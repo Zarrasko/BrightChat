@@ -1,0 +1,84 @@
+package com.craigeley.chat.ui
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import com.craigeley.chat.ChatViewModel
+import com.craigeley.chat.api.Store
+import com.craigeley.chat.ui.theme.ChatColors
+import com.craigeley.chat.ui.theme.ChatDimens
+import com.craigeley.chat.ui.theme.ChatType
+
+@Composable
+fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(ChatDimens.screenPadding),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            HapticText(
+                text = "‹",
+                style = ChatType.title,
+                color = ChatColors.onSurface,
+                onClick = onBack,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            Text(text = "Settings", style = ChatType.body, color = ChatColors.onSurfaceVariant)
+            Spacer(modifier = Modifier.weight(1f))
+            // Balances the back chevron so the title sits centred.
+            Spacer(modifier = Modifier.width(16.dp))
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        Text(text = "Server", style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = Store.BASE_URL.removePrefix("https://").removePrefix("http://"),
+            style = ChatType.body,
+            color = ChatColors.onSurface,
+            textAlign = TextAlign.Center,
+        )
+
+        Spacer(modifier = Modifier.height(36.dp))
+
+        HapticText(
+            text = "Refresh conversations",
+            style = ChatType.body,
+            color = ChatColors.onSurfaceDim,
+            onClick = {
+                viewModel.refresh()
+                onBack()
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        HapticText(
+            text = "Sign out",
+            style = ChatType.body,
+            color = ChatColors.onSurfaceDim,
+            textAlign = TextAlign.Center,
+            onClick = { viewModel.signOut() },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
