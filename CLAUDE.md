@@ -20,9 +20,20 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
 - **Phase 2 (done):** send (`POST /api/v1/message/text`, optimistic + server
   echo) + a Socket.IO foreground service for live `new-message`/`updated-message`
   delivery and notifications. This is the working OpenBubbles replacement.
-- **Phase 3:** attachments (images), tapbacks/reactions rendered compactly, read
-  receipts, contact-name resolution inside notifications, persisting the contact
-  index across launches.
+- **Phase 3 (in progress):** image attachments — receive **and** send **(done)**,
+  tapbacks/reactions rendered compactly, read receipts, contact-name resolution
+  inside notifications **(done)**, persisting the contact index across launches
+  **(done)**. The contact index is now persisted to `Store` (normalized key→name map
+  as JSON) so `SocketService` — which runs with no activity/ViewModel alive (e.g.
+  started at boot) — can resolve a sender's address to a name for notifications.
+  Inbound images render inline in the thread (download → cache → EXIF-orient →
+  downsample, dependency-free; see `Attachments`). Outbound images: the thread
+  compose bar's "+" opens the system photo picker and sends via multipart
+  `POST /message/attachment` (optimistic, echo-reconciled like text). Both work over
+  plain REST. Tapbacks/reactions, typing, and read-receipt *sending* remain gated on
+  the server's Private API (SIP disabled + helper bundle on the Mac, see The server).
+  **Not yet done:** non-image attachment types (video/audio/vcard still show
+  `[Attachment]`).
 
 Note: messaging yourself (note-to-self) legitimately shows each message twice —
 iMessage stores a sent *and* a received row (two GUIDs). Normal chats don't; the
@@ -53,7 +64,11 @@ clears the password and returns to setup.
 ## Architecture
 
 - **`Store`** (`api/Store.kt`) — SharedPreferences. `BASE_URL` is **hardcoded**
-  (one personal server). The password is encrypted at rest via `SecureStore`.
+  (one personal server). The password is encrypted at rest via `SecureStore`. Also
+  persists the **contact index** (`setContacts`/`contacts`) as the normalized
+  key→name map (JSON) so `SocketService` can name notification senders without the
+  app running; the ViewModel writes it on each contacts load, `signOut` wipes it
+  with everything else.
 - **`SecureStore`** (`api/SecureStore.kt`) — at-rest encryption only. An
   AES-256-GCM key lives non-exportable in the AndroidKeyStore (hardware-backed)
   and encrypts the password. (Trimmed down from `ask`'s version — no Ed25519 /
@@ -65,7 +80,12 @@ clears the password and returns to setup.
   (`with=handle,attachment`, `sort=DESC`, guid URL-encoded); `send(guid,text,tempGuid)`
   → `POST /message/text` (only `chatGuid`+`message` required; we pass a `tempGuid`
   to correlate the echo and `method:"apple-script"` since Private API is off, and
-  parse the created message from the response); `newChat(address,text)` →
+  parse the created message from the response);
+  `sendAttachment(guid,bytes,name,mime,tempGuid)` → `POST /message/attachment` (the
+  one **multipart/form-data** call — built by hand, not via `request()` — same
+  `tempGuid`/`apple-script` echo handling as `send`); `downloadAttachment(guid,dest)`
+  → `GET /attachment/:guid/download` (streams the raw bytes to a file, for the inline
+  image loader); `newChat(address,text)` →
   `POST /chat/new` (starts a 1:1 by sending the first message — macOS Big Sur+
   requires the message inline; returns the new chat guid); `contacts()` → `GET /contact`
   flattened to (address,name) pairs. Message parsing lives in the **companion**
@@ -126,15 +146,37 @@ clears the password and returns to setup.
   - **`AppForeground`** — a volatile flag set by `MainActivity.onStart/onStop` so
     the service only notifies for messages the user isn't already looking at.
 - **Models** (`Models.kt`) — `Conversation`; `ChatMessage` (guid, text, date,
-  fromMe, sender, attachments; body falls back to `[Attachment]` when null/blank);
-  `IncomingMessage` (socket payload: chatGuid, message, isNew, chatDisplayName);
-  `Contact` (name, address — a pickable recipient for a new message).
+  fromMe, sender, `attachments: List<Attachment>`); `Attachment` (guid, mimeType,
+  transferName, width, height — `isImage` gates inline rendering). `ChatMessage`
+  carries the shared `ATTACHMENT_PLACEHOLDER` (`[Attachment]`) constant; its
+  `bodyText` returns null when the text is *only* that placeholder for image(s) we
+  draw inline (so an image-only message shows just the image), and `images` is the
+  image subset. `IncomingMessage` (socket payload: chatGuid, message, isNew,
+  chatDisplayName); `Contact` (name, address — a pickable recipient for a new message).
+- **`Attachments`** (`Attachments.kt`) — the inline-image loader, **dependency-free**
+  (no Coil/Glide, matching the house style). `image(context, api, attachment)`
+  (suspend, off-main): returns a decoded `ImageBitmap` or null; downloads via
+  `BlueBubblesApi.downloadAttachment` (streams `GET /attachment/:guid/download` over
+  the same socket), caches the raw bytes under `cacheDir` (so reopening a thread
+  doesn't refetch), decodes a **downsampled** bitmap (`inSampleSize` to cap the long
+  edge at 1080px — a full-res photo would OOM the phone), applies the **EXIF
+  orientation** (BitmapFactory ignores it, so portrait phone photos would otherwise
+  render sideways), and holds a small guid-keyed `LruCache`. `cacheLocal(guid,bytes)`
+  seeds the cache from a just-picked image so an optimistic outgoing message renders
+  through the same path with no round trip. The ViewModel exposes `loadImage`;
+  `ThreadScreen`'s `AttachmentImage` loads it lazily via `produceState`, showing
+  `[Image]` until ready. Sending: `ViewModel.sendImage(uri)` reads the picked bytes
+  (the thread compose bar's "+" launches the system photo picker — no permission),
+  seeds the cache, posts an optimistic bubble, then reconciles with the server echo.
 - **Screens** (`ui/`) — `SetupScreen` (password entry), `ConversationsScreen`
   (list, tap title → settings, Refresh, **New**), `NewMessageScreen` (a "To" field
   that searches the contact index by name/number/email or takes a raw address,
   then a compose bar; sends via `newChat` and opens the thread), `ThreadScreen`
-  (messages + compose bar, back chevron), `SettingsScreen` (server host + refresh
-  + sign out). The thread
+  (messages — text + inline images — and a compose bar with a back chevron),
+  `SettingsScreen` (server host + refresh
+  + sign out). `ComposeBar` is shared; its optional `onPickImage` adds a leading
+  "+" that opens the photo picker — passed only in `ThreadScreen` (a brand-new chat
+  has no guid to attach to yet), so `NewMessageScreen` stays text-only. The thread
   `LazyColumn` is **`reverseLayout = true`** with messages newest-first, so it
   opens anchored at the latest (no scroll-to-bottom animation — that whoosh was the
   old bug); scroll *up* for history. A new newest message auto-scrolls down only if

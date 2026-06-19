@@ -1,5 +1,9 @@
 package com.craigeley.chat.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +13,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,15 +29,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.craigeley.chat.Attachment
 import com.craigeley.chat.ChatMessage
 import com.craigeley.chat.ChatViewModel
 import com.craigeley.chat.Contacts
@@ -46,6 +55,12 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     val state by viewModel.state.collectAsState()
     val convo = state.open ?: return
     val listState = rememberLazyListState()
+
+    // System photo picker (no permission needed; falls back to the document picker
+    // where the dedicated picker isn't present). A pick sends straight away.
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) viewModel.sendImage(uri)
+    }
 
     // Which messages begin a same-speaker run (so only they get a name label).
     val labeled = remember(state.messages) {
@@ -106,19 +121,31 @@ fun ThreadScreen(viewModel: ChatViewModel) {
             ) {
                 // Newest first so reverseLayout pins it to the bottom.
                 items(state.messages.asReversed(), key = { it.guid }) { message ->
-                    MessageRow(message, convo, state.contacts, showLabel = message.guid in labeled)
+                    MessageRow(
+                        message,
+                        convo,
+                        state.contacts,
+                        showLabel = message.guid in labeled,
+                        loadImage = viewModel::loadImage,
+                    )
                 }
             }
         }
 
-        ComposeBar(onSend = viewModel::sendMessage)
+        ComposeBar(
+            onSend = viewModel::sendMessage,
+            onPickImage = {
+                pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            },
+        )
     }
 }
 
 /** Bottom compose row: a growing text field and a Send action. Shared with the
- *  new-message screen. */
+ *  new-message screen. When [onPickImage] is supplied (the thread, not a brand-new
+ *  chat) a leading "+" opens the photo picker. */
 @Composable
-fun ComposeBar(onSend: (String) -> Unit) {
+fun ComposeBar(onSend: (String) -> Unit, onPickImage: (() -> Unit)? = null) {
     var input by remember { mutableStateOf("") }
     Column(modifier = Modifier.fillMaxWidth()) {
         HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
@@ -126,6 +153,15 @@ fun ComposeBar(onSend: (String) -> Unit) {
             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
+            if (onPickImage != null) {
+                HapticText(
+                    text = "+",
+                    style = ChatType.body,
+                    color = ChatColors.onSurfaceDisabled,
+                    onClick = onPickImage,
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+            }
             Box(modifier = Modifier.weight(1f)) {
                 if (input.isEmpty()) {
                     Text(text = "Message", style = ChatType.body, color = ChatColors.onSurfaceDisabled)
@@ -165,7 +201,13 @@ private const val MESSAGE_MAX_WIDTH = 0.8f
 /** A dim sender label (only when needed), then the text — no bubbles, just a
  *  width-capped column hugging its side. */
 @Composable
-private fun MessageRow(message: ChatMessage, convo: Conversation, contacts: Contacts, showLabel: Boolean) {
+private fun MessageRow(
+    message: ChatMessage,
+    convo: Conversation,
+    contacts: Contacts,
+    showLabel: Boolean,
+    loadImage: suspend (Attachment) -> ImageBitmap?,
+) {
     val align = if (message.fromMe) Alignment.End else Alignment.Start
     val textAlign = if (message.fromMe) TextAlign.End else TextAlign.Start
     // Name labels on both sides — "You" for your turns, the sender's name for
@@ -178,6 +220,7 @@ private fun MessageRow(message: ChatMessage, convo: Conversation, contacts: Cont
         convo.participants.size == 1 -> contacts.sender(convo.participants[0])
         else -> null
     }
+    val body = message.bodyText
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = align) {
         Column(
             modifier = Modifier.fillMaxWidth(MESSAGE_MAX_WIDTH),
@@ -187,9 +230,13 @@ private fun MessageRow(message: ChatMessage, convo: Conversation, contacts: Cont
                 Text(text = label, style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
                 Spacer(modifier = Modifier.height(4.dp))
             }
-            if (message.text.isNotEmpty()) {
+            message.images.forEach { image ->
+                AttachmentImage(image, loadImage)
+                Spacer(modifier = Modifier.height(if (body != null) 6.dp else 4.dp))
+            }
+            if (body != null) {
                 Text(
-                    text = message.text,
+                    text = body,
                     style = ChatType.body,
                     color = ChatColors.onSurface,
                     textAlign = textAlign,
@@ -197,5 +244,26 @@ private fun MessageRow(message: ChatMessage, convo: Conversation, contacts: Cont
                 )
             }
         }
+    }
+}
+
+/** One inline image: loads (download + cache + decode) off-thread via [load],
+ *  showing a dim placeholder until the bitmap is ready. Height-capped so a tall
+ *  photo can't swallow the thread; width fills the message column. */
+@Composable
+private fun AttachmentImage(attachment: Attachment, load: suspend (Attachment) -> ImageBitmap?) {
+    val bitmap by produceState<ImageBitmap?>(initialValue = null, attachment.guid) {
+        value = load(attachment)
+    }
+    val image = bitmap
+    if (image != null) {
+        Image(
+            bitmap = image,
+            contentDescription = attachment.transferName,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+        )
+    } else {
+        Text(text = "[Image]", style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
     }
 }

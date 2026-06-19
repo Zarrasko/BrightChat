@@ -23,6 +23,21 @@ data class Conversation(
         }
 }
 
+/**
+ * One file riding along with a message. [guid] keys the download endpoint; the
+ * raw bytes are fetched + cached lazily (see [com.craigeley.chat.Attachments]).
+ * Only images render inline so far — anything else shows the placeholder text.
+ */
+data class Attachment(
+    val guid: String,
+    val mimeType: String?,
+    val transferName: String?,
+    val width: Int,           // pixels per the server's metadata; 0 when unknown
+    val height: Int,
+) {
+    val isImage: Boolean get() = mimeType?.startsWith("image/") == true
+}
+
 /** One message within a conversation. */
 data class ChatMessage(
     val guid: String,
@@ -30,8 +45,20 @@ data class ChatMessage(
     val date: Long,           // epoch millis
     val fromMe: Boolean,
     val sender: String?,      // handle address; null when from me (shown in groups)
-    val attachmentCount: Int,
-)
+    val attachments: List<Attachment> = emptyList(),
+) {
+    val images: List<Attachment> get() = attachments.filter { it.isImage }
+
+    /** The body line to render, or null when the text is just the attachment
+     *  placeholder for image(s) we draw inline instead. */
+    val bodyText: String?
+        get() = if (text == ATTACHMENT_PLACEHOLDER && images.isNotEmpty()) null else text.ifEmpty { null }
+
+    companion object {
+        /** Stand-in body for an attachment-only message (no real text). */
+        const val ATTACHMENT_PLACEHOLDER = "[Attachment]"
+    }
+}
 
 /** A pickable recipient when starting a new message — one row per contact address. */
 data class Contact(val name: String, val address: String)

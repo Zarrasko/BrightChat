@@ -112,6 +112,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (!contactsLoaded) {
                 runCatching { client.contacts() }.onSuccess { raw ->
                     contacts = Contacts.from(raw)
+                    // Persist so SocketService can name notification senders even
+                    // when the app (and this ViewModel) isn't running.
+                    Store.setContacts(app, contacts.asMap())
                     // One pickable row per address (a person may have several),
                     // newest search needs name→address, sorted for the picker.
                     contactList = raw.map { Contact(name = it.second, address = it.first) }
@@ -173,7 +176,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // Optimistic: show it immediately under a temp guid, then swap in the
         // server's echo (real guid) so the socket's new-message dedupes cleanly.
         val tempGuid = "temp-${System.currentTimeMillis()}-${(0..99999).random()}"
-        val optimistic = ChatMessage(tempGuid, body, System.currentTimeMillis(), fromMe = true, sender = null, attachmentCount = 0)
+        val optimistic = ChatMessage(tempGuid, body, System.currentTimeMillis(), fromMe = true, sender = null)
         _state.update { it.copy(messages = (it.messages + optimistic).sortedBy { m -> m.date }, message = null) }
         viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
@@ -194,6 +197,69 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    // ---- Attachments ------------------------------------------------------
+
+    /** Decoded inline image for [attachment] (downloaded + cached on first use),
+     *  or null if it isn't an image / can't be fetched. Called from the thread UI. */
+    suspend fun loadImage(attachment: Attachment): androidx.compose.ui.graphics.ImageBitmap? {
+        val client = api ?: return null
+        return Attachments.image(app, client, attachment)
+    }
+
+    /**
+     * Sends a picked image into the open thread. Mirrors [sendMessage]: it shows an
+     * optimistic bubble immediately — the picked bytes are seeded into the image
+     * cache under the temp guid so the normal loader renders them without a round
+     * trip — then swaps in the server's echo (real guid) so the socket dedupes.
+     */
+    fun sendImage(uri: android.net.Uri) {
+        val convo = _state.value.open ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val client = api ?: return@launch
+            val resolver = app.contentResolver
+            val bytes = runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+            if (bytes == null || bytes.isEmpty()) {
+                _state.update { it.copy(message = "Couldn’t read that image") }
+                return@launch
+            }
+            val mime = resolver.getType(uri) ?: "image/jpeg"
+            val name = queryDisplayName(uri) ?: "image.jpg"
+            val tempGuid = "temp-${System.currentTimeMillis()}-${(0..99999).random()}"
+            // Seed the cache so the optimistic bubble renders the local image.
+            Attachments.cacheLocal(app, tempGuid, bytes)
+            val optimistic = ChatMessage(
+                guid = tempGuid,
+                text = ChatMessage.ATTACHMENT_PLACEHOLDER,
+                date = System.currentTimeMillis(),
+                fromMe = true,
+                sender = null,
+                attachments = listOf(Attachment(tempGuid, mime, name, width = 0, height = 0)),
+            )
+            _state.update { it.copy(messages = (it.messages + optimistic).sortedBy { m -> m.date }, message = null) }
+            try {
+                val sent = client.sendAttachment(convo.guid, bytes, name, mime, tempGuid)
+                _state.update { s ->
+                    val replaced = s.messages
+                        .map { if (it.guid == tempGuid) sent else it }
+                        .distinctBy { it.guid }
+                        .sortedBy { m -> m.date }
+                    s.copy(messages = replaced)
+                }
+                bumpConversation(convo.guid, sent.text, sent.date, fromMe = true)
+            } catch (t: Throwable) {
+                _state.update { s ->
+                    s.copy(messages = s.messages.filterNot { it.guid == tempGuid }, message = "Couldn’t send image")
+                }
+            }
+        }
+    }
+
+    private fun queryDisplayName(uri: android.net.Uri): String? =
+        runCatching {
+            app.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { if (it.moveToFirst() && it.columnCount > 0) it.getString(0) else null }
+        }.getOrNull()
 
     // ---- New message ------------------------------------------------------
 

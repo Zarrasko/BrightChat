@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.util.Log
+import com.craigeley.chat.Contacts
 import com.craigeley.chat.Notifications
 import com.craigeley.chat.api.BlueBubblesApi
 import com.craigeley.chat.api.Store
@@ -65,10 +66,20 @@ class SocketService : Service() {
         SocketBus.incoming.tryEmit(incoming)
         // Notify only for genuinely new incoming messages the user can't see.
         if (isNew && !incoming.message.fromMe && !AppForeground.active) {
-            val title = incoming.chatDisplayName.ifBlank { incoming.message.sender ?: "Message" }
+            // Prefer an explicit (group) chat name; otherwise resolve the sender's
+            // address to a contact name from the persisted index, falling back to
+            // the raw address. Read fresh so it reflects the latest address book.
+            val title = incoming.chatDisplayName.ifBlank {
+                val sender = incoming.message.sender
+                sender?.let { contacts().name(it) ?: it } ?: "Message"
+            }
             Notifications.post(this, title, incoming.message.text)
         }
     }
+
+    /** The persisted contact index. Reloaded per notification (infrequent — only
+     *  background messages) so a name added while the service ran still resolves. */
+    private fun contacts(): Contacts = Store.contacts(this)
 
     override fun onDestroy() {
         socket?.disconnect()

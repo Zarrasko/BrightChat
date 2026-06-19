@@ -25,6 +25,9 @@ class Contacts(private val byKey: Map<String, String> = emptyMap()) {
     /** Sender label inside a thread (first name keeps group rows short). */
     fun sender(address: String): String = label(address, firstNameOnly = true)
 
+    /** The normalized key → name map, for persistence (see [Store.setContacts]). */
+    fun asMap(): Map<String, String> = byKey
+
     private fun label(address: String, firstNameOnly: Boolean): String {
         val name = name(address) ?: return address
         return if (firstNameOnly) name.substringBefore(" ") else name
@@ -38,6 +41,10 @@ class Contacts(private val byKey: Map<String, String> = emptyMap()) {
             val digits = a.filter { it.isDigit() }
             return if (digits.length >= 10) digits.takeLast(10) else digits
         }
+
+        /** Rebuilds the index from an already-normalized key → name map (the form
+         *  [asMap] persists), skipping re-normalization. */
+        fun fromMap(byKey: Map<String, String>): Contacts = Contacts(byKey)
 
         /** Builds the index from (address, name) pairs; first name wins per key. */
         fun from(pairs: List<Pair<String, String>>): Contacts {

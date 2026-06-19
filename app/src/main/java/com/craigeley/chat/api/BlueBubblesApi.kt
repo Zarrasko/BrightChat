@@ -1,8 +1,10 @@
 package com.craigeley.chat.api
 
+import com.craigeley.chat.Attachment
 import com.craigeley.chat.ChatMessage
 import com.craigeley.chat.Conversation
 import com.craigeley.chat.IncomingMessage
+import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -98,7 +100,91 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         if (code !in 200..299) throw ApiException(code, "send failed ($code)")
         val data = runCatching { JSONObject(resp).optJSONObject("data") }.getOrNull()
         return data?.let { parseMessage(it) }
-            ?: ChatMessage(tempGuid, text, System.currentTimeMillis(), fromMe = true, sender = null, attachmentCount = 0)
+            ?: ChatMessage(tempGuid, text, System.currentTimeMillis(), fromMe = true, sender = null)
+    }
+
+    /**
+     * `POST /api/v1/message/attachment` — sends a file into a chat as multipart
+     * form-data (the one call that isn't JSON, so it's built by hand rather than
+     * via [request]). Like [send] we pass a `tempGuid` to correlate the echo and
+     * force `apple-script` (Private API is off). Returns the created message parsed
+     * from the response, falling back to a placeholder if the body is unexpected.
+     */
+    fun sendAttachment(
+        chatGuid: String,
+        bytes: ByteArray,
+        filename: String,
+        mimeType: String,
+        tempGuid: String,
+    ): ChatMessage {
+        val safeFile = filename.replace("\"", "").ifBlank { "image.jpg" }
+        val boundary = "chatBoundary" + tempGuid.filter { it.isLetterOrDigit() }
+        val crlf = "\r\n"
+        fun field(name: String, value: String) =
+            "--$boundary$crlf" +
+                "Content-Disposition: form-data; name=\"$name\"$crlf$crlf" +
+                "$value$crlf"
+        val preamble = buildString {
+            append(field("chatGuid", chatGuid))
+            append(field("tempGuid", tempGuid))
+            append(field("name", safeFile))
+            append(field("method", "apple-script"))
+            append("--$boundary$crlf")
+            append("Content-Disposition: form-data; name=\"attachment\"; filename=\"$safeFile\"$crlf")
+            append("Content-Type: $mimeType$crlf$crlf")
+        }
+        val epilogue = "$crlf--$boundary--$crlf"
+
+        val url = URL("$baseUrl/api/v1/message/attachment?password=" + enc(password))
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15_000
+            readTimeout = 60_000
+            doOutput = true
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            setChunkedStreamingMode(0) // stream the file, don't buffer it all in RAM
+        }
+        return try {
+            conn.outputStream.use { out ->
+                out.write(preamble.toByteArray(Charsets.UTF_8))
+                out.write(bytes)
+                out.write(epilogue.toByteArray(Charsets.UTF_8))
+            }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val resp = stream?.bufferedReader()?.use { it.readText() } ?: ""
+            if (code !in 200..299) throw ApiException(code, "send attachment failed ($code)")
+            val data = runCatching { JSONObject(resp).optJSONObject("data") }.getOrNull()
+            data?.let { parseMessage(it) }
+                ?: ChatMessage(tempGuid, ChatMessage.ATTACHMENT_PLACEHOLDER, System.currentTimeMillis(), fromMe = true, sender = null)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /**
+     * `GET /api/v1/attachment/:guid/download` — streams an attachment's raw bytes
+     * to [dest]. Used by the inline image loader; deliberately not routed through
+     * [request] (which buffers a text body) since these are binary and large.
+     */
+    fun downloadAttachment(guid: String, dest: File) {
+        val url = URL(buildString {
+            append(baseUrl).append("/api/v1/attachment/").append(enc(guid)).append("/download")
+            append("?password=").append(enc(password))
+        })
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 15_000
+            readTimeout = 30_000
+        }
+        try {
+            val code = conn.responseCode
+            if (code !in 200..299) throw ApiException(code, "attachment download failed ($code)")
+            conn.inputStream.use { input -> dest.outputStream().use { input.copyTo(it) } }
+        } finally {
+            conn.disconnect()
+        }
     }
 
     /**
@@ -230,7 +316,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
             val t = o.optString("text", "").trim()
             if (t.isNotEmpty()) return t
             val attachments = o.optJSONArray("attachments")?.length() ?: 0
-            return if (attachments > 0) "[Attachment]" else ""
+            return if (attachments > 0) ChatMessage.ATTACHMENT_PLACEHOLDER else ""
         }
 
         fun parseMessage(o: JSONObject): ChatMessage {
@@ -241,8 +327,23 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                 date = o.optLong("dateCreated", 0L),
                 fromMe = o.optBoolean("isFromMe", false),
                 sender = handle?.optString("address")?.takeIf { it.isNotBlank() },
-                attachmentCount = o.optJSONArray("attachments")?.length() ?: 0,
+                attachments = parseAttachments(o),
             )
+        }
+
+        private fun parseAttachments(o: JSONObject): List<Attachment> {
+            val arr = o.optJSONArray("attachments") ?: return emptyList()
+            return (0 until arr.length()).mapNotNull { i ->
+                val a = arr.getJSONObject(i)
+                val guid = a.optString("guid").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                Attachment(
+                    guid = guid,
+                    mimeType = a.optString("mimeType").takeIf { it.isNotBlank() },
+                    transferName = a.optString("transferName").takeIf { it.isNotBlank() },
+                    width = a.optInt("width", 0),
+                    height = a.optInt("height", 0),
+                )
+            }
         }
 
         /**
