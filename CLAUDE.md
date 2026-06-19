@@ -166,8 +166,13 @@ clears the password and returns to setup.
   through the same path with no round trip. The ViewModel exposes `loadImage`;
   `ThreadScreen`'s `AttachmentImage` loads it lazily via `produceState`, showing
   `[Image]` until ready. Sending: `ViewModel.sendImage(uri)` reads the picked bytes
-  (the thread compose bar's "+" launches the system photo picker — no permission),
-  seeds the cache, posts an optimistic bubble, then reconciles with the server echo.
+  (the compose bar's "+" launches the system photo picker — no permission), seeds
+  the cache, posts an optimistic bubble, then reconciles with the server echo. For a
+  brand-new chat there's no guid yet, so `sendNewImage(address, uri)` constructs the
+  canonical 1:1 guid `iMessage;-;<handle>` (the address normalized to its E.164/email
+  handle by `imessageHandle` — a constructed guid can't lean on `newChat`'s loose
+  AppleScript address resolution), sends the attachment to it (which creates the
+  chat server-side), then opens the thread + refreshes.
 - **Screens** (`ui/`) — `SetupScreen` (password entry), `ConversationsScreen`
   (list, tap title → settings, Refresh, **New**), `NewMessageScreen` (a "To" field
   that searches the contact index by name/number/email or takes a raw address,
@@ -175,8 +180,9 @@ clears the password and returns to setup.
   (messages — text + inline images — and a compose bar with a back chevron),
   `SettingsScreen` (server host + refresh
   + sign out). `ComposeBar` is shared; its optional `onPickImage` adds a leading
-  "+" that opens the photo picker — passed only in `ThreadScreen` (a brand-new chat
-  has no guid to attach to yet), so `NewMessageScreen` stays text-only. The thread
+  "+" that opens the photo picker — wired in both `ThreadScreen` (sends into the open
+  chat) and `NewMessageScreen` (once a recipient is chosen; sends as the first
+  message of a new 1:1 via `sendNewImage`). The thread
   `LazyColumn` is **`reverseLayout = true`** with messages newest-first, so it
   opens anchored at the latest (no scroll-to-bottom animation — that whoosh was the
   old bug); scroll *up* for history. A new newest message auto-scrolls down only if

@@ -1,5 +1,8 @@
 package com.craigeley.chat.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,6 +50,13 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
     val focus = remember { FocusRequester() }
 
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+
+    // Hoisted to the top level (not the recipient-chosen branch) so the launcher
+    // isn't created conditionally; the lambda reads the current recipient.
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        val r = recipient
+        if (uri != null && r != null) viewModel.sendNewImage(r.address, uri)
+    }
 
     Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 20.dp)) {
         Row(
@@ -149,7 +159,12 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
             )
             HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
             Spacer(modifier = Modifier.weight(1f))
-            ComposeBar(onSend = { viewModel.sendNewMessage(r.address, it) })
+            ComposeBar(
+                onSend = { viewModel.sendNewMessage(r.address, it) },
+                onPickImage = {
+                    pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+            )
         }
 
         state.message?.let {

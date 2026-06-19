@@ -261,6 +261,67 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 ?.use { if (it.moveToFirst() && it.columnCount > 0) it.getString(0) else null }
         }.getOrNull()
 
+    /**
+     * Sends a picked image as the first message of a *new* 1:1. There's no chat
+     * guid yet, so we construct the canonical BlueBubbles 1:1 guid
+     * (`iMessage;-;<handle>`) — sending an attachment to it creates the chat
+     * server-side — then drop into the thread and refresh the list. The address is
+     * normalized to the E.164 handle iMessage keys its guids by (`newChat`'s
+     * AppleScript resolves loose addresses for text, but a constructed guid can't).
+     */
+    fun sendNewImage(address: String, uri: android.net.Uri) {
+        val addr = address.trim()
+        if (addr.isEmpty()) return
+        _state.update { it.copy(composingNew = false, message = "Sending…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            val client = api ?: return@launch
+            val resolver = app.contentResolver
+            val bytes = runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+            if (bytes == null || bytes.isEmpty()) {
+                _state.update { it.copy(message = "Couldn’t read that image") }
+                return@launch
+            }
+            val mime = resolver.getType(uri) ?: "image/jpeg"
+            val name = queryDisplayName(uri) ?: "image.jpg"
+            val handle = imessageHandle(addr)
+            val guid = "iMessage;-;$handle"
+            val tempGuid = "temp-${System.currentTimeMillis()}-${(0..99999).random()}"
+            try {
+                client.sendAttachment(guid, bytes, name, mime, tempGuid)
+                messageCache.remove(guid)
+                val convo = Conversation(
+                    guid = guid,
+                    displayName = "",
+                    participants = listOf(handle),
+                    isGroup = false,
+                    lastText = ChatMessage.ATTACHMENT_PLACEHOLDER,
+                    lastDate = System.currentTimeMillis(),
+                    lastFromMe = true,
+                )
+                _state.update { it.copy(message = null) }
+                open(convo)   // land in the new thread (fetch pulls the sent image)
+                refresh()     // and pull it into the conversation list
+            } catch (t: Throwable) {
+                _state.update { it.copy(message = t.message ?: "Couldn’t send image") }
+            }
+        }
+    }
+
+    /** Normalizes a picked address to the E.164 (or lowercased email) handle that
+     *  iMessage keys 1:1 chat guids by. US-centric on the country code, matching the
+     *  single personal account this app serves. */
+    private fun imessageHandle(address: String): String {
+        val a = address.trim()
+        if (a.contains("@")) return a.lowercase()
+        val digits = a.filter { it.isDigit() }
+        return when {
+            a.startsWith("+") -> "+$digits"
+            digits.length == 10 -> "+1$digits"
+            digits.length == 11 && digits.startsWith("1") -> "+$digits"
+            else -> a
+        }
+    }
+
     // ---- New message ------------------------------------------------------
 
     fun startNewMessage() = _state.update { it.copy(composingNew = true, message = null) }
