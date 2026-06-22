@@ -30,10 +30,16 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   downsample, dependency-free; see `Attachments`). Outbound images: the thread
   compose bar's "+" opens the system photo picker and sends via multipart
   `POST /message/attachment` (optimistic, echo-reconciled like text). Both work over
-  plain REST. Tapbacks/reactions, typing, and read-receipt *sending* remain gated on
-  the server's Private API (SIP disabled + helper bundle on the Mac, see The server).
-  **Not yet done:** non-image attachment types (video/audio/vcard still show
-  `[Attachment]`).
+  plain REST. **Tapbacks/reactions (done):** incoming reactions render compactly
+  (folded onto their target message, not shown as their own row); long-press a
+  message to send your own via `POST /message/react`, re-tap the same one to remove.
+  *Sending* is gated on the server's Private API being live — the app detects this
+  from `server/info` (`private_api && helper_connected`) and only offers the picker
+  then; *rendering* incoming reactions works regardless (they arrive as normal
+  messages). See "The server" for enabling the Private API (SIP + Library Validation
+  off on the Mac). **Not yet done:** typing indicators and read-receipt *sending*
+  (also Private-API features); non-image attachment types (video/audio/vcard still
+  show `[Attachment]`).
 
 Note: messaging yourself (note-to-self) legitimately shows each message twice —
 iMessage stores a sent *and* a received row (two GUIDs). Normal chats don't; the
@@ -72,7 +78,9 @@ clears the password and returns to setup.
   persists the **contact index** (`setContacts`/`contacts`) as the normalized
   key→name map (JSON) so `SocketService` can name notification senders without the
   app running; the ViewModel writes it on each contacts load, `signOut` wipes it
-  with everything else.
+  with everything else. Also caches the **Private API flag** (`privateApi`/
+  `setPrivateApi`) read from `server/info`, so the UI knows on launch whether to
+  offer tapbacks before the first refresh lands.
 - **`SecureStore`** (`api/SecureStore.kt`) — at-rest encryption only. An
   AES-256-GCM key lives non-exportable in the AndroidKeyStore (hardware-backed)
   and encrypts the password. (Trimmed down from `ask`'s version — no Ed25519 /
@@ -80,7 +88,12 @@ clears the password and returns to setup.
 - **`BlueBubblesApi`** (`api/BlueBubblesApi.kt`) — the REST surface, plain
   `HttpURLConnection` + `org.json` (no networking dependency, like hive/pod).
   Auth is the server password as the `password` query param on every call.
-  `validate()` → `GET /server/info`; `messages(guid)` → `GET /chat/:guid/message`
+  `validate()` → `GET /server/info` (bool reachable); `serverInfo()` → same endpoint
+  but also reads `private_api && helper_connected` into a `ServerInfo` so the app can
+  gate tapback *sending* on the Private API being live; `react(guid,selectedMsgGuid,
+  reaction,partIndex)` → `POST /message/react` (Private-API only; `reaction` is a
+  `ReactionType.apiValue`, prefix `-` to remove; returns the created reaction message
+  to reconcile its echo); `messages(guid)` → `GET /chat/:guid/message`
   (`with=handle,attachment`, `sort=DESC`, guid URL-encoded); `send(guid,text,tempGuid)`
   → `POST /message/text` (only `chatGuid`+`message` required; we pass a `tempGuid`
   to correlate the echo and `method:"apple-script"` since Private API is off, and
@@ -116,10 +129,20 @@ clears the password and returns to setup.
   appends an optimistic message under a temp guid, then swaps in the server's
   echo (real guid) so the socket's `new-message` dedupes by guid. It collects
   `SocketBus` and folds incoming/updated messages into the list (`bumpConversation`)
-  and the open thread (`mergeMessage`, dedupe by guid); a message for an unknown
-  chat triggers a `refresh()`. Keeps a session-lived per-conversation
-  `messageCache` so reopening a thread is instant (cached shown immediately, fresh
-  fetch refreshes in the background; snapshotted on `closeThread`). Starts/stops
+  and the open thread; a message for an unknown chat triggers a `refresh()`.
+  **Tapbacks:** the open thread keeps a raw message list (`openRaw`, reaction
+  messages included) as its source of truth; `state.messages` is always
+  `foldReactions(openRaw)`, which attaches each tapback to its target message as a
+  `Reaction` (keyed by (target, reactor), latest add wins, a `-`-prefixed removal
+  clears it) and drops the reaction rows. Every open-thread mutation goes through
+  `updateOpenThread(guid){…}` — guarded so a late send/echo can't clobber a thread
+  you've navigated away from — so sends, the socket merge (`mergeRaw`), and
+  `sendReaction` all re-fold. `sendReaction(target,type)` is optimistic + echo-
+  reconciled like `sendMessage`, toggles off if you already hold that reaction, and
+  no-ops unless `state.privateApi` (the cached `server/info` capability). Keeps a
+  session-lived per-conversation `messageCache` (now the *raw* list) so reopening a
+  thread is instant (cached shown immediately, fresh fetch refreshes in the
+  background; snapshotted on `closeThread`). Starts/stops
   `SocketService`. `sendNewMessage(address,text)` starts a fresh 1:1 via `newChat`
   then opens it; the searchable `contactList` (one `Contact` per address, built
   from `contacts()`) feeds the new-message picker. Screen routing derives from
@@ -155,7 +178,16 @@ clears the password and returns to setup.
   carries the shared `ATTACHMENT_PLACEHOLDER` (`[Attachment]`) constant; its
   `bodyText` returns null when the text is *only* that placeholder for image(s) we
   draw inline (so an image-only message shows just the image), and `images` is the
-  image subset. `IncomingMessage` (socket payload: chatGuid, message, isNew,
+  image subset. **Tapback fields:** `associatedMessageGuid`/`associatedMessageType`
+  are set only on reaction messages (`isReaction`, `isReactionRemoval`,
+  `reactionTargetGuid` strips iMessage's `p:<n>/`/`bp:` prefixes); `reactions:
+  List<Reaction>` is populated by `foldReactions` for display. **Gotcha:** the
+  server runs `associatedMessageType` through a transformer, so it arrives as a
+  *word* (`love`/`laugh`/…, prefixed `-` for a removal), **not** the raw iMessage
+  int (2000/3000/…) — so `ChatMessage.associatedMessageType` is a `String` and
+  `ReactionType` keys off that word (its `apiValue`, which doubles as the
+  `message/react` reaction param). The visual mark per type is drawn/typeset in
+  `ui/Tapbacks.kt`, not stored on the enum. `Reaction` (type, fromMe, sender). `IncomingMessage` (socket payload: chatGuid, message, isNew,
   chatDisplayName); `Contact` (name, address — a pickable recipient for a new message).
 - **`Attachments`** (`Attachments.kt`) — the inline-image loader, **dependency-free**
   (no Coil/Glide, matching the house style). `image(context, api, attachment)`
@@ -193,7 +225,20 @@ clears the password and returns to setup.
   you're already near the bottom. Thread bubbles-less readability: each turn is
   **width-capped at 80%**
   (`MESSAGE_MAX_WIDTH`) and hugs its side; a name label ("You" / sender) shows
-  **only on the first message of a same-speaker run**. `Notifications` has two
+  **only on the first message of a same-speaker run**. **Tapbacks** (`ui/Tapbacks.kt`):
+  Public Sans has no heart/thumb/triangle glyphs (they'd fall back to a different
+  font — the original bug), so the three iconic tapbacks are drawn as monochrome
+  vector paths (`Icon` + parsed Material path data, tinted) and the three text ones
+  (haha / ‼ / ?) are typeset in Public Sans — iMessage's own icon+text split, all
+  dependency-free. A turn's folded `reactions` render in its empty **gutter**
+  (`GutterReactions`) with a small *drawn* arrow pointing back at it (`<- ♥`
+  received, `♥ ->` yours — Public Sans lacks the arrow glyphs too, so it's a
+  `Canvas` shaft+chevron); same-type reactions collapse to one glyph + count (`♥3`), a type is
+  full white if you're among its reactors else 70%, and the row `FlowRow`-wraps when
+  many pile up. Long-pressing a turn opens an inline `ReactionPicker` (the six drawn
+  marks, your current one bright so re-tapping reads as remove) — only when
+  `state.privateApi` is true (`combinedClickable(enabled = canReact)`), since sending
+  needs the server's Private API. `Notifications` has two
   channels — high-importance "messages" (per-message) and low "service" (the
   ongoing foreground notification).
 
@@ -228,6 +273,18 @@ A **BlueBubbles Server** on an always-on Mac signed into iMessage, reached over
 **Tailscale Serve** at the user-configured `https://<machine>.<tailnet>.ts.net`
 URL (entered at setup) — the server stays LAN-bound; Tailscale provides TLS +
 private routing, and the live socket (Phase 2) is the push channel, so no FCM is
-needed. See the README for the full self-host walkthrough. `private_api` is off
-by default (so no tapbacks/typing from the server yet — that's a Phase 3
-prerequisite, needs SIP disabled + the helper bundle on the Mac).
+needed. See the README for the full self-host walkthrough.
+
+**Private API (optional).** `private_api` is off by default. Enabling it lets the
+server send tapbacks (and later typing/read receipts) by injecting a helper dylib
+into Messages — there's no bundle to install by hand; the server does the
+injection once two macOS protections are off: **Library Validation** (`sudo
+defaults write /Library/Preferences/com.apple.security.libraryvalidation.plist
+DisableLibraryValidation -bool true`) **and SIP** (`csrutil disable` from
+Recovery). Then flip the Private API toggle in the server's Settings; its status
+box should report the helper connected, and `GET /server/info` returns
+`"private_api": true, "helper_connected": true`. The app reads exactly those two
+fields (`BlueBubblesApi.serverInfo`) to decide whether to offer tapback sending —
+so users who don't want to disable SIP simply never see the picker. README has the
+step-by-step. (Library Validation is the step the BlueBubbles docs bury — SIP-off
+alone won't let the dylib load.)

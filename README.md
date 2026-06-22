@@ -57,6 +57,32 @@ Tailscale to reach it privately from the phone.
    the BlueBubbles server password. The app validates them against the server and
    stores them on the device.
 
+### Optional: enable the Private API (tapbacks, read receipts, typing)
+
+By default BlueBubbles can only send via AppleScript, which can't send tapbacks,
+mark chats read, or send typing indicators. Those need BlueBubbles' **Private
+API**, which injects a helper into Messages — and that requires turning off two
+macOS protections. It's optional; skip this and everything else still works.
+
+1. **Disable Library Validation** (lets the helper load into Messages):
+
+   ```sh
+   sudo defaults write /Library/Preferences/com.apple.security.libraryvalidation.plist DisableLibraryValidation -bool true
+   ```
+
+2. **Disable System Integrity Protection (SIP).** Boot into Recovery
+   (Apple Silicon: hold the power button → *Options*; Intel: hold ⌘R at boot),
+   open Terminal, run `csrutil disable`, then reboot. Verify with `csrutil status`
+   — it should read `disabled`. (On Apple Silicon this also disables running iOS
+   apps on the Mac.) Do this at your own risk; a VM snapshot first is wise.
+
+3. **Flip it on in the server.** BlueBubbles Server → *Settings* → **Private API**
+   toggle on. There's no bundle to install by hand — the server injects the helper
+   itself. Hit refresh on the **Private API Status** box; it should report the
+   helper connected. (`GET /api/v1/server/info` then shows `"private_api": true`
+   and `"helper_connected": true` — the app reads this to decide whether to offer
+   tapbacks etc.)
+
 For instant delivery after a reboot without opening the app, enable Tailscale's
 **Always-on VPN** on the phone (Android Settings → Network → VPN) and leave
 "Block connections without VPN" **off** — the live socket reconnects the moment
@@ -80,8 +106,9 @@ other Android 14+ devices should work but are untested.
 - **Phase 2 (done):** sending + a Socket.IO foreground service for live delivery
   and notifications. The working OpenBubbles replacement.
 - **Phase 3 (in progress):** image attachments (send + receive), contact names in
-  notifications. Still to come: tapbacks/reactions, read receipts, non-image
-  attachments — these need the BlueBubbles Private API enabled on the Mac.
+  notifications, and **tapbacks** — incoming reactions render compactly; long-press
+  a message to send your own (needs the optional Private API, above). Still to come:
+  read receipts, typing indicators, non-image attachments.
 
 ## License
 
