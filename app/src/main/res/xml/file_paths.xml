@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Maps the cacheDir/shared/ folder (where openAttachment downloads files) to the
+     FileProvider so a content:// URI can be granted to an external viewer/share app. -->
+<paths>
+    <cache-path name="shared" path="shared/" />
+</paths>

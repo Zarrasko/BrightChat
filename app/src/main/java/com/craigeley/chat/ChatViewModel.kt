@@ -357,6 +357,49 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Opens a non-image attachment: downloads it to a FileProvider-shared cache file,
+     * then hands off to an external app via `ACTION_VIEW`. Falls back to a share
+     * chooser, then a message if nothing on the (minimal) device can handle it.
+     */
+    fun openAttachment(attachment: Attachment) {
+        val client = api ?: return
+        _state.update { it.copy(message = "Downloading…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val dir = java.io.File(app.cacheDir, "shared").apply { mkdirs() }
+                val safe = (attachment.transferName ?: attachment.guid)
+                    .replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { attachment.guid }
+                val dest = java.io.File(dir, safe)
+                if (!dest.exists() || dest.length() == 0L) client.downloadAttachment(attachment.guid, dest)
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    app, "${app.packageName}.fileprovider", dest,
+                )
+                val mime = attachment.mimeType ?: "application/octet-stream"
+                _state.update { it.copy(message = null) }
+                val view = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, mime)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                try {
+                    app.startActivity(view)
+                } catch (e: android.content.ActivityNotFoundException) {
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = mime
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    val chooser = Intent.createChooser(send, "Open with")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    runCatching { app.startActivity(chooser) }
+                        .onFailure { _state.update { s -> s.copy(message = "No app can open this file") } }
+                }
+            } catch (t: Throwable) {
+                _state.update { it.copy(message = "Couldn’t download attachment") }
+            }
+        }
+    }
+
+    /**
      * Sends a picked image into the open thread. Mirrors [sendMessage]: it shows an
      * optimistic bubble immediately — the picked bytes are seeded into the image
      * cache under the temp guid so the normal loader renders them without a round

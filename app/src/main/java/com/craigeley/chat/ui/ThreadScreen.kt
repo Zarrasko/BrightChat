@@ -141,6 +141,7 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                         state.contacts,
                         showLabel = message.guid in labeled,
                         loadImage = viewModel::loadImage,
+                        onOpenAttachment = viewModel::openAttachment,
                         canReact = state.privateApi,
                         pickerOpen = reactingTo == message.guid,
                         onLongPress = { if (state.privateApi) reactingTo = message.guid },
@@ -152,6 +153,16 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                     )
                 }
             }
+        }
+
+        state.message?.let { msg ->
+            Text(
+                text = msg,
+                style = ChatType.hint,
+                color = ChatColors.onSurfaceDim,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            )
         }
 
         if (state.typingChatGuid == convo.guid) {
@@ -260,6 +271,7 @@ private fun MessageRow(
     contacts: Contacts,
     showLabel: Boolean,
     loadImage: suspend (Attachment) -> ImageBitmap?,
+    onOpenAttachment: (Attachment) -> Unit,
     canReact: Boolean,
     pickerOpen: Boolean,
     onLongPress: () -> Unit,
@@ -294,9 +306,9 @@ private fun MessageRow(
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             if (message.fromMe) {
                 ReactionGutter(message, hasReactions, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
-                MessageContent(message, body, align, textAlign, loadImage, canReact, pickerOpen, onLongPress, onReact, onDismissPicker, interaction, Modifier.weight(MESSAGE_MAX_WIDTH))
+                MessageContent(message, body, align, textAlign, loadImage, onOpenAttachment, canReact, pickerOpen, onLongPress, onReact, onDismissPicker, interaction, Modifier.weight(MESSAGE_MAX_WIDTH))
             } else {
-                MessageContent(message, body, align, textAlign, loadImage, canReact, pickerOpen, onLongPress, onReact, onDismissPicker, interaction, Modifier.weight(MESSAGE_MAX_WIDTH))
+                MessageContent(message, body, align, textAlign, loadImage, onOpenAttachment, canReact, pickerOpen, onLongPress, onReact, onDismissPicker, interaction, Modifier.weight(MESSAGE_MAX_WIDTH))
                 ReactionGutter(message, hasReactions, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
             }
         }
@@ -326,6 +338,7 @@ private fun MessageContent(
     align: Alignment.Horizontal,
     textAlign: TextAlign,
     loadImage: suspend (Attachment) -> ImageBitmap?,
+    onOpenAttachment: (Attachment) -> Unit,
     canReact: Boolean,
     pickerOpen: Boolean,
     onLongPress: () -> Unit,
@@ -351,6 +364,10 @@ private fun MessageContent(
         }
         message.images.forEach { image ->
             AttachmentImage(image, loadImage)
+            Spacer(modifier = Modifier.height(if (body != null) 6.dp else 4.dp))
+        }
+        message.files.forEach { file ->
+            AttachmentFile(file, textAlign) { onOpenAttachment(file) }
             Spacer(modifier = Modifier.height(if (body != null) 6.dp else 4.dp))
         }
         if (body != null) {
@@ -413,4 +430,19 @@ private fun AttachmentImage(attachment: Attachment, load: suspend (Attachment) -
     } else {
         Text(text = "[Image]", style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
     }
+}
+
+/** A non-image attachment as a tappable, underlined "Type · filename" row —
+ *  tapping downloads it and hands off to an external app. */
+@Composable
+private fun AttachmentFile(attachment: Attachment, textAlign: TextAlign, onOpen: () -> Unit) {
+    HapticText(
+        text = attachment.fileLabel,
+        style = ChatType.body,
+        color = ChatColors.onSurface,
+        underline = true,
+        textAlign = textAlign,
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onOpen,
+    )
 }
