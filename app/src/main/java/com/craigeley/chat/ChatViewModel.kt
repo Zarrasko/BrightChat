@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 enum class Status { Idle, Loading, Ready, Error }
 
 data class UiState(
-    val hasPassword: Boolean,
+    val isConfigured: Boolean,                 // a server URL and password are stored
     val status: Status = Status.Idle,
     val conversations: List<Conversation> = emptyList(),
     val open: Conversation? = null,            // the currently-open thread, if any
@@ -45,10 +45,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application
 
-    private var api: BlueBubblesApi? =
-        Store.password(application)?.takeIf { it.isNotBlank() }?.let { BlueBubblesApi(Store.BASE_URL, it) }
+    // A client only exists once setup has stored both a server URL and a password.
+    private var api: BlueBubblesApi? = run {
+        val url = Store.baseUrl(application)
+        val pw = Store.password(application)?.takeIf { it.isNotBlank() }
+        if (url != null && pw != null) BlueBubblesApi(url, pw) else null
+    }
 
-    private val _state = MutableStateFlow(UiState(hasPassword = api != null))
+    private val _state = MutableStateFlow(UiState(isConfigured = api != null))
     val state: StateFlow<UiState> = _state
 
     private var loadJob: Job? = null
@@ -75,22 +79,53 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- Setup ------------------------------------------------------------
 
-    fun savePassword(value: String) {
-        val pw = value.trim()
-        if (pw.isEmpty()) return
+    /** First-launch setup: store the server URL + password and validate them
+     *  against the server before committing. Both are required. */
+    fun saveSetup(url: String, password: String) {
+        val pw = password.trim()
+        if (url.isBlank() || pw.isEmpty()) return
         _state.update { it.copy(status = Status.Loading, message = "Connecting…") }
         viewModelScope.launch(Dispatchers.IO) {
-            val client = BlueBubblesApi(Store.BASE_URL, pw)
+            // Normalize the URL the same way we store it, then validate against it.
+            Store.setBaseUrl(app, url)
+            val base = Store.baseUrl(app) ?: return@launch
+            val client = BlueBubblesApi(base, pw)
             val ok = runCatching { client.validate() }.getOrDefault(false)
             if (ok) {
                 Store.setPassword(app, pw)
                 api = client
-                _state.update { it.copy(hasPassword = true, message = null) }
+                _state.update { it.copy(isConfigured = true, message = null) }
                 loadConversations()
                 startSocket()
             } else {
                 _state.update {
-                    it.copy(status = Status.Error, message = "Couldn’t reach the server — check the password")
+                    it.copy(status = Status.Error, message = "Couldn’t reach the server — check the URL and password")
+                }
+            }
+        }
+    }
+
+    /** Changes the server URL from Settings: re-validate against the existing
+     *  password, then recreate the client and reconnect the socket to the new host. */
+    fun updateServerUrl(url: String) {
+        if (url.isBlank()) return
+        val pw = Store.password(app)?.takeIf { it.isNotBlank() } ?: return
+        _state.update { it.copy(status = Status.Loading, message = "Connecting…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            Store.setBaseUrl(app, url)
+            val base = Store.baseUrl(app) ?: return@launch
+            val client = BlueBubblesApi(base, pw)
+            val ok = runCatching { client.validate() }.getOrDefault(false)
+            if (ok) {
+                api = client
+                _state.update { it.copy(message = null) }
+                // Bounce the socket so it reconnects to the new host.
+                stopSocket()
+                startSocket()
+                loadConversations()
+            } else {
+                _state.update {
+                    it.copy(status = Status.Error, message = "Couldn’t reach that server — check the URL")
                 }
             }
         }
@@ -434,7 +469,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         api = null
         stopSocket()
         Store.signOut(app)
-        _state.value = UiState(hasPassword = false, message = message)
+        _state.value = UiState(isConfigured = false, message = message)
     }
 
     override fun onCleared() {

@@ -32,11 +32,14 @@ import com.craigeley.chat.ui.theme.ChatColors
 import com.craigeley.chat.ui.theme.ChatDimens
 import com.craigeley.chat.ui.theme.ChatType
 
-/** First launch: enter the BlueBubbles Server password. Encrypted on the device only. */
+/** First launch: enter the BlueBubbles Server URL and password. Stored on the
+ *  device only (the password encrypted at rest). */
 @Composable
 fun SetupScreen(viewModel: ChatViewModel) {
     val state by viewModel.state.collectAsState()
+    var serverUrl by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    val canSave = serverUrl.isNotBlank() && password.isNotBlank()
 
     Column(
         modifier = Modifier
@@ -49,19 +52,39 @@ fun SetupScreen(viewModel: ChatViewModel) {
         Text(text = "chat", style = ChatType.title, color = ChatColors.onSurface)
         Spacer(modifier = Modifier.weight(1f))
         Text(
-            text = "Enter the server password",
+            text = "Connect your server",
             style = ChatType.body,
             color = ChatColors.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "From your BlueBubbles Server",
+            text = "Your BlueBubbles Server address and password",
             style = ChatType.hint,
             color = ChatColors.onSurfaceDisabled,
             textAlign = TextAlign.Center,
         )
         Spacer(modifier = Modifier.height(32.dp))
+
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+            if (serverUrl.isEmpty()) {
+                Text(text = "your-server.example.com", style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+            BasicTextField(
+                value = serverUrl,
+                onValueChange = { serverUrl = it },
+                singleLine = true,
+                textStyle = ChatType.meta.copy(color = ChatColors.onSurface, textAlign = TextAlign.Center),
+                cursorBrush = SolidColor(ChatColors.onSurface),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
             if (password.isEmpty()) {
@@ -76,7 +99,7 @@ fun SetupScreen(viewModel: ChatViewModel) {
                 cursorBrush = SolidColor(ChatColors.onSurface),
                 visualTransformation = if (password.isEmpty()) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { viewModel.savePassword(password) }),
+                keyboardActions = KeyboardActions(onDone = { if (canSave) viewModel.saveSetup(serverUrl, password) }),
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(modifier = Modifier.height(8.dp))
@@ -98,8 +121,8 @@ fun SetupScreen(viewModel: ChatViewModel) {
         HapticText(
             text = "Save",
             style = ChatType.button,
-            color = if (password.isBlank()) ChatColors.onSurfaceDisabled else ChatColors.onSurface,
-            onClick = { viewModel.savePassword(password) },
+            color = if (!canSave) ChatColors.onSurfaceDisabled else ChatColors.onSurface,
+            onClick = { if (canSave) viewModel.saveSetup(serverUrl, password) },
         )
         Spacer(modifier = Modifier.height(16.dp))
     }

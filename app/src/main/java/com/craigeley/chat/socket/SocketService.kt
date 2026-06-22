@@ -46,12 +46,13 @@ class SocketService : Service() {
 
     private fun connect() {
         val password = Store.password(this) ?: run { stopSelf(); return }
+        val baseUrl = Store.baseUrl(this) ?: run { stopSelf(); return }
         val opts = IO.Options().apply {
             transports = arrayOf("websocket") // server upgrades to ws anyway; skip polling
             query = "password=" + URLEncoder.encode(password, "UTF-8")
             reconnection = true
         }
-        val s = runCatching { IO.socket(Store.BASE_URL, opts) }.getOrNull() ?: run { stopSelf(); return }
+        val s = runCatching { IO.socket(baseUrl, opts) }.getOrNull() ?: run { stopSelf(); return }
         socket = s
         s.on(Socket.EVENT_CONNECT, Emitter.Listener { Log.d(TAG, "socket connected") })
         s.on(Socket.EVENT_CONNECT_ERROR, Emitter.Listener { Log.w(TAG, "connect error: ${it.firstOrNull()}") })

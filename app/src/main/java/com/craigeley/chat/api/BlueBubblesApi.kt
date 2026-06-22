@@ -19,9 +19,10 @@ class ApiException(val code: Int, message: String) : IOException(message) {
 
 /**
  * Minimal BlueBubbles Server REST client — plain [HttpURLConnection] + `org.json`,
- * no networking dependency (like hive/pod). Auth is the server password passed as
- * the `password` query param on every call. Reached over Tailscale Serve at
- * [Store.BASE_URL]. The live event feed is separate (Socket.IO, see the `socket`
+ * no networking dependency. Auth is the server password passed as
+ * the `password` query param on every call. The base URL is the user-configured
+ * server (`Store.baseUrl`), typically reached over Tailscale Serve, passed into
+ * the constructor. The live event feed is separate (Socket.IO, see the `socket`
  * package); message parsing is shared with it via the [companion object].
  *
  * Timestamps come back as epoch millis and are carried through unchanged — the UI

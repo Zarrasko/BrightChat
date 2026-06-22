@@ -56,15 +56,19 @@ adb-over-wifi; it is otherwise reached only over Tailscale).
 
 ## Setup / auth
 
-On first launch the app asks for the **BlueBubbles Server password**, validates it
-against `GET /api/v1/server/info`, and stores it encrypted on the device. The
-server URL is hardcoded (`Store.BASE_URL`). If the API returns 401/403 the app
+On first launch the app asks for the **BlueBubbles Server URL and password**
+(`SetupScreen` → `ChatViewModel.saveSetup`), validates them against
+`GET /api/v1/server/info`, and stores both on the device (the password encrypted).
+The URL is also editable later in `SettingsScreen` (`ChatViewModel.updateServerUrl`,
+which re-validates and bounces the socket). If the API returns 401/403 the app
 clears the password and returns to setup.
 
 ## Architecture
 
-- **`Store`** (`api/Store.kt`) — SharedPreferences. `BASE_URL` is **hardcoded**
-  (one personal server). The password is encrypted at rest via `SecureStore`. Also
+- **`Store`** (`api/Store.kt`) — SharedPreferences. The **server URL**
+  (`baseUrl`/`setBaseUrl`) is entered at setup and editable in Settings — one
+  self-hosted server per install; `setBaseUrl` normalizes it (defaults the scheme
+  to `https://`, strips a trailing slash). The password is encrypted at rest via `SecureStore`. Also
   persists the **contact index** (`setContacts`/`contacts`) as the normalized
   key→name map (JSON) so `SocketService` can name notification senders without the
   app running; the ViewModel writes it on each contacts load, `signOut` wipes it
@@ -195,8 +199,8 @@ clears the password and returns to setup.
 
 ## Light Phone III specifics
 
-These look odd out of context but are deliberate, and match the siblings (see
-`~/Developer/ask/CLAUDE.md` for the fuller version):
+These look odd out of context but are deliberate, and match a family of sibling
+LightOS apps that share the same conventions:
 
 - **UI is black-and-white, Public Sans, text-only** (vandamd's LightOS style).
   Use `ChatColors`, `ChatType`, `ChatDimens` from `ui/theme/ChatTheme.kt` — not
@@ -220,9 +224,10 @@ These look odd out of context but are deliberate, and match the siblings (see
 
 ## The server
 
-A **BlueBubbles Server** (v1.9.9 at time of writing) on an always-on Mac
-(`fieldmac-mini`), reached over **Tailscale Serve** at the hardcoded
-`https://…ts.net` URL — the server stays LAN-bound; Tailscale provides TLS +
+A **BlueBubbles Server** on an always-on Mac signed into iMessage, reached over
+**Tailscale Serve** at the user-configured `https://<machine>.<tailnet>.ts.net`
+URL (entered at setup) — the server stays LAN-bound; Tailscale provides TLS +
 private routing, and the live socket (Phase 2) is the push channel, so no FCM is
-needed. `private_api` is off (so no tapbacks/typing from the server yet — that's
-a Phase 3 prerequisite, needs SIP disabled + the helper bundle on the Mac).
+needed. See the README for the full self-host walkthrough. `private_api` is off
+by default (so no tapbacks/typing from the server yet — that's a Phase 3
+prerequisite, needs SIP disabled + the helper bundle on the Mac).

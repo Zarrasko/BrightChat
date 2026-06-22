@@ -9,6 +9,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import com.craigeley.chat.api.Store
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -90,12 +91,15 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Lets the password be pushed over adb instead of typed on the phone:
-     * `adb shell am start -n com.craigeley.chat/.MainActivity -e password YOUR_PASSWORD`
+     * Lets setup be pushed over adb instead of typed on the phone:
+     * `adb shell am start -n com.craigeley.chat/.MainActivity -e server YOUR_URL -e password YOUR_PASSWORD`
+     * The `server` extra is optional once a URL is already stored.
      */
     private fun handlePasswordExtra(intent: Intent?) {
         val password = intent?.getStringExtra("password")?.takeIf { it.isNotBlank() } ?: return
-        viewModel.savePassword(password)
+        val server = intent.getStringExtra("server")?.takeIf { it.isNotBlank() }
+            ?: Store.baseUrl(this) ?: return
+        viewModel.saveSetup(server, password)
     }
 }
 
@@ -105,7 +109,7 @@ fun ChatApp(viewModel: ChatViewModel) {
     var showSettings by remember { mutableStateOf(false) }
 
     when {
-        !state.hasPassword -> {
+        !state.isConfigured -> {
             // A rejected password sends us back here; make sure settings is dismissed.
             showSettings = false
             SetupScreen(viewModel)

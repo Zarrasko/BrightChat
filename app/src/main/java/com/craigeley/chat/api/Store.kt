@@ -5,19 +5,32 @@ import com.craigeley.chat.Contacts
 import org.json.JSONObject
 
 /**
- * On-device state for the BlueBubbles client: just the server password, encrypted
- * at rest by [SecureStore]. The server URL is hardcoded — this app talks to
- * exactly one personal BlueBubbles Server, reached over Tailscale Serve (which
- * provides TLS + private routing; the server itself stays LAN-bound). Nothing
- * here touches Google Play Services.
+ * On-device state for the BlueBubbles client: the server URL (entered at setup,
+ * editable in Settings) and the server password, encrypted at rest by
+ * [SecureStore]. The app talks to one self-hosted BlueBubbles Server — typically
+ * reached over Tailscale Serve or another HTTPS reverse proxy (which provides TLS
+ * + private routing; the server itself stays LAN-bound). Nothing here touches
+ * Google Play Services.
  */
 object Store {
     private const val PREFS = "chat"
     private const val KEY_PASSWORD = "bb_password" // encrypted
     private const val KEY_CONTACTS = "contacts"    // normalized key → name, JSON
+    private const val KEY_BASE_URL = "base_url"    // the server URL, set at setup
 
-    /** The single BlueBubbles Server this app talks to. */
-    const val BASE_URL = "https://fieldmac-mini.tail311799.ts.net"
+    /** The configured BlueBubbles Server URL, or null if setup hasn't run yet. */
+    fun baseUrl(context: Context): String? =
+        prefs(context).getString(KEY_BASE_URL, null)?.takeIf { it.isNotBlank() }
+
+    /** Stores the server URL, normalizing it: default to https:// if no scheme is
+     *  given, and drop a trailing slash so it concatenates cleanly with API paths. */
+    fun setBaseUrl(context: Context, value: String) {
+        var url = value.trim().trimEnd('/')
+        if (url.isNotEmpty() && !url.startsWith("http://") && !url.startsWith("https://")) {
+            url = "https://$url"
+        }
+        prefs(context).edit().putString(KEY_BASE_URL, url).apply()
+    }
 
     fun password(context: Context): String? =
         prefs(context).getString(KEY_PASSWORD, null)?.let { runCatching { SecureStore.decrypt(it) }.getOrNull() }
