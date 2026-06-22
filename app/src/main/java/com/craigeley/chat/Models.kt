@@ -157,3 +157,11 @@ data class IncomingMessage(
     val isNew: Boolean,
     val chatDisplayName: String,
 )
+
+/**
+ * A typing-indicator change from the live socket ([com.craigeley.chat.socket.SocketBus]):
+ * the other party in [chatGuid] started ([typing] true) or stopped typing. The
+ * server only emits these for 1:1 chats, and re-emits roughly every 5s while typing
+ * continues — so the ViewModel auto-expires a stale "typing" if no refresh arrives.
+ */
+data class TypingEvent(val chatGuid: String, val typing: Boolean)

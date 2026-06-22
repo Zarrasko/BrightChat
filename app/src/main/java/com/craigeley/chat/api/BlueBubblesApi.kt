@@ -167,6 +167,19 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
     }
 
     /**
+     * `POST`/`DELETE /api/v1/chat/:guid/typing` — show or clear your typing bubble
+     * on the other party's device (Private-API only). Best-effort; callers ignore
+     * failures and gate on the Private API being live.
+     */
+    fun startTyping(chatGuid: String) {
+        request("POST", "/api/v1/chat/${enc(chatGuid)}/typing", null)
+    }
+
+    fun stopTyping(chatGuid: String) {
+        request("DELETE", "/api/v1/chat/${enc(chatGuid)}/typing", null)
+    }
+
+    /**
      * `POST /api/v1/message/attachment` — sends a file into a chat as multipart
      * form-data (the one call that isn't JSON, so it's built by hand rather than
      * via [request]). Like [send] we pass a `tempGuid` to correlate the echo and

@@ -7,6 +7,7 @@ import android.os.IBinder
 import android.util.Log
 import com.craigeley.chat.Contacts
 import com.craigeley.chat.Notifications
+import com.craigeley.chat.TypingEvent
 import com.craigeley.chat.api.BlueBubblesApi
 import com.craigeley.chat.api.Store
 import io.socket.client.IO
@@ -58,7 +59,16 @@ class SocketService : Service() {
         s.on(Socket.EVENT_CONNECT_ERROR, Emitter.Listener { Log.w(TAG, "connect error: ${it.firstOrNull()}") })
         s.on("new-message", Emitter.Listener { onMessage(it, isNew = true) })
         s.on("updated-message", Emitter.Listener { onMessage(it, isNew = false) })
+        s.on("typing-indicator", Emitter.Listener { onTyping(it) })
         s.connect()
+    }
+
+    /** A `typing-indicator` event — `{ display, guid }` — bridged to the ViewModel.
+     *  No notification; it only matters for the open thread. */
+    private fun onTyping(args: Array<out Any?>?) {
+        val data = args?.firstOrNull() as? JSONObject ?: return
+        val guid = data.optString("guid").takeIf { it.isNotBlank() } ?: return
+        SocketBus.typing.tryEmit(TypingEvent(guid, data.optBoolean("display", false)))
     }
 
     private fun onMessage(args: Array<out Any?>?, isNew: Boolean) {

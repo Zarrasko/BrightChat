@@ -107,8 +107,9 @@ other Android 14+ devices should work but are untested.
   and notifications. The working OpenBubbles replacement.
 - **Phase 3 (in progress):** image attachments (send + receive), contact names in
   notifications, **tapbacks** (incoming render compactly; long-press a message to
-  send your own), and **marking threads read** — both need the optional Private API,
-  above. Still to come: typing indicators, non-image attachments.
+  send your own), **marking threads read**, and **typing indicators** (send +
+  receive) — the last three need the optional Private API, above. Still to come:
+  non-image attachments.
 
 ## License
 

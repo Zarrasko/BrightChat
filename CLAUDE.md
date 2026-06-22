@@ -40,8 +40,11 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   off on the Mac). **Marking a thread read** is also wired (when the Private API is
   live): opening a thread — and a live incoming message while it's foreground —
   POSTs `chat/:guid/read`, which clears the unread on the account's other devices.
-  **Not yet done:** typing indicators (also a Private-API feature); non-image
-  attachment types (video/audio/vcard still show `[Attachment]`).
+  **Typing indicators** are wired both ways (Private-API, 1:1 only — the server
+  filters group typing): the open thread shows an animated `•••` when the other
+  party types, and typing in the compose bar POSTs/DELETEs `chat/:guid/typing`.
+  **Not yet done:** non-image attachment types (video/audio/vcard still show
+  `[Attachment]`).
 
 Note: messaging yourself (note-to-self) legitimately shows each message twice —
 iMessage stores a sent *and* a received row (two GUIDs). Normal chats don't; the
@@ -96,7 +99,9 @@ clears the password and returns to setup.
   reaction,partIndex)` → `POST /message/react` (Private-API only; `reaction` is a
   `ReactionType.apiValue`, prefix `-` to remove; returns the created reaction message
   to reconcile its echo); `markRead(guid)` → `POST /chat/:guid/read` (Private-API
-  only; clears unread across the account's devices); `messages(guid)` → `GET /chat/:guid/message`
+  only; clears unread across the account's devices); `startTyping(guid)`/
+  `stopTyping(guid)` → `POST`/`DELETE /chat/:guid/typing` (Private-API only);
+  `messages(guid)` → `GET /chat/:guid/message`
   (`with=handle,attachment`, `sort=DESC`, guid URL-encoded); `send(guid,text,tempGuid)`
   → `POST /message/text` (only `chatGuid`+`message` required; we pass a `tempGuid`
   to correlate the echo and `method:"apple-script"` since Private API is off, and
@@ -149,7 +154,11 @@ clears the password and returns to setup.
   no-ops unless `state.privateApi` (the cached `server/info` capability).
   `markReadIfPrivate(guid)` fires `markRead` best-effort (off-main, errors ignored)
   when you open a thread and on a foreground incoming message, so reading here
-  clears the unread on your other devices — also gated on `state.privateApi`. Keeps a
+  clears the unread on your other devices — also gated on `state.privateApi`.
+  **Typing:** collects `SocketBus.typing` into `state.typingChatGuid` (with a 12s
+  auto-expiry, since a "stopped" event can be missed); `onComposeTextChanged` sends
+  `startTyping` on the first keystroke and `stopTyping` after a 4s pause / empty
+  field / send / close — gated on `privateApi`. Keeps a
   session-lived per-conversation `messageCache` (now the *raw* list) so reopening a
   thread is instant (cached shown immediately, fresh fetch refreshes in the
   background; snapshotted on `closeThread`). Starts/stops
@@ -178,8 +187,9 @@ clears the password and returns to setup.
     the tunnel comes up (verified: ~15s of `connect error` retries post-boot, then
     `socket connected` the instant Tailscale connected). Leave "Block connections
     without VPN" OFF.
-  - **`SocketBus`** — a process-wide `MutableSharedFlow<IncomingMessage>` bridging
-    the service (alive even when the activity is dead) to the ViewModel.
+  - **`SocketBus`** — process-wide `MutableSharedFlow`s bridging the service (alive
+    even when the activity is dead) to the ViewModel: `incoming` (messages) and
+    `typing` (`TypingEvent`, from the socket's `typing-indicator` event).
   - **`AppForeground`** — a volatile flag set by `MainActivity.onStart/onStop` so
     the service only notifies for messages the user isn't already looking at.
 - **Models** (`Models.kt`) — `Conversation`; `ChatMessage` (guid, text, date,
@@ -231,7 +241,10 @@ clears the password and returns to setup.
   + sign out). `ComposeBar` is shared; its optional `onPickImage` adds a leading
   "+" that opens the photo picker — wired in both `ThreadScreen` (sends into the open
   chat) and `NewMessageScreen` (once a recipient is chosen; sends as the first
-  message of a new 1:1 via `sendNewImage`). The thread
+  message of a new 1:1 via `sendNewImage`); its optional `onTextChange` (thread only)
+  drives the typing-indicator sends. `ThreadScreen`'s `TypingIndicator` (an animated
+  `•••` just above the compose bar) shows while `state.typingChatGuid` matches the
+  open chat. The thread
   `LazyColumn` is **`reverseLayout = true`** with messages newest-first, so it
   opens anchored at the latest (no scroll-to-bottom animation — that whoosh was the
   old bug); scroll *up* for history. A new newest message auto-scrolls down only if

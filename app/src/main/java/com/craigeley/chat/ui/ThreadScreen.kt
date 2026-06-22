@@ -154,20 +154,51 @@ fun ThreadScreen(viewModel: ChatViewModel) {
             }
         }
 
+        if (state.typingChatGuid == convo.guid) {
+            TypingIndicator()
+        }
+
         ComposeBar(
             onSend = viewModel::sendMessage,
             onPickImage = {
                 pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             },
+            onTextChange = viewModel::onComposeTextChanged,
         )
     }
+}
+
+/** A left-aligned animated ellipsis shown while the other party is typing — the
+ *  bubble-less equivalent of iMessage's "…" indicator, just above the compose bar. */
+@Composable
+private fun TypingIndicator() {
+    var dots by remember { mutableStateOf(1) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(400)
+            dots = (dots % 3) + 1
+        }
+    }
+    Text(
+        // "•" is centred mid-line (unlike a baseline ".") and is in Public Sans, so
+        // it reads as typing dots with no font fallback.
+        text = "•".repeat(dots),
+        style = ChatType.body,
+        color = ChatColors.onSurfaceDim,
+        modifier = Modifier.fillMaxWidth().padding(start = 4.dp, top = 2.dp, bottom = 4.dp),
+        textAlign = TextAlign.Start,
+    )
 }
 
 /** Bottom compose row: a growing text field and a Send action. Shared with the
  *  new-message screen. When [onPickImage] is supplied (the thread, not a brand-new
  *  chat) a leading "+" opens the photo picker. */
 @Composable
-fun ComposeBar(onSend: (String) -> Unit, onPickImage: (() -> Unit)? = null) {
+fun ComposeBar(
+    onSend: (String) -> Unit,
+    onPickImage: (() -> Unit)? = null,
+    onTextChange: ((String) -> Unit)? = null,
+) {
     var input by remember { mutableStateOf("") }
     Column(modifier = Modifier.fillMaxWidth()) {
         HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
@@ -190,7 +221,7 @@ fun ComposeBar(onSend: (String) -> Unit, onPickImage: (() -> Unit)? = null) {
                 }
                 BasicTextField(
                     value = input,
-                    onValueChange = { input = it },
+                    onValueChange = { input = it; onTextChange?.invoke(it) },
                     textStyle = ChatType.body.copy(color = ChatColors.onSurface),
                     cursorBrush = SolidColor(ChatColors.onSurface),
                     keyboardOptions = KeyboardOptions(

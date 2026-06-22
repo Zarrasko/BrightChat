@@ -12,12 +12,18 @@ import com.craigeley.chat.socket.SocketBus
 import com.craigeley.chat.socket.SocketService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 enum class Status { Idle, Loading, Ready, Error }
+
+// Send a typing "stop" this long after the last keystroke; expire a received
+// "typing" after this long without a refresh (the server re-emits ~every 5s).
+private const val TYPING_PAUSE_MS = 4_000L
+private const val TYPING_EXPIRY_MS = 12_000L
 
 data class UiState(
     val isConfigured: Boolean,                 // a server URL and password are stored
@@ -30,6 +36,7 @@ data class UiState(
     val contactList: List<Contact> = emptyList(), // searchable recipients for a new message
     val composingNew: Boolean = false,         // the "New message" compose screen is open
     val privateApi: Boolean = false,           // server's Private API live → tapbacks available
+    val typingChatGuid: String? = null,        // chat whose other party is currently typing
     val message: String? = null,               // transient status / error line
 )
 
@@ -222,7 +229,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun closeThread() {
         // Snapshot the raw list (incl. live updates) so reopening is instant.
-        _state.value.open?.let { messageCache[it.guid] = openRaw }
+        _state.value.open?.let {
+            messageCache[it.guid] = openRaw
+            finishTyping(it.guid) // don't leave a typing bubble up after leaving
+        }
         openRaw = emptyList()
         threadJob?.cancel()
         _state.update { it.copy(open = null, messages = emptyList(), threadLoading = false) }
@@ -272,6 +282,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val body = text.trim()
         val convo = _state.value.open ?: return
         if (body.isEmpty()) return
+        finishTyping(convo.guid) // sending clears our typing bubble
         // Optimistic: show it immediately under a temp guid, then swap in the
         // server's echo (real guid) so the socket's new-message dedupes cleanly.
         val tempGuid = "temp-${System.currentTimeMillis()}-${(0..99999).random()}"
@@ -497,6 +508,67 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             SocketBus.incoming.collect { applyIncoming(it) }
         }
+        viewModelScope.launch {
+            SocketBus.typing.collect { applyTyping(it) }
+        }
+    }
+
+    // ---- Typing indicators ------------------------------------------------
+
+    private var typingExpiryJob: Job? = null      // clears a stale "typing" if no refresh
+    private var typingSent = false                // whether we've told the server we're typing
+    private var typingStopJob: Job? = null        // fires the auto-stop after a pause
+
+    /** Receiving: fold a typing change into state. A "stopped" event can be missed,
+     *  so a "typing" auto-expires after [TYPING_EXPIRY_MS] without a refresh (the
+     *  server re-emits ~every 5s while typing continues). */
+    private fun applyTyping(event: TypingEvent) {
+        typingExpiryJob?.cancel()
+        if (event.typing) {
+            _state.update { it.copy(typingChatGuid = event.chatGuid) }
+            typingExpiryJob = viewModelScope.launch {
+                delay(TYPING_EXPIRY_MS)
+                _state.update { if (it.typingChatGuid == event.chatGuid) it.copy(typingChatGuid = null) else it }
+            }
+        } else {
+            _state.update { if (it.typingChatGuid == event.chatGuid) it.copy(typingChatGuid = null) else it }
+        }
+    }
+
+    /** Sending: the open thread's compose text changed. Tells the server we're
+     *  typing on the first keystroke and schedules an auto-stop after a pause; an
+     *  empty field stops immediately. No-op unless the Private API is live. */
+    fun onComposeTextChanged(text: String) {
+        if (!_state.value.privateApi) return
+        val guid = _state.value.open?.guid ?: return
+        if (text.isBlank()) {
+            typingStopJob?.cancel()
+            stopTypingNow(guid)
+            return
+        }
+        val client = api ?: return
+        if (!typingSent) {
+            typingSent = true
+            viewModelScope.launch(Dispatchers.IO) { runCatching { client.startTyping(guid) } }
+        }
+        typingStopJob?.cancel()
+        typingStopJob = viewModelScope.launch {
+            delay(TYPING_PAUSE_MS)
+            stopTypingNow(guid)
+        }
+    }
+
+    private fun stopTypingNow(guid: String) {
+        if (!typingSent) return
+        typingSent = false
+        val client = api ?: return
+        viewModelScope.launch(Dispatchers.IO) { runCatching { client.stopTyping(guid) } }
+    }
+
+    /** Cancel a pending auto-stop and clear our typing state — on send or close. */
+    private fun finishTyping(guid: String) {
+        typingStopJob?.cancel()
+        stopTypingNow(guid)
     }
 
     private fun applyIncoming(incoming: IncomingMessage) {
