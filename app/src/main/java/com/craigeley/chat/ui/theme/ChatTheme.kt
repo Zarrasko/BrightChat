@@ -41,6 +41,13 @@ val PublicSans = FontFamily(
         weight = FontWeight.Medium,
         variationSettings = FontVariation.Settings(FontVariation.weight(500)),
     ),
+    // Heavy weight, used by the text tapbacks (haha / !! / ?) so they hold their own
+    // next to the solid filled glyphs (heart/thumbs).
+    Font(
+        R.font.publicsans_variablefont_wght,
+        weight = FontWeight.ExtraBold,
+        variationSettings = FontVariation.Settings(FontVariation.weight(800)),
+    ),
 )
 
 object ChatType {

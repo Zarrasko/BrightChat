@@ -1,9 +1,14 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.craigeley.chat.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,7 +41,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,6 +53,8 @@ import com.craigeley.chat.ChatMessage
 import com.craigeley.chat.ChatViewModel
 import com.craigeley.chat.Contacts
 import com.craigeley.chat.Conversation
+import com.craigeley.chat.Reaction
+import com.craigeley.chat.ReactionType
 import com.craigeley.chat.ui.theme.ChatColors
 import com.craigeley.chat.ui.theme.ChatType
 
@@ -55,6 +64,11 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     val state by viewModel.state.collectAsState()
     val convo = state.open ?: return
     val listState = rememberLazyListState()
+
+    // Which message's tapback picker is open (its guid), if any. Long-press opens
+    // it; picking a reaction or tapping elsewhere closes it. Only when the server's
+    // Private API is live — otherwise reacting can't be sent, so we don't offer it.
+    var reactingTo by remember { mutableStateOf<String?>(null) }
 
     // System photo picker (no permission needed; falls back to the document picker
     // where the dedicated picker isn't present). A pick sends straight away.
@@ -127,6 +141,14 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                         state.contacts,
                         showLabel = message.guid in labeled,
                         loadImage = viewModel::loadImage,
+                        canReact = state.privateApi,
+                        pickerOpen = reactingTo == message.guid,
+                        onLongPress = { if (state.privateApi) reactingTo = message.guid },
+                        onReact = { type ->
+                            viewModel.sendReaction(message, type)
+                            reactingTo = null
+                        },
+                        onDismissPicker = { reactingTo = null },
                     )
                 }
             }
@@ -207,6 +229,11 @@ private fun MessageRow(
     contacts: Contacts,
     showLabel: Boolean,
     loadImage: suspend (Attachment) -> ImageBitmap?,
+    canReact: Boolean,
+    pickerOpen: Boolean,
+    onLongPress: () -> Unit,
+    onReact: (ReactionType) -> Unit,
+    onDismissPicker: () -> Unit,
 ) {
     val align = if (message.fromMe) Alignment.End else Alignment.Start
     val textAlign = if (message.fromMe) TextAlign.End else TextAlign.Start
@@ -221,26 +248,115 @@ private fun MessageRow(
         else -> null
     }
     val body = message.bodyText
+    val interaction = remember { MutableInteractionSource() }
+    val hasReactions = message.reactions.isNotEmpty()
+    // The name label sits above the turn (not inside the content column) so the
+    // gutter reaction lines up with the message's first line, not the label.
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = align) {
-        Column(
-            modifier = Modifier.fillMaxWidth(MESSAGE_MAX_WIDTH),
-            horizontalAlignment = align,
-        ) {
-            if (label != null) {
-                Text(text = label, style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
-                Spacer(modifier = Modifier.height(4.dp))
+        if (label != null) {
+            Text(text = label, style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+        // Content is width-capped; the leftover gutter on the opposite side carries
+        // any tapbacks (`<- ♥` / `♥ ->`), pointing back at the turn. 0.8/0.2 weights
+        // keep the same cap whether or not there's a reaction.
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            if (message.fromMe) {
+                ReactionGutter(message, hasReactions, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
+                MessageContent(message, body, align, textAlign, loadImage, canReact, pickerOpen, onLongPress, onReact, onDismissPicker, interaction, Modifier.weight(MESSAGE_MAX_WIDTH))
+            } else {
+                MessageContent(message, body, align, textAlign, loadImage, canReact, pickerOpen, onLongPress, onReact, onDismissPicker, interaction, Modifier.weight(MESSAGE_MAX_WIDTH))
+                ReactionGutter(message, hasReactions, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
             }
-            message.images.forEach { image ->
-                AttachmentImage(image, loadImage)
-                Spacer(modifier = Modifier.height(if (body != null) 6.dp else 4.dp))
-            }
-            if (body != null) {
-                Text(
-                    text = body,
-                    style = ChatType.body,
-                    color = ChatColors.onSurface,
-                    textAlign = textAlign,
-                    modifier = Modifier.fillMaxWidth(),
+        }
+    }
+}
+
+/** The gutter cell beside a turn — its tapbacks (if any) hugging the message edge
+ *  at the top, so they read as belonging to the first line. */
+@Composable
+private fun ReactionGutter(message: ChatMessage, hasReactions: Boolean, modifier: Modifier) {
+    Box(
+        modifier = modifier,
+        contentAlignment = if (message.fromMe) Alignment.TopEnd else Alignment.TopStart,
+    ) {
+        if (hasReactions) {
+            GutterReactions(message.reactions, message.fromMe, modifier = Modifier.padding(horizontal = 4.dp))
+        }
+    }
+}
+
+/** The message itself: optional name label, the long-press tapback picker, inline
+ *  images, then the text — no bubbles, just a column hugging its side. */
+@Composable
+private fun MessageContent(
+    message: ChatMessage,
+    body: String?,
+    align: Alignment.Horizontal,
+    textAlign: TextAlign,
+    loadImage: suspend (Attachment) -> ImageBitmap?,
+    canReact: Boolean,
+    pickerOpen: Boolean,
+    onLongPress: () -> Unit,
+    onReact: (ReactionType) -> Unit,
+    onDismissPicker: () -> Unit,
+    interaction: MutableInteractionSource,
+    modifier: Modifier,
+) {
+    Column(
+        modifier = modifier.combinedClickable(
+            interactionSource = interaction,
+            indication = null,
+            enabled = canReact,
+            onClick = { if (pickerOpen) onDismissPicker() },
+            onLongClick = onLongPress,
+        ),
+        horizontalAlignment = align,
+    ) {
+        // The tapback picker (long-press) sits above the turn it targets.
+        if (pickerOpen) {
+            ReactionPicker(selected = message.reactions.firstOrNull { it.fromMe }?.type, onReact = onReact)
+            Spacer(modifier = Modifier.height(6.dp))
+        }
+        message.images.forEach { image ->
+            AttachmentImage(image, loadImage)
+            Spacer(modifier = Modifier.height(if (body != null) 6.dp else 4.dp))
+        }
+        if (body != null) {
+            Text(
+                text = body,
+                style = ChatType.body,
+                color = ChatColors.onSurface,
+                textAlign = textAlign,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/** The six tapbacks as a row of the drawn glyphs; the user's current one (if any)
+ *  shows bright so re-tapping it reads as "remove". */
+@Composable
+private fun ReactionPicker(selected: ReactionType?, onReact: (ReactionType) -> Unit) {
+    val haptics = LocalHapticFeedback.current
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ReactionType.entries.forEach { type ->
+            Box(
+                modifier = Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onReact(type)
+                },
+            ) {
+                TapbackGlyph(
+                    type = type,
+                    color = if (type == selected) ChatColors.onSurface else ChatColors.onSurfaceDim,
+                    size = 22.dp,
                 )
             }
         }

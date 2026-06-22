@@ -38,6 +38,40 @@ data class Attachment(
     val isImage: Boolean get() = mimeType?.startsWith("image/") == true
 }
 
+/**
+ * The six iMessage tapbacks. [apiValue] is the string both the `message/react`
+ * endpoint takes *and* the value the server reports in `associatedMessageType` —
+ * it transforms the raw iMessage code to a word (2000→`love`, 2003→`laugh`,
+ * 3000→`-love` for a removal). The visual mark for each is drawn/typeset in
+ * `ui/Tapbacks.kt` (heart/thumbs as vectors, HA/‼/? as Public Sans text).
+ */
+enum class ReactionType(val apiValue: String) {
+    LOVE("love"),
+    LIKE("like"),
+    DISLIKE("dislike"),
+    LAUGH("laugh"),
+    EMPHASIZE("emphasize"),
+    QUESTION("question");
+
+    companion object {
+        /** Maps a server `associatedMessageType` string (`love` or `-love`) to a
+         *  type, ignoring the add/remove sign. Null if it isn't a reaction (e.g.
+         *  `sticker`, or null/blank on a normal message). */
+        fun fromApiValue(raw: String?): ReactionType? {
+            if (raw.isNullOrBlank()) return null
+            val base = raw.removePrefix("-")
+            return entries.firstOrNull { it.apiValue == base }
+        }
+    }
+}
+
+/** A tapback folded onto its target message: who reacted and with what. */
+data class Reaction(
+    val type: ReactionType,
+    val fromMe: Boolean,
+    val sender: String?,      // reactor's handle address; null when from me
+)
+
 /** One message within a conversation. */
 data class ChatMessage(
     val guid: String,
@@ -46,8 +80,37 @@ data class ChatMessage(
     val fromMe: Boolean,
     val sender: String?,      // handle address; null when from me (shown in groups)
     val attachments: List<Attachment> = emptyList(),
+    // Set only on reaction messages: the message this tapback targets (raw, may be
+    // prefixed `p:0/` or `bp:`) and its `associatedMessageType` (the server's word
+    // form, e.g. `love`/`-love`). Such messages aren't shown as rows — the ViewModel
+    // folds them onto their target as [reactions].
+    val associatedMessageGuid: String? = null,
+    val associatedMessageType: String? = null,
+    // Tapbacks folded onto this (normal) message for display. Never serialized;
+    // populated by ChatViewModel.foldReactions from the reaction messages.
+    val reactions: List<Reaction> = emptyList(),
 ) {
     val images: List<Attachment> get() = attachments.filter { it.isImage }
+
+    /** This message is itself a tapback (folded onto its target, not shown alone). */
+    val isReaction: Boolean
+        get() = !associatedMessageGuid.isNullOrBlank() && reactionType != null
+
+    /** The tapback this message carries, if it is one. */
+    val reactionType: ReactionType? get() = ReactionType.fromApiValue(associatedMessageType)
+
+    /** Whether this tapback *removes* a reaction (server prefixes the word with `-`). */
+    val isReactionRemoval: Boolean get() = associatedMessageType?.startsWith("-") == true
+
+    /** The plain guid of the message this tapback targets, stripping iMessage's
+     *  `p:<n>/` (part) and `bp:` (body) prefixes. */
+    val reactionTargetGuid: String?
+        get() {
+            val raw = associatedMessageGuid ?: return null
+            raw.indexOf('/').let { if (it >= 0) return raw.substring(it + 1) }
+            if (raw.startsWith("bp:")) return raw.substring(3)
+            return raw
+        }
 
     /** The body line to render, or null when the text is just the attachment
      *  placeholder for image(s) we draw inline instead. */

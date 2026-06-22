@@ -28,6 +28,7 @@ data class UiState(
     val contacts: Contacts = Contacts(),       // address → name, from the server's address book
     val contactList: List<Contact> = emptyList(), // searchable recipients for a new message
     val composingNew: Boolean = false,         // the "New message" compose screen is open
+    val privateApi: Boolean = false,           // server's Private API live → tapbacks available
     val message: String? = null,               // transient status / error line
 )
 
@@ -52,7 +53,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (url != null && pw != null) BlueBubblesApi(url, pw) else null
     }
 
-    private val _state = MutableStateFlow(UiState(isConfigured = api != null))
+    private val _state = MutableStateFlow(
+        UiState(isConfigured = api != null, privateApi = Store.privateApi(application)),
+    )
     val state: StateFlow<UiState> = _state
 
     private var loadJob: Job? = null
@@ -66,8 +69,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     // Per-conversation message cache (session-lived). Reopening a thread shows the
     // cached messages instantly while a fresh fetch refreshes in the background —
-    // no "Loading…" flash. Snapshotted on close so live updates persist.
+    // no "Loading…" flash. Snapshotted on close so live updates persist. Holds the
+    // *raw* list (reaction messages included) so reopening re-folds correctly.
     private val messageCache = HashMap<String, List<ChatMessage>>()
+
+    // The open thread's raw messages — the single source for what's shown. State's
+    // `messages` is always foldReactions(openRaw); every open-thread mutation goes
+    // through updateOpenThread so tapbacks stay folded onto their targets.
+    private var openRaw: List<ChatMessage> = emptyList()
 
     init {
         observeSocket()
@@ -90,11 +99,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             Store.setBaseUrl(app, url)
             val base = Store.baseUrl(app) ?: return@launch
             val client = BlueBubblesApi(base, pw)
-            val ok = runCatching { client.validate() }.getOrDefault(false)
-            if (ok) {
+            val info = runCatching { client.serverInfo() }.getOrNull()
+            if (info?.reachable == true) {
                 Store.setPassword(app, pw)
+                Store.setPrivateApi(app, info.privateApiReady)
                 api = client
-                _state.update { it.copy(isConfigured = true, message = null) }
+                _state.update { it.copy(isConfigured = true, privateApi = info.privateApiReady, message = null) }
                 loadConversations()
                 startSocket()
             } else {
@@ -115,10 +125,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             Store.setBaseUrl(app, url)
             val base = Store.baseUrl(app) ?: return@launch
             val client = BlueBubblesApi(base, pw)
-            val ok = runCatching { client.validate() }.getOrDefault(false)
-            if (ok) {
+            val info = runCatching { client.serverInfo() }.getOrNull()
+            if (info?.reachable == true) {
                 api = client
-                _state.update { it.copy(message = null) }
+                Store.setPrivateApi(app, info.privateApiReady)
+                _state.update { it.copy(privateApi = info.privateApiReady, message = null) }
                 // Bounce the socket so it reconnects to the new host.
                 stopSocket()
                 startSocket()
@@ -144,6 +155,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(status = Status.Loading, message = null) }
         try {
             val convos = client.conversations().sortedByDescending { it.lastDate }
+            // Re-check Private API liveness so enabling/disabling it on the server
+            // (or the helper dropping) reflects without re-running setup.
+            val privateApi = runCatching { client.serverInfo() }.getOrNull()
+                ?.also { Store.setPrivateApi(app, it.privateApiReady) }
+                ?.privateApiReady ?: _state.value.privateApi
             if (!contactsLoaded) {
                 runCatching { client.contacts() }.onSuccess { raw ->
                     contacts = Contacts.from(raw)
@@ -164,6 +180,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     conversations = convos,
                     contacts = contacts,
                     contactList = contactList,
+                    privateApi = privateApi,
                     message = null,
                 )
             }
@@ -176,17 +193,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun open(conversation: Conversation) {
         val cached = messageCache[conversation.guid]
+        openRaw = cached ?: emptyList()
         _state.update {
-            it.copy(open = conversation, messages = cached ?: emptyList(), threadLoading = cached == null)
+            it.copy(
+                open = conversation,
+                messages = cached?.let(::foldReactions) ?: emptyList(),
+                threadLoading = cached == null,
+            )
         }
         threadJob?.cancel()
         threadJob = viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
             try {
-                val msgs = client.messages(conversation.guid).sortedBy { it.date }
+                val msgs = client.messages(conversation.guid) // raw — reactions included
                 messageCache[conversation.guid] = msgs
-                _state.update { s ->
-                    if (s.open?.guid == conversation.guid) s.copy(messages = msgs, threadLoading = false) else s
+                if (_state.value.open?.guid == conversation.guid) {
+                    openRaw = msgs
+                    _state.update { it.copy(messages = foldReactions(msgs), threadLoading = false) }
                 }
             } catch (t: Throwable) {
                 _state.update { if (it.open?.guid == conversation.guid) it.copy(threadLoading = false) else it }
@@ -196,10 +219,49 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun closeThread() {
-        // Snapshot what's on screen (incl. live updates) so reopening is instant.
-        _state.value.open?.let { messageCache[it.guid] = _state.value.messages }
+        // Snapshot the raw list (incl. live updates) so reopening is instant.
+        _state.value.open?.let { messageCache[it.guid] = openRaw }
+        openRaw = emptyList()
         threadJob?.cancel()
         _state.update { it.copy(open = null, messages = emptyList(), threadLoading = false) }
+    }
+
+    /**
+     * Applies [transform] to the open thread's raw messages and republishes the
+     * folded view — but only if [convoGuid] is still the open thread, so a late
+     * send/echo can't clobber a thread the user has since navigated away from.
+     */
+    private fun updateOpenThread(convoGuid: String, transform: (List<ChatMessage>) -> List<ChatMessage>) {
+        if (_state.value.open?.guid != convoGuid) return
+        openRaw = transform(openRaw)
+        val folded = foldReactions(openRaw)
+        _state.update { it.copy(messages = folded) }
+    }
+
+    /**
+     * Folds tapback messages onto their targets: a reaction message isn't shown as
+     * its own row but attached to the message it targets as a [Reaction]. A reactor
+     * holds at most one tapback per message, so we key by (target, reactor) and let
+     * the latest add win — a removal (3000s) clears it. Output is sorted by date.
+     */
+    private fun foldReactions(raw: List<ChatMessage>): List<ChatMessage> {
+        if (raw.none { it.isReaction }) return raw.sortedBy { it.date }
+        val active = LinkedHashMap<Pair<String, String>, Reaction?>()
+        for (r in raw.filter { it.isReaction }.sortedBy { it.date }) {
+            val target = r.reactionTargetGuid ?: continue
+            val type = r.reactionType ?: continue
+            val reactorKey = if (r.fromMe) "me" else (r.sender ?: "?")
+            active[target to reactorKey] = if (r.isReactionRemoval) null else Reaction(type, r.fromMe, r.sender)
+        }
+        val byTarget = HashMap<String, MutableList<Reaction>>()
+        for ((key, reaction) in active) {
+            if (reaction != null) byTarget.getOrPut(key.first) { mutableListOf() }.add(reaction)
+        }
+        return raw.asSequence()
+            .filterNot { it.isReaction }
+            .map { m -> byTarget[m.guid]?.let { m.copy(reactions = it) } ?: m }
+            .sortedBy { it.date }
+            .toList()
     }
 
     // ---- Sending ----------------------------------------------------------
@@ -212,23 +274,62 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // server's echo (real guid) so the socket's new-message dedupes cleanly.
         val tempGuid = "temp-${System.currentTimeMillis()}-${(0..99999).random()}"
         val optimistic = ChatMessage(tempGuid, body, System.currentTimeMillis(), fromMe = true, sender = null)
-        _state.update { it.copy(messages = (it.messages + optimistic).sortedBy { m -> m.date }, message = null) }
+        updateOpenThread(convo.guid) { it + optimistic }
+        _state.update { it.copy(message = null) }
         viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
             try {
                 val sent = client.send(convo.guid, body, tempGuid)
-                _state.update { s ->
-                    val replaced = s.messages
-                        .map { if (it.guid == tempGuid) sent else it }
-                        .distinctBy { it.guid }
-                        .sortedBy { m -> m.date }
-                    s.copy(messages = replaced)
+                updateOpenThread(convo.guid) { list ->
+                    list.map { if (it.guid == tempGuid) sent else it }.distinctBy { it.guid }
                 }
                 bumpConversation(convo.guid, sent.text, sent.date, fromMe = true)
             } catch (t: Throwable) {
-                _state.update { s ->
-                    s.copy(messages = s.messages.filterNot { it.guid == tempGuid }, message = "Couldn’t send")
+                updateOpenThread(convo.guid) { list -> list.filterNot { it.guid == tempGuid } }
+                _state.update { it.copy(message = "Couldn’t send") }
+            }
+        }
+    }
+
+    // ---- Tapbacks ---------------------------------------------------------
+
+    /**
+     * Sends a tapback onto [target] (or removes it, if [target] already carries
+     * mine of [type] — long-pressing the same reaction toggles it off). Mirrors
+     * [sendMessage]: an optimistic reaction message is folded in immediately, then
+     * reconciled with the server's echo. Gated on [UiState.privateApi]; can't react
+     * to a not-yet-acked optimistic message (no real guid to target).
+     */
+    fun sendReaction(target: ChatMessage, type: ReactionType) {
+        val convo = _state.value.open ?: return
+        if (!_state.value.privateApi) return
+        if (target.guid.startsWith("temp-")) {
+            _state.update { it.copy(message = "Still sending — try again in a moment") }
+            return
+        }
+        val removing = target.reactions.firstOrNull { it.fromMe }?.type == type
+        val apiValue = if (removing) "-${type.apiValue}" else type.apiValue
+        val tempGuid = "temp-react-${System.currentTimeMillis()}-${(0..99999).random()}"
+        val optimistic = ChatMessage(
+            guid = tempGuid,
+            text = "",
+            date = System.currentTimeMillis(),
+            fromMe = true,
+            sender = null,
+            associatedMessageGuid = target.guid,
+            associatedMessageType = apiValue, // "love" or "-love"
+        )
+        updateOpenThread(convo.guid) { it + optimistic }
+        viewModelScope.launch(Dispatchers.IO) {
+            val client = api ?: return@launch
+            try {
+                val sent = client.react(convo.guid, target.guid, apiValue)
+                updateOpenThread(convo.guid) { list ->
+                    list.map { if (it.guid == tempGuid) sent else it }.distinctBy { it.guid }
                 }
+            } catch (t: Throwable) {
+                updateOpenThread(convo.guid) { list -> list.filterNot { it.guid == tempGuid } }
+                _state.update { it.copy(message = "Couldn’t react") }
             }
         }
     }
@@ -271,21 +372,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 sender = null,
                 attachments = listOf(Attachment(tempGuid, mime, name, width = 0, height = 0)),
             )
-            _state.update { it.copy(messages = (it.messages + optimistic).sortedBy { m -> m.date }, message = null) }
+            updateOpenThread(convo.guid) { it + optimistic }
+            _state.update { it.copy(message = null) }
             try {
                 val sent = client.sendAttachment(convo.guid, bytes, name, mime, tempGuid)
-                _state.update { s ->
-                    val replaced = s.messages
-                        .map { if (it.guid == tempGuid) sent else it }
-                        .distinctBy { it.guid }
-                        .sortedBy { m -> m.date }
-                    s.copy(messages = replaced)
+                updateOpenThread(convo.guid) { list ->
+                    list.map { if (it.guid == tempGuid) sent else it }.distinctBy { it.guid }
                 }
                 bumpConversation(convo.guid, sent.text, sent.date, fromMe = true)
             } catch (t: Throwable) {
-                _state.update { s ->
-                    s.copy(messages = s.messages.filterNot { it.guid == tempGuid }, message = "Couldn’t send image")
-                }
+                updateOpenThread(convo.guid) { list -> list.filterNot { it.guid == tempGuid } }
+                _state.update { it.copy(message = "Couldn’t send image") }
             }
         }
     }
@@ -414,22 +511,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     c
                 }
             }.sortedByDescending { it.lastDate }
-            val messages = if (s.open?.guid == incoming.chatGuid) {
-                mergeMessage(s.messages, incoming.message)
-            } else {
-                s.messages
-            }
-            s.copy(conversations = convos, messages = messages)
+            s.copy(conversations = convos)
         }
+        // Fold the message into the open thread's raw list (a tapback lands on its
+        // target; a normal message appends). foldReactions re-runs in updateOpenThread.
+        updateOpenThread(incoming.chatGuid) { mergeRaw(it, incoming.message) }
         // A message for a chat not currently in the list (e.g. a brand-new
         // conversation) — pull the list again so it appears with full metadata.
         if (!known) refresh()
     }
 
-    private fun mergeMessage(list: List<ChatMessage>, m: ChatMessage): List<ChatMessage> {
+    private fun mergeRaw(list: List<ChatMessage>, m: ChatMessage): List<ChatMessage> {
         val idx = list.indexOfFirst { it.guid == m.guid }
-        val merged = if (idx >= 0) list.toMutableList().also { it[idx] = m } else list + m
-        return merged.sortedBy { it.date }
+        return if (idx >= 0) list.toMutableList().also { it[idx] = m } else list + m
     }
 
     private fun bumpConversation(guid: String, text: String, date: Long, fromMe: Boolean) {

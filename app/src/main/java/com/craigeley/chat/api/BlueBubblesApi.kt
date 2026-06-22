@@ -18,6 +18,14 @@ class ApiException(val code: Int, message: String) : IOException(message) {
 }
 
 /**
+ * What `GET /server/info` tells us. [reachable] is the password/connectivity check
+ * setup relies on; [privateApiReady] is true only when the server has the Private
+ * API enabled *and* the Messages helper is actually connected — the gate for
+ * offering tapbacks (sending needs both; the SIP/helper setup is in the README).
+ */
+data class ServerInfo(val reachable: Boolean, val privateApiReady: Boolean)
+
+/**
  * Minimal BlueBubbles Server REST client — plain [HttpURLConnection] + `org.json`,
  * no networking dependency. Auth is the server password passed as
  * the `password` query param on every call. The base URL is the user-configured
@@ -32,6 +40,20 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
 
     /** `GET /api/v1/server/info` — used to validate the password on setup. */
     fun validate(): Boolean = request("GET", "/api/v1/server/info", null).first in 200..299
+
+    /**
+     * `GET /api/v1/server/info` — like [validate] but also reads whether the Private
+     * API is live (`private_api` && `helper_connected`), so the app can offer
+     * tapbacks only when the server can actually send them.
+     */
+    fun serverInfo(): ServerInfo {
+        val (code, text) = request("GET", "/api/v1/server/info", null)
+        if (code !in 200..299) return ServerInfo(reachable = false, privateApiReady = false)
+        val data = runCatching { JSONObject(text).optJSONObject("data") }.getOrNull()
+        val privateApi = data?.optBoolean("private_api", false) == true
+        val helper = data?.optBoolean("helper_connected", false) == true
+        return ServerInfo(reachable = true, privateApiReady = privateApi && helper)
+    }
 
     /**
      * The conversation list, in true most-recent-activity order.
@@ -102,6 +124,31 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         val data = runCatching { JSONObject(resp).optJSONObject("data") }.getOrNull()
         return data?.let { parseMessage(it) }
             ?: ChatMessage(tempGuid, text, System.currentTimeMillis(), fromMe = true, sender = null)
+    }
+
+    /**
+     * `POST /api/v1/message/react` — sends a tapback onto [selectedMessageGuid].
+     * Private-API only (gated in the UI on [serverInfo]); [reaction] is a
+     * [ReactionType.apiValue], prefixed `-` to remove. [partIndex] is 0 for a
+     * normal single-part message. Returns the created reaction message (real guid)
+     * parsed from the response, so the ViewModel can reconcile its optimistic echo.
+     */
+    fun react(
+        chatGuid: String,
+        selectedMessageGuid: String,
+        reaction: String,
+        partIndex: Int = 0,
+    ): ChatMessage {
+        val body = JSONObject()
+            .put("chatGuid", chatGuid)
+            .put("selectedMessageGuid", selectedMessageGuid)
+            .put("reaction", reaction)
+            .put("partIndex", partIndex)
+        val (code, resp) = request("POST", "/api/v1/message/react", body)
+        if (code !in 200..299) throw ApiException(code, "react failed ($code)")
+        val data = runCatching { JSONObject(resp).optJSONObject("data") }.getOrNull()
+        return data?.let { parseMessage(it) }
+            ?: throw ApiException(code, "react: no message returned")
     }
 
     /**
@@ -329,6 +376,11 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                 fromMe = o.optBoolean("isFromMe", false),
                 sender = handle?.optString("address")?.takeIf { it.isNotBlank() },
                 attachments = parseAttachments(o),
+                // Present only on tapbacks; the ViewModel folds such messages onto
+                // their target rather than rendering them. The server reports the
+                // type as a word (`love`/`-love`), not the raw iMessage int.
+                associatedMessageGuid = o.optString("associatedMessageGuid").takeIf { it.isNotBlank() },
+                associatedMessageType = o.optString("associatedMessageType").takeIf { it.isNotBlank() && it != "null" },
             )
         }
 

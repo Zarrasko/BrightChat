@@ -17,6 +17,7 @@ object Store {
     private const val KEY_PASSWORD = "bb_password" // encrypted
     private const val KEY_CONTACTS = "contacts"    // normalized key → name, JSON
     private const val KEY_BASE_URL = "base_url"    // the server URL, set at setup
+    private const val KEY_PRIVATE_API = "private_api" // server's Private API live?
 
     /** The configured BlueBubbles Server URL, or null if setup hasn't run yet. */
     fun baseUrl(context: Context): String? =
@@ -66,6 +67,14 @@ object Store {
             obj.keys().forEach { map[it] = obj.getString(it) }
             Contacts.fromMap(map)
         }.getOrDefault(Contacts())
+    }
+
+    /** Whether the server's Private API is live (tapbacks available). Cached from
+     *  `server/info` so the UI knows on launch before the first refresh lands. */
+    fun privateApi(context: Context): Boolean = prefs(context).getBoolean(KEY_PRIVATE_API, false)
+
+    fun setPrivateApi(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_PRIVATE_API, value).apply()
     }
 
     /** Sign out: wipe the stored password. */
