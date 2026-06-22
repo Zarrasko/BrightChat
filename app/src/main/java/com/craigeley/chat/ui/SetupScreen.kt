@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -41,16 +43,21 @@ fun SetupScreen(viewModel: ChatViewModel) {
     var password by remember { mutableStateOf("") }
     val canSave = serverUrl.isNotBlank() && password.isNotBlank()
 
+    // Scrollable so the focused password field scrolls clear of the keyboard —
+    // on the Light Phone's short screen the IME otherwise covers it (BasicTextField
+    // brings itself into view inside a verticalScroll; weighted spacers can't live
+    // in one, so spacing here is fixed).
     Column(
         modifier = Modifier
             .fillMaxSize()
             .imePadding()
+            .verticalScroll(rememberScrollState())
             .padding(ChatDimens.screenPadding),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(72.dp))
         Text(text = "chat", style = ChatType.title, color = ChatColors.onSurface)
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(56.dp))
         Text(
             text = "Connect your server",
             style = ChatType.body,
@@ -117,13 +124,13 @@ fun SetupScreen(viewModel: ChatViewModel) {
             )
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(56.dp))
         HapticText(
             text = "Save",
             style = ChatType.button,
             color = if (!canSave) ChatColors.onSurfaceDisabled else ChatColors.onSurface,
             onClick = { if (canSave) viewModel.saveSetup(serverUrl, password) },
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }
