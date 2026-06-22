@@ -117,6 +117,24 @@ data class ChatMessage(
     val bodyText: String?
         get() = if (text == ATTACHMENT_PLACEHOLDER && images.isNotEmpty()) null else text.ifEmpty { null }
 
+    /**
+     * One-line summary for the conversation list: the message text when there is
+     * any, or — for an attachment-only message — a bracketed description of it
+     * (`[Photo]`, `[3 Photos]`, `[Attachment]`). The brackets mark it as a descriptor
+     * so it can't be mistaken for someone literally texting "photo". Empty only for a
+     * genuinely empty message.
+     */
+    val previewText: String
+        get() {
+            val t = if (text == ATTACHMENT_PLACEHOLDER) "" else text
+            if (t.isNotBlank()) return t
+            val imageCount = images.size
+            if (imageCount > 0) return if (imageCount == 1) "[Photo]" else "[$imageCount Photos]"
+            if (attachments.isNotEmpty()) return if (attachments.size == 1) "[Attachment]" else "[${attachments.size} Attachments]"
+            // Placeholder text but no parsed attachments (e.g. an optimistic fallback).
+            return if (text == ATTACHMENT_PLACEHOLDER) "[Attachment]" else ""
+        }
+
     companion object {
         /** Stand-in body for an attachment-only message (no real text). */
         const val ATTACHMENT_PLACEHOLDER = "[Attachment]"

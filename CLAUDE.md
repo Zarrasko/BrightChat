@@ -117,9 +117,13 @@ clears the password and returns to setup.
     `lastMessage`, so on this account (~2700 chats) a freshly-active chat can fall
     outside its first page and never appear, and the list shows stale ordering
     (this was the "stuck at 4 hours ago" bug). Instead we drive the list from one
-    `POST /message/query` DESC sweep (`with:[chats,chats.participants]`, the newest
-    ~1000 messages) and take the first message seen per chat — already in true
-    recency order, with each chat's metadata read off the embedded chat object.
+    `POST /message/query` DESC sweep (`with:[chats,chats.participants,attachment]`,
+    the newest ~1000 messages) and take the first message seen per chat — already in
+    true recency order, with each chat's metadata read off the embedded chat object.
+    (`attachment` is in the `with` so an attachment-only last message gets a real
+    preview via `ChatMessage.previewText` — `[Photo]` etc. — rather than a blank line;
+    without it the sweep can't tell text-less messages from empty ones, which was the
+    inconsistent-preview bug.)
     Trade-off: only chats active within the sweep window appear (the recent ones —
     what a messages list shows). **1:1 chats (style 45) return empty
     `participants`; the `chatIdentifier` is the other party's address, so we fall
@@ -184,7 +188,10 @@ clears the password and returns to setup.
   carries the shared `ATTACHMENT_PLACEHOLDER` (`[Attachment]`) constant; its
   `bodyText` returns null when the text is *only* that placeholder for image(s) we
   draw inline (so an image-only message shows just the image), and `images` is the
-  image subset. **Tapback fields:** `associatedMessageGuid`/`associatedMessageType`
+  image subset. `previewText` is the conversation-list one-liner: the text, or a
+  bracketed attachment summary (`[Photo]` / `[3 Photos]` / `[Attachment]`) when
+  there's none — bracketed so it can't be mistaken for literal "photo" text, and used
+  wherever `Conversation.lastText` is set so the preview is consistent. **Tapback fields:** `associatedMessageGuid`/`associatedMessageType`
   are set only on reaction messages (`isReaction`, `isReactionRemoval`,
   `reactionTargetGuid` strips iMessage's `p:<n>/`/`bp:` prefixes); `reactions:
   List<Reaction>` is populated by `foldReactions` for display. **Gotcha:** the

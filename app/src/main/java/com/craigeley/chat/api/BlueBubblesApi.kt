@@ -74,7 +74,10 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         val body = JSONObject()
             .put("limit", limit)
             .put("offset", 0)
-            .put("with", JSONArray().put("chats").put("chats.participants"))
+            // `attachment` so an attachment-only message gets a real list preview
+            // ("Photo" etc.) rather than a blank line; without it the sweep can't
+            // tell text-less messages apart from genuinely empty ones.
+            .put("with", JSONArray().put("chats").put("chats.participants").put("attachment"))
             .put("sort", "DESC")
         val (code, respText) = request("POST", "/api/v1/message/query", body)
         if (code !in 200..299) throw ApiException(code, "message/query failed ($code)")
@@ -83,9 +86,10 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         for (i in 0 until data.length()) {
             val m = data.getJSONObject(i)
             val chats = m.optJSONArray("chats") ?: continue
-            val lastText = messageText(m)
-            val lastDate = m.optLong("dateCreated", 0L)
-            val lastFromMe = m.optBoolean("isFromMe", false)
+            val lastMsg = parseMessage(m)
+            val lastText = lastMsg.previewText
+            val lastDate = lastMsg.date
+            val lastFromMe = lastMsg.fromMe
             for (j in 0 until chats.length()) {
                 val chat = chats.getJSONObject(j)
                 val guid = chat.optString("guid")

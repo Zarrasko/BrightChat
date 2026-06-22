@@ -285,7 +285,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 updateOpenThread(convo.guid) { list ->
                     list.map { if (it.guid == tempGuid) sent else it }.distinctBy { it.guid }
                 }
-                bumpConversation(convo.guid, sent.text, sent.date, fromMe = true)
+                bumpConversation(convo.guid, sent.previewText, sent.date, fromMe = true)
             } catch (t: Throwable) {
                 updateOpenThread(convo.guid) { list -> list.filterNot { it.guid == tempGuid } }
                 _state.update { it.copy(message = "Couldn’t send") }
@@ -381,7 +381,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 updateOpenThread(convo.guid) { list ->
                     list.map { if (it.guid == tempGuid) sent else it }.distinctBy { it.guid }
                 }
-                bumpConversation(convo.guid, sent.text, sent.date, fromMe = true)
+                bumpConversation(convo.guid, sent.previewText, sent.date, fromMe = true)
             } catch (t: Throwable) {
                 updateOpenThread(convo.guid) { list -> list.filterNot { it.guid == tempGuid } }
                 _state.update { it.copy(message = "Couldn’t send image") }
@@ -428,7 +428,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     displayName = "",
                     participants = listOf(handle),
                     isGroup = false,
-                    lastText = ChatMessage.ATTACHMENT_PLACEHOLDER,
+                    lastText = "[Photo]",
                     lastDate = System.currentTimeMillis(),
                     lastFromMe = true,
                 )
@@ -505,7 +505,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val convos = s.conversations.map { c ->
                 if (c.guid == incoming.chatGuid) {
                     c.copy(
-                        lastText = incoming.message.text,
+                        lastText = incoming.message.previewText,
                         lastDate = incoming.message.date,
                         lastFromMe = incoming.message.fromMe,
                     )
