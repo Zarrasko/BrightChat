@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.craigeley.chat.api.ApiException
 import com.craigeley.chat.api.BlueBubblesApi
 import com.craigeley.chat.api.Store
+import com.craigeley.chat.socket.AppForeground
 import com.craigeley.chat.socket.SocketBus
 import com.craigeley.chat.socket.SocketService
 import kotlinx.coroutines.Dispatchers
@@ -201,6 +202,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 threadLoading = cached == null,
             )
         }
+        markReadIfPrivate(conversation.guid)
         threadJob?.cancel()
         threadJob = viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
@@ -516,9 +518,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // Fold the message into the open thread's raw list (a tapback lands on its
         // target; a normal message appends). foldReactions re-runs in updateOpenThread.
         updateOpenThread(incoming.chatGuid) { mergeRaw(it, incoming.message) }
+        // If it's an incoming message in the thread you're looking at, mark the chat
+        // read so the unread clears on your other devices too.
+        if (!incoming.message.fromMe && _state.value.open?.guid == incoming.chatGuid && AppForeground.active) {
+            markReadIfPrivate(incoming.chatGuid)
+        }
         // A message for a chat not currently in the list (e.g. a brand-new
         // conversation) — pull the list again so it appears with full metadata.
         if (!known) refresh()
+    }
+
+    /** Marks [chatGuid] read on the server (best-effort, off-main), but only when
+     *  the Private API is live — it's the only path that can send a read receipt. */
+    private fun markReadIfPrivate(chatGuid: String) {
+        if (!_state.value.privateApi) return
+        val client = api ?: return
+        viewModelScope.launch(Dispatchers.IO) { runCatching { client.markRead(chatGuid) } }
     }
 
     private fun mergeRaw(list: List<ChatMessage>, m: ChatMessage): List<ChatMessage> {

@@ -106,9 +106,9 @@ other Android 14+ devices should work but are untested.
 - **Phase 2 (done):** sending + a Socket.IO foreground service for live delivery
   and notifications. The working OpenBubbles replacement.
 - **Phase 3 (in progress):** image attachments (send + receive), contact names in
-  notifications, and **tapbacks** — incoming reactions render compactly; long-press
-  a message to send your own (needs the optional Private API, above). Still to come:
-  read receipts, typing indicators, non-image attachments.
+  notifications, **tapbacks** (incoming render compactly; long-press a message to
+  send your own), and **marking threads read** — both need the optional Private API,
+  above. Still to come: typing indicators, non-image attachments.
 
 ## License
 

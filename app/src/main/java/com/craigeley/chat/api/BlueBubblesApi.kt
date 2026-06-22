@@ -152,6 +152,17 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
     }
 
     /**
+     * `POST /api/v1/chat/:guid/read` — marks the chat read (Private-API only).
+     * Clears its unread state, which iMessage syncs to the account's other devices,
+     * and sends a read receipt per the conversation's setting (so it just mirrors
+     * reading on another device). Idempotent; callers fire it best-effort.
+     */
+    fun markRead(chatGuid: String) {
+        val (code, _) = request("POST", "/api/v1/chat/${enc(chatGuid)}/read", null)
+        if (code !in 200..299) throw ApiException(code, "mark read failed ($code)")
+    }
+
+    /**
      * `POST /api/v1/message/attachment` — sends a file into a chat as multipart
      * form-data (the one call that isn't JSON, so it's built by hand rather than
      * via [request]). Like [send] we pass a `tempGuid` to correlate the echo and

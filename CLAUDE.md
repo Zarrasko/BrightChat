@@ -37,9 +37,11 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   from `server/info` (`private_api && helper_connected`) and only offers the picker
   then; *rendering* incoming reactions works regardless (they arrive as normal
   messages). See "The server" for enabling the Private API (SIP + Library Validation
-  off on the Mac). **Not yet done:** typing indicators and read-receipt *sending*
-  (also Private-API features); non-image attachment types (video/audio/vcard still
-  show `[Attachment]`).
+  off on the Mac). **Marking a thread read** is also wired (when the Private API is
+  live): opening a thread — and a live incoming message while it's foreground —
+  POSTs `chat/:guid/read`, which clears the unread on the account's other devices.
+  **Not yet done:** typing indicators (also a Private-API feature); non-image
+  attachment types (video/audio/vcard still show `[Attachment]`).
 
 Note: messaging yourself (note-to-self) legitimately shows each message twice —
 iMessage stores a sent *and* a received row (two GUIDs). Normal chats don't; the
@@ -93,7 +95,8 @@ clears the password and returns to setup.
   gate tapback *sending* on the Private API being live; `react(guid,selectedMsgGuid,
   reaction,partIndex)` → `POST /message/react` (Private-API only; `reaction` is a
   `ReactionType.apiValue`, prefix `-` to remove; returns the created reaction message
-  to reconcile its echo); `messages(guid)` → `GET /chat/:guid/message`
+  to reconcile its echo); `markRead(guid)` → `POST /chat/:guid/read` (Private-API
+  only; clears unread across the account's devices); `messages(guid)` → `GET /chat/:guid/message`
   (`with=handle,attachment`, `sort=DESC`, guid URL-encoded); `send(guid,text,tempGuid)`
   → `POST /message/text` (only `chatGuid`+`message` required; we pass a `tempGuid`
   to correlate the echo and `method:"apple-script"` since Private API is off, and
@@ -139,7 +142,10 @@ clears the password and returns to setup.
   you've navigated away from — so sends, the socket merge (`mergeRaw`), and
   `sendReaction` all re-fold. `sendReaction(target,type)` is optimistic + echo-
   reconciled like `sendMessage`, toggles off if you already hold that reaction, and
-  no-ops unless `state.privateApi` (the cached `server/info` capability). Keeps a
+  no-ops unless `state.privateApi` (the cached `server/info` capability).
+  `markReadIfPrivate(guid)` fires `markRead` best-effort (off-main, errors ignored)
+  when you open a thread and on a foreground incoming message, so reading here
+  clears the unread on your other devices — also gated on `state.privateApi`. Keeps a
   session-lived per-conversation `messageCache` (now the *raw* list) so reopening a
   thread is instant (cached shown immediately, fresh fetch refreshes in the
   background; snapshotted on `closeThread`). Starts/stops
