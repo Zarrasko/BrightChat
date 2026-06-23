@@ -357,6 +357,49 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Opens a non-image attachment: downloads it to a FileProvider-shared cache file,
+     * then hands off to an external app via `ACTION_VIEW`. Falls back to a share
+     * chooser, then a message if nothing on the (minimal) device can handle it.
+     */
+    fun openAttachment(attachment: Attachment) {
+        val client = api ?: return
+        _state.update { it.copy(message = "Downloading…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val dir = java.io.File(app.cacheDir, "shared").apply { mkdirs() }
+                val safe = (attachment.transferName ?: attachment.guid)
+                    .replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { attachment.guid }
+                val dest = java.io.File(dir, safe)
+                if (!dest.exists() || dest.length() == 0L) client.downloadAttachment(attachment.guid, dest)
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    app, "${app.packageName}.fileprovider", dest,
+                )
+                val mime = attachment.mimeType ?: "application/octet-stream"
+                _state.update { it.copy(message = null) }
+                val view = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, mime)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                try {
+                    app.startActivity(view)
+                } catch (e: android.content.ActivityNotFoundException) {
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = mime
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    val chooser = Intent.createChooser(send, "Open with")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    runCatching { app.startActivity(chooser) }
+                        .onFailure { _state.update { s -> s.copy(message = "No app can open this file") } }
+                }
+            } catch (t: Throwable) {
+                _state.update { it.copy(message = "Couldn’t download attachment") }
+            }
+        }
+    }
+
+    /**
      * Sends a picked image into the open thread. Mirrors [sendMessage]: it shows an
      * optimistic bubble immediately — the picked bytes are seeded into the image
      * cache under the temp guid so the normal loader renders them without a round
@@ -473,22 +516,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cancelNewMessage() = _state.update { it.copy(composingNew = false, message = null) }
 
-    /** Starts a fresh 1:1 chat with [address] by sending [text], then opens it. */
-    fun sendNewMessage(address: String, text: String) {
-        val addr = address.trim()
+    /**
+     * Starts a fresh chat with [addresses] by sending [text], then opens it. One
+     * address is a 1:1 (AppleScript); two or more form a group, which the server
+     * only creates over the Private API — so a group send is gated on
+     * `state.privateApi` (the picker also hides the option, this is the backstop).
+     * The group's guid is server-assigned, so we open on whatever `newChat` returns.
+     */
+    fun sendNewMessage(addresses: List<String>, text: String) {
+        val addrs = addresses.map { it.trim() }.filter { it.isNotEmpty() }
         val body = text.trim()
-        if (addr.isEmpty() || body.isEmpty()) return
+        if (addrs.isEmpty() || body.isEmpty()) return
+        val isGroup = addrs.size > 1
+        if (isGroup && !_state.value.privateApi) {
+            _state.update { it.copy(message = "Group messaging needs the server’s Private API") }
+            return
+        }
         _state.update { it.copy(composingNew = false, message = "Sending…") }
         viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
             try {
-                val guid = client.newChat(addr, body)
+                val guid = client.newChat(addrs, body)
                 messageCache.remove(guid)
                 val convo = Conversation(
                     guid = guid,
                     displayName = "",
-                    participants = listOf(addr),
-                    isGroup = false,
+                    participants = addrs,
+                    isGroup = isGroup,
                     lastText = body,
                     lastDate = System.currentTimeMillis(),
                     lastFromMe = true,

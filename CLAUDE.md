@@ -43,8 +43,11 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   **Typing indicators** are wired both ways (Private-API, 1:1 only — the server
   filters group typing): the open thread shows an animated `•••` when the other
   party types, and typing in the compose bar POSTs/DELETEs `chat/:guid/typing`.
-  **Not yet done:** non-image attachment types (video/audio/vcard still show
-  `[Attachment]`).
+  **Non-image attachments** (video/audio/vcard/pdf) render as a tappable
+  `Type · filename` row; tapping downloads the file and hands off to an external app
+  (`ACTION_VIEW` → share chooser → "can't open" line) via a `FileProvider`. (This is
+  the last of the Phase 3 list; only inline *playback* of video/audio and history
+  pagination remain unbuilt.)
 
 Note: messaging yourself (note-to-self) legitimately shows each message twice —
 iMessage stores a sent *and* a received row (two GUIDs). Normal chats don't; the
@@ -194,7 +197,8 @@ clears the password and returns to setup.
     the service only notifies for messages the user isn't already looking at.
 - **Models** (`Models.kt`) — `Conversation`; `ChatMessage` (guid, text, date,
   fromMe, sender, `attachments: List<Attachment>`); `Attachment` (guid, mimeType,
-  transferName, width, height — `isImage` gates inline rendering). `ChatMessage`
+  transferName, width, height — `isImage` gates inline rendering; `typeLabel`/
+  `fileLabel` drive the non-image file row). `ChatMessage`
   carries the shared `ATTACHMENT_PLACEHOLDER` (`[Attachment]`) constant; its
   `bodyText` returns null when the text is *only* that placeholder for image(s) we
   draw inline (so an image-only message shows just the image), and `images` is the
@@ -224,7 +228,10 @@ clears the password and returns to setup.
   seeds the cache from a just-picked image so an optimistic outgoing message renders
   through the same path with no round trip. The ViewModel exposes `loadImage`;
   `ThreadScreen`'s `AttachmentImage` loads it lazily via `produceState`, showing
-  `[Image]` until ready. Sending: `ViewModel.sendImage(uri)` reads the picked bytes
+  `[Image]` until ready. **Non-image files** don't use this loader: they render as a
+  tappable `AttachmentFile` row (`Type · filename`), and `ViewModel.openAttachment`
+  downloads the raw bytes to `cacheDir/shared/` and opens them through the
+  `FileProvider` + `ACTION_VIEW`/share intent — no decoding, just a handoff. Sending: `ViewModel.sendImage(uri)` reads the picked bytes
   (the compose bar's "+" launches the system photo picker — no permission), seeds
   the cache, posts an optimistic bubble, then reconciles with the server echo. For a
   brand-new chat there's no guid yet, so `sendNewImage(address, uri)` constructs the

@@ -26,7 +26,8 @@ data class Conversation(
 /**
  * One file riding along with a message. [guid] keys the download endpoint; the
  * raw bytes are fetched + cached lazily (see [com.craigeley.chat.Attachments]).
- * Only images render inline so far — anything else shows the placeholder text.
+ * Images render inline; other files render as a tappable [fileLabel] row that opens
+ * them externally (see `ChatViewModel.openAttachment`).
  */
 data class Attachment(
     val guid: String,
@@ -36,6 +37,22 @@ data class Attachment(
     val height: Int,
 ) {
     val isImage: Boolean get() = mimeType?.startsWith("image/") == true
+
+    /** A short human type for a non-image file, e.g. "Video", "Audio", "Contact". */
+    val typeLabel: String
+        get() = when {
+            mimeType == null -> "File"
+            mimeType.startsWith("video/") -> "Video"
+            mimeType.startsWith("audio/") -> "Audio"
+            mimeType.contains("vcard") -> "Contact"
+            mimeType == "application/pdf" -> "PDF"
+            mimeType.startsWith("image/") -> "Photo"
+            else -> "File"
+        }
+
+    /** The row shown for a non-image file in the thread: type plus the filename. */
+    val fileLabel: String
+        get() = transferName?.takeIf { it.isNotBlank() }?.let { "$typeLabel · $it" } ?: typeLabel
 }
 
 /**
@@ -92,6 +109,9 @@ data class ChatMessage(
 ) {
     val images: List<Attachment> get() = attachments.filter { it.isImage }
 
+    /** Non-image attachments — rendered as tappable file rows, not inline. */
+    val files: List<Attachment> get() = attachments.filter { !it.isImage }
+
     /** This message is itself a tapback (folded onto its target, not shown alone). */
     val isReaction: Boolean
         get() = !associatedMessageGuid.isNullOrBlank() && reactionType != null
@@ -113,9 +133,10 @@ data class ChatMessage(
         }
 
     /** The body line to render, or null when the text is just the attachment
-     *  placeholder for image(s) we draw inline instead. */
+     *  placeholder for attachment(s) we render ourselves (images inline, other
+     *  files as their own tappable rows). */
     val bodyText: String?
-        get() = if (text == ATTACHMENT_PLACEHOLDER && images.isNotEmpty()) null else text.ifEmpty { null }
+        get() = if (text == ATTACHMENT_PLACEHOLDER && attachments.isNotEmpty()) null else text.ifEmpty { null }
 
     /**
      * One-line summary for the conversation list: the message text when there is
@@ -130,7 +151,10 @@ data class ChatMessage(
             if (t.isNotBlank()) return t
             val imageCount = images.size
             if (imageCount > 0) return if (imageCount == 1) "[Photo]" else "[$imageCount Photos]"
-            if (attachments.isNotEmpty()) return if (attachments.size == 1) "[Attachment]" else "[${attachments.size} Attachments]"
+            // No images here, so any attachments are non-image files; a single one
+            // gets its type ("[Video]"), several get a count.
+            if (attachments.size == 1) return "[${attachments.first().typeLabel}]"
+            if (attachments.isNotEmpty()) return "[${attachments.size} Attachments]"
             // Placeholder text but no parsed attachments (e.g. an optimistic fallback).
             return if (text == ATTACHMENT_PLACEHOLDER) "[Attachment]" else ""
         }

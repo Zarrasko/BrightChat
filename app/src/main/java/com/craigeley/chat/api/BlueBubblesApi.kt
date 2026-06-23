@@ -266,15 +266,22 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
     /**
      * `POST /api/v1/chat/new` — starts a new chat by sending its first message.
      * macOS Big Sur+ requires a message (AppleScript can't create an empty chat),
-     * so this both creates the chat and sends. Returns the new chat's guid. 1:1
-     * works over AppleScript; group creation would need the Private API.
+     * so this both creates the chat and sends. Returns the new chat's guid.
+     *
+     * A single address goes over **AppleScript** (rock-solid, no Private API
+     * needed). Two or more addresses form a **group**, which AppleScript can't do
+     * reliably on modern macOS — that path requires `method:"private-api"`, so the
+     * caller must gate group creation on the server's Private API being live. The
+     * server assigns the group its own guid (`any;+;<hex>`, style 43), unguessable
+     * client-side, so callers must use the returned guid rather than construct one.
      */
-    fun newChat(address: String, text: String, service: String = "iMessage"): String {
+    fun newChat(addresses: List<String>, text: String, service: String = "iMessage"): String {
+        val isGroup = addresses.size > 1
         val body = JSONObject()
-            .put("addresses", JSONArray().put(address))
+            .put("addresses", JSONArray().apply { addresses.forEach { put(it) } })
             .put("message", text)
             .put("service", service)
-            .put("method", "apple-script")
+            .put("method", if (isGroup) "private-api" else "apple-script")
         val (code, resp) = request("POST", "/api/v1/chat/new", body)
         if (code !in 200..299) throw ApiException(code, "new chat failed ($code)")
         val guid = JSONObject(resp).optJSONObject("data")?.optString("guid")

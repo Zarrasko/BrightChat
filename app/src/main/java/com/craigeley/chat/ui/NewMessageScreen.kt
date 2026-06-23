@@ -5,6 +5,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicTextField
@@ -39,23 +42,37 @@ import com.craigeley.chat.ui.theme.ChatType
 
 /**
  * Start a new conversation: type into "To" to search the address book (by name,
- * number, or email) or enter a raw address, pick a recipient, then type the first
- * message. Sending creates the chat (`chat/new`) and drops into the thread.
+ * number, or email) or enter a raw address, then tap to add a recipient. Each
+ * chosen recipient becomes a removable chip; one recipient is a 1:1, two or more
+ * a group (group sending is gated on the server's Private API — see the ViewModel).
+ * Type the first message and send; that creates the chat (`chat/new`) and drops
+ * into the thread. The photo picker is offered for 1:1 only (the group create path
+ * can't take a constructed guid for the attachment).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun NewMessageScreen(viewModel: ChatViewModel) {
     val state by viewModel.state.collectAsState()
     var query by remember { mutableStateOf("") }
-    var recipient by remember { mutableStateOf<Contact?>(null) }
+    var recipients by remember { mutableStateOf<List<Contact>>(emptyList()) }
     val focus = remember { FocusRequester() }
 
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
 
-    // Hoisted to the top level (not the recipient-chosen branch) so the launcher
-    // isn't created conditionally; the lambda reads the current recipient.
+    fun addRecipient(contact: Contact) {
+        if (recipients.none { it.address.equals(contact.address, ignoreCase = true) }) {
+            recipients = recipients + contact
+        }
+        query = ""
+        runCatching { focus.requestFocus() }
+    }
+
+    // Hoisted to the top level (not a conditional branch) so the launcher isn't
+    // created conditionally; the lambda reads the current recipients and only
+    // sends when it's a 1:1 (the group create path can't take a constructed guid).
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        val r = recipient
-        if (uri != null && r != null) viewModel.sendNewImage(r.address, uri)
+        val only = recipients.singleOrNull()
+        if (uri != null && only != null) viewModel.sendNewImage(only.address, uri)
     }
 
     Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 20.dp)) {
@@ -75,15 +92,31 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
             Spacer(modifier = Modifier.width(24.dp))
         }
 
-        if (recipient == null) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(text = "To", style = ChatType.body, color = ChatColors.onSurfaceDim)
-                Spacer(modifier = Modifier.width(16.dp))
-                Box(modifier = Modifier.weight(1f)) {
-                    if (query.isEmpty()) {
+        // "To" line: chosen recipients as removable chips, then an inline field to
+        // add more. FlowRow lets chips wrap and the field flow after them, native-style.
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text = "To", style = ChatType.body, color = ChatColors.onSurfaceDim)
+            Spacer(modifier = Modifier.width(16.dp))
+            FlowRow(modifier = Modifier.weight(1f)) {
+                recipients.forEach { contact ->
+                    HapticText(
+                        text = "${contact.name} ×",
+                        style = ChatType.body,
+                        color = ChatColors.onSurfaceVariant,
+                        maxLines = 1,
+                        modifier = Modifier.padding(end = 12.dp),
+                        onClick = {
+                            recipients = recipients.filterNot {
+                                it.address.equals(contact.address, ignoreCase = true)
+                            }
+                        },
+                    )
+                }
+                Box(modifier = Modifier.widthIn(min = 120.dp)) {
+                    if (query.isEmpty() && recipients.isEmpty()) {
                         Text(
                             text = "Name, number, or email",
                             style = ChatType.body,
@@ -100,17 +133,15 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
                     )
                 }
             }
-            HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
+        }
+        HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
 
-            val q = query.trim()
+        val q = query.trim()
+        if (q.isNotEmpty()) {
             val matches = remember(q, state.contactList) {
-                if (q.isEmpty()) {
-                    emptyList()
-                } else {
-                    state.contactList
-                        .filter { it.name.contains(q, true) || it.address.contains(q, true) }
-                        .take(40)
-                }
+                state.contactList
+                    .filter { it.name.contains(q, true) || it.address.contains(q, true) }
+                    .take(40)
             }
             LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 items(matches, key = { it.address }) { contact ->
@@ -122,7 +153,7 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
                             textAlign = TextAlign.Start,
                             maxLines = 1,
                             modifier = Modifier.fillMaxWidth(),
-                            onClick = { recipient = contact },
+                            onClick = { addRecipient(contact) },
                         )
                         Text(
                             text = contact.address,
@@ -133,36 +164,31 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
                         )
                     }
                 }
-                // Let the user send to a raw number/email they typed.
+                // Let the user add a raw number/email they typed.
                 if (q.length >= 3 && matches.none { it.address.equals(q, ignoreCase = true) }) {
                     item {
                         HapticText(
-                            text = "Send to “$q”",
+                            text = "Add “$q”",
                             style = ChatType.body,
                             color = ChatColors.onSurfaceVariant,
                             textAlign = TextAlign.Start,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                            onClick = { recipient = Contact(q, q) },
+                            onClick = { addRecipient(Contact(q, q)) },
                         )
                     }
                 }
             }
         } else {
-            val r = recipient!!
-            HapticText(
-                text = "To: ${r.name}",
-                style = ChatType.body,
-                color = ChatColors.onSurface,
-                textAlign = TextAlign.Start,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                onClick = { recipient = null }, // tap to pick someone else
-            )
-            HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
             Spacer(modifier = Modifier.weight(1f))
+        }
+
+        if (recipients.isNotEmpty()) {
             ComposeBar(
-                onSend = { viewModel.sendNewMessage(r.address, it) },
-                onPickImage = {
-                    pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                onSend = { viewModel.sendNewMessage(recipients.map { it.address }, it) },
+                onPickImage = if (recipients.size == 1) {
+                    { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+                } else {
+                    null
                 },
             )
         }

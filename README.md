@@ -108,8 +108,9 @@ other Android 14+ devices should work but are untested.
 - **Phase 3 (in progress):** image attachments (send + receive), contact names in
   notifications, **tapbacks** (incoming render compactly; long-press a message to
   send your own), **marking threads read**, and **typing indicators** (send +
-  receive) — the last three need the optional Private API, above. Still to come:
-  non-image attachments.
+  receive) — the last three need the optional Private API, above. Non-image
+  attachments (video/voice/contact/PDF) show as a tappable row that opens in another
+  app. Still to come: inline video/audio playback.
 
 ## License
 
