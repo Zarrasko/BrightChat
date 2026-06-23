@@ -516,22 +516,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cancelNewMessage() = _state.update { it.copy(composingNew = false, message = null) }
 
-    /** Starts a fresh 1:1 chat with [address] by sending [text], then opens it. */
-    fun sendNewMessage(address: String, text: String) {
-        val addr = address.trim()
+    /**
+     * Starts a fresh chat with [addresses] by sending [text], then opens it. One
+     * address is a 1:1 (AppleScript); two or more form a group, which the server
+     * only creates over the Private API — so a group send is gated on
+     * `state.privateApi` (the picker also hides the option, this is the backstop).
+     * The group's guid is server-assigned, so we open on whatever `newChat` returns.
+     */
+    fun sendNewMessage(addresses: List<String>, text: String) {
+        val addrs = addresses.map { it.trim() }.filter { it.isNotEmpty() }
         val body = text.trim()
-        if (addr.isEmpty() || body.isEmpty()) return
+        if (addrs.isEmpty() || body.isEmpty()) return
+        val isGroup = addrs.size > 1
+        if (isGroup && !_state.value.privateApi) {
+            _state.update { it.copy(message = "Group messaging needs the server’s Private API") }
+            return
+        }
         _state.update { it.copy(composingNew = false, message = "Sending…") }
         viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
             try {
-                val guid = client.newChat(addr, body)
+                val guid = client.newChat(addrs, body)
                 messageCache.remove(guid)
                 val convo = Conversation(
                     guid = guid,
                     displayName = "",
-                    participants = listOf(addr),
-                    isGroup = false,
+                    participants = addrs,
+                    isGroup = isGroup,
                     lastText = body,
                     lastDate = System.currentTimeMillis(),
                     lastFromMe = true,
