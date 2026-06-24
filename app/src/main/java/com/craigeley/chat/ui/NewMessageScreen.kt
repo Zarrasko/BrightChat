@@ -115,7 +115,11 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
                         },
                     )
                 }
-                Box(modifier = Modifier.widthIn(min = 120.dp)) {
+                // Size to content (min width so it stays tappable) rather than
+                // fillMaxWidth — inside a FlowRow the latter demands the whole row,
+                // forcing the cursor onto its own line below the chips even when
+                // there's room beside them.
+                Box {
                     if (query.isEmpty() && recipients.isEmpty()) {
                         Text(
                             text = "Name, number, or email",
@@ -129,7 +133,7 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
                         singleLine = true,
                         textStyle = ChatType.body.copy(color = ChatColors.onSurface),
                         cursorBrush = SolidColor(ChatColors.onSurface),
-                        modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                        modifier = Modifier.widthIn(min = 120.dp).focusRequester(focus),
                     )
                 }
             }
