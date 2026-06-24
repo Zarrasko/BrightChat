@@ -48,6 +48,18 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   (`ACTION_VIEW` → share chooser → "can't open" line) via a `FileProvider`. (This is
   the last of the Phase 3 list; only inline *playback* of video/audio and history
   pagination remain unbuilt.)
+  **Links (done):** iMessage attaches a `*.pluginPayloadAttachment` rich-link
+  preview blob to every URL it sends; we can't render the preview and the URL is
+  already in the text, so these are dropped at parse time (`parseAttachments`) rather
+  than shown as junk file rows. URLs in a message body are linkified
+  (`ThreadScreen.linkify` → `LinkAnnotation.Url`) so they're tappable (underlined,
+  open in the browser).
+  **Forked group chats (done):** iMessage can split one group into sibling chat
+  rooms — same name, identical participants, different guid — with messages divided
+  across them by "era". BlueBubbles reports each room as its own chat, so the list
+  (keyed on chat guid) showed the group twice, and a room whose newest activity was a
+  tapback surfaced as its own "Loved …" thread. We collapse them: see
+  `BlueBubblesApi.conversations` + `groupIdentity` and `Conversation.guids` below.
 
 Note: messaging yourself (note-to-self) legitimately shows each message twice —
 iMessage stores a sent *and* a received row (two GUIDs). Normal chats don't; the
@@ -118,7 +130,11 @@ clears the password and returns to setup.
   requires the message inline; returns the new chat guid); `contacts()` → `GET /contact`
   flattened to (address,name) pairs. Message parsing lives in the **companion**
   (`parseMessage`, `messageText`, `messageEvent`) so the socket service decodes
-  `new-message`/`updated-message` payloads with the same logic. `ApiException.isAuthError`
+  `new-message`/`updated-message` payloads with the same logic. `parseAttachments`
+  drops `*.pluginPayloadAttachment` rich-link blobs (iMessage's URL previews — not
+  real files). `messageText` guards `isNull("text")` because org.json's `optString`
+  returns the literal string `"null"` for an explicit JSON null (a text-less message
+  would otherwise render the word "null"). `ApiException.isAuthError`
   flags 401/403. Timestamps are epoch millis, carried through unchanged.
   - **`conversations()` deliberately does NOT use `chat/query`.** That endpoint
     sorts by an unreliable `lastmessage` cache and often returns an empty
@@ -136,6 +152,19 @@ clears the password and returns to setup.
     what a messages list shows). **1:1 chats (style 45) return empty
     `participants`; the `chatIdentifier` is the other party's address, so we fall
     back to it** — otherwise 1:1 rows render as "Unknown".
+    For the preview the sweep prefers the newest **non-reaction** message (so a row
+    reads "So you'll watch…" not a bare "Loved …"), while still bumping recency by
+    the newest message's date — a tapback bumps the thread like iMessage does.
+  - **Forked-group merge (`conversations` pass 2 + `groupIdentity`).** A group iMessage
+    has split into sibling rooms (same name + identical participants, different guid)
+    is collapsed into one `Conversation` whose `guids` lists every room (newest-active
+    first, so `guid` is the send target). Keyed by `groupIdentity` =
+    `displayName + sorted participants` — **groups only** (style 43); 1:1s and unforked
+    groups key by their own guid and never merge, so single-room chats are unchanged.
+    The thread (`ChatViewModel.open`) fetches each member room independently and
+    interleaves them (`foldReactions` sorts by date and folds tapbacks across rooms),
+    resilient to one dead room; socket routing, `bumpConversation`, and mark-read all
+    match by **guid membership** (`guid in conversation.guids`), not equality.
 - **`ChatViewModel`** — single source of truth (`UiState` as a `StateFlow`).
   Drives `Idle → Loading → Ready/Error`. Owns password setup, the conversation
   list, the open thread, sending, and the live feed. **Ordering is enforced
@@ -195,7 +224,9 @@ clears the password and returns to setup.
     `typing` (`TypingEvent`, from the socket's `typing-indicator` event).
   - **`AppForeground`** — a volatile flag set by `MainActivity.onStart/onStop` so
     the service only notifies for messages the user isn't already looking at.
-- **Models** (`Models.kt`) — `Conversation`; `ChatMessage` (guid, text, date,
+- **Models** (`Models.kt`) — `Conversation` (carries `guids: List<String>` — every
+  chat-room guid it spans, usually just `[guid]`, more for a forked group; `guid` is
+  the primary/send target); `ChatMessage` (guid, text, date,
   fromMe, sender, `attachments: List<Attachment>`); `Attachment` (guid, mimeType,
   transferName, width, height — `isImage` gates inline rendering; `typeLabel`/
   `fileLabel` drive the non-image file row). `ChatMessage`
@@ -243,7 +274,8 @@ clears the password and returns to setup.
   (list, tap title → settings, Refresh, **New**), `NewMessageScreen` (a "To" field
   that searches the contact index by name/number/email or takes a raw address,
   then a compose bar; sends via `newChat` and opens the thread), `ThreadScreen`
-  (messages — text + inline images — and a compose bar with a back chevron),
+  (messages — text + inline images — and a compose bar with a back chevron; `linkify`
+  turns http/https URLs in a body into tappable `LinkAnnotation.Url` links),
   `SettingsScreen` (server host + refresh
   + sign out). `ComposeBar` is shared; its optional `onPickImage` adds a leading
   "+" that opens the photo picker — wired in both `ThreadScreen` (sends into the open
