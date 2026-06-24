@@ -4,14 +4,13 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Outer ring -->
+    <!-- Letter "C": a bold white arc (opening right) on the black adaptive
+         background, matching vandamd's single-letter app tiles. Two <180° arc
+         segments (centre 54,54, r=27) avoid large-arc flag ambiguity. -->
     <path
         android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="4"
+        android:strokeWidth="15"
+        android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M54,54m-24,0a24,24 0,1 1,48 0a24,24 0,1 1,-48 0" />
-    <!-- Play triangle -->
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M47,43 L67,54 L47,65 Z" />
+        android:pathData="M72,34 A27,27 0 0 0 27,54 A27,27 0 0 0 72,74" />
 </vector>
