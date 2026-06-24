@@ -136,8 +136,17 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
         }
         HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
 
+        val sendNew: (String) -> Unit = { viewModel.sendNewMessage(recipients.map { it.address }, it) }
+        val pickForCompose: (() -> Unit)? = if (recipients.size == 1) {
+            { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+        } else {
+            null
+        }
+
         val q = query.trim()
         if (q.isNotEmpty()) {
+            // Searching: contact matches fill the space; the compose bar (when a
+            // recipient is already chosen) sits below them with its own divider.
             val matches = remember(q, state.contactList) {
                 state.contactList
                     .filter { it.name.contains(q, true) || it.address.contains(q, true) }
@@ -178,19 +187,11 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
                     }
                 }
             }
-        } else {
-            Spacer(modifier = Modifier.weight(1f))
-        }
-
-        if (recipients.isNotEmpty()) {
-            ComposeBar(
-                onSend = { viewModel.sendNewMessage(recipients.map { it.address }, it) },
-                onPickImage = if (recipients.size == 1) {
-                    { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-                } else {
-                    null
-                },
-            )
+            if (recipients.isNotEmpty()) ComposeBar(onSend = sendNew, onPickImage = pickForCompose)
+        } else if (recipients.isNotEmpty()) {
+            // Composing: the message field hugs the "To" divider (no gap, no second
+            // line) so it's right under the recipient; the empty room falls below it.
+            ComposeBar(onSend = sendNew, onPickImage = pickForCompose, showTopDivider = false)
         }
 
         state.message?.let {

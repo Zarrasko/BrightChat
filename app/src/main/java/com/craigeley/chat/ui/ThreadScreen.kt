@@ -216,10 +216,13 @@ fun ComposeBar(
     onSend: (String) -> Unit,
     onPickImage: (() -> Unit)? = null,
     onTextChange: ((String) -> Unit)? = null,
+    showTopDivider: Boolean = true,
 ) {
     var input by remember { mutableStateOf("") }
     Column(modifier = Modifier.fillMaxWidth()) {
-        HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
+        // Suppressed when the caller already draws a divider right above us (the
+        // new-message screen's "To" line) — otherwise it reads as a double line.
+        if (showTopDivider) HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
         Row(
             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
             verticalAlignment = Alignment.Bottom,
