@@ -13,6 +13,11 @@ data class Conversation(
     val lastText: String,
     val lastDate: Long,             // epoch millis; 0 when unknown
     val lastFromMe: Boolean,
+    // Every chat-room guid this conversation spans. Usually just [guid]; for a group
+    // that iMessage has forked into sibling rooms with the same name + participants,
+    // it lists all of them (newest-active first, so [guid] is the send target). The
+    // thread fetches/merges messages across all of them. See BlueBubblesApi.conversations.
+    val guids: List<String> = listOf(guid),
 ) {
     /** Human title: an explicit group name if set, otherwise the participants. */
     val title: String

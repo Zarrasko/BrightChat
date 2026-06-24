@@ -209,12 +209,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 threadLoading = cached == null,
             )
         }
-        markReadIfPrivate(conversation.guid)
+        conversation.guids.forEach { markReadIfPrivate(it) }
         threadJob?.cancel()
         threadJob = viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
             try {
-                val msgs = client.messages(conversation.guid) // raw — reactions included
+                // Raw — reactions included; merged across a forked group's sibling
+                // rooms (usually just one guid) and re-sorted by date in foldReactions.
+                // Fetch each room independently so a single stale/dead room can't sink
+                // the whole thread; only surface an error if every room failed (so an
+                // auth failure still reaches handleError → sign-out).
+                val results = conversation.guids.map { g -> runCatching { client.messages(g) } }
+                val msgs = results.mapNotNull { it.getOrNull() }.flatten().distinctBy { it.guid }
+                if (msgs.isEmpty()) results.firstNotNullOfOrNull { it.exceptionOrNull() }?.let { throw it }
                 messageCache[conversation.guid] = msgs
                 if (_state.value.open?.guid == conversation.guid) {
                     openRaw = msgs
@@ -244,7 +251,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * send/echo can't clobber a thread the user has since navigated away from.
      */
     private fun updateOpenThread(convoGuid: String, transform: (List<ChatMessage>) -> List<ChatMessage>) {
-        if (_state.value.open?.guid != convoGuid) return
+        // Membership, not equality: an incoming message may arrive on any of a forked
+        // group's sibling rooms, all of which belong to the same open thread.
+        if (_state.value.open?.guids?.contains(convoGuid) != true) return
         openRaw = transform(openRaw)
         val folded = foldReactions(openRaw)
         _state.update { it.copy(messages = folded) }
@@ -626,15 +635,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun applyIncoming(incoming: IncomingMessage) {
-        val known = _state.value.conversations.any { it.guid == incoming.chatGuid }
+        val known = _state.value.conversations.any { incoming.chatGuid in it.guids }
         _state.update { s ->
             val convos = s.conversations.map { c ->
-                if (c.guid == incoming.chatGuid) {
-                    c.copy(
-                        lastText = incoming.message.previewText,
-                        lastDate = incoming.message.date,
-                        lastFromMe = incoming.message.fromMe,
-                    )
+                if (incoming.chatGuid in c.guids) {
+                    // A tapback bumps recency but keeps the real-message preview (it'd
+                    // otherwise read "Loved …"); a normal message updates both.
+                    if (incoming.message.isReaction) {
+                        c.copy(lastDate = incoming.message.date)
+                    } else {
+                        c.copy(
+                            lastText = incoming.message.previewText,
+                            lastDate = incoming.message.date,
+                            lastFromMe = incoming.message.fromMe,
+                        )
+                    }
                 } else {
                     c
                 }
@@ -646,7 +661,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         updateOpenThread(incoming.chatGuid) { mergeRaw(it, incoming.message) }
         // If it's an incoming message in the thread you're looking at, mark the chat
         // read so the unread clears on your other devices too.
-        if (!incoming.message.fromMe && _state.value.open?.guid == incoming.chatGuid && AppForeground.active) {
+        if (!incoming.message.fromMe && _state.value.open?.guids?.contains(incoming.chatGuid) == true && AppForeground.active) {
             markReadIfPrivate(incoming.chatGuid)
         }
         // A message for a chat not currently in the list (e.g. a brand-new
@@ -670,7 +685,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun bumpConversation(guid: String, text: String, date: Long, fromMe: Boolean) {
         _state.update { s ->
             val convos = s.conversations.map { c ->
-                if (c.guid == guid) c.copy(lastText = text, lastDate = date, lastFromMe = fromMe) else c
+                if (guid in c.guids) c.copy(lastText = text, lastDate = date, lastFromMe = fromMe) else c
             }.sortedByDescending { it.lastDate }
             s.copy(conversations = convos)
         }

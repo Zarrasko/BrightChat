@@ -69,6 +69,11 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
      *
      * Trade-off: only chats with activity inside the sweep window appear — i.e.
      * the recently-active ones, which is exactly what a messages list shows.
+     *
+     * A group that iMessage has forked into sibling rooms (same name + participants,
+     * different guid — messages split across rooms by "era") is collapsed into one
+     * conversation spanning all those guids, so it shows as a single row and its
+     * thread merges messages from every room (see [groupIdentity] + ChatViewModel.open).
      */
     fun conversations(limit: Int = 1000): List<Conversation> {
         val body = JSONObject()
@@ -82,22 +87,50 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         val (code, respText) = request("POST", "/api/v1/message/query", body)
         if (code !in 200..299) throw ApiException(code, "message/query failed ($code)")
         val data = JSONObject(respText).optJSONArray("data") ?: JSONArray()
+        // Pass 1: one row per chat room, newest activity first. The newest message
+        // sets recency (lastDate) — a tapback bumps the thread, like iMessage — but
+        // for the *preview text* we prefer the newest non-reaction message, so a row
+        // reads "So you'll watch…" rather than a bare "Loved …".
         val byGuid = LinkedHashMap<String, Conversation>()
+        val previewFinal = HashSet<String>() // guids whose preview is a real (non-reaction) message
         for (i in 0 until data.length()) {
             val m = data.getJSONObject(i)
             val chats = m.optJSONArray("chats") ?: continue
-            val lastMsg = parseMessage(m)
-            val lastText = lastMsg.previewText
-            val lastDate = lastMsg.date
-            val lastFromMe = lastMsg.fromMe
+            val msg = parseMessage(m)
             for (j in 0 until chats.length()) {
                 val chat = chats.getJSONObject(j)
                 val guid = chat.optString("guid")
-                if (guid.isBlank() || byGuid.containsKey(guid)) continue // newest seen wins
-                byGuid[guid] = chatToConversation(chat, guid, lastText, lastDate, lastFromMe)
+                if (guid.isBlank()) continue
+                val existing = byGuid[guid]
+                if (existing == null) {
+                    byGuid[guid] = chatToConversation(chat, guid, msg.previewText, msg.date, msg.fromMe)
+                    if (!msg.isReaction) previewFinal.add(guid)
+                } else if (!msg.isReaction && guid !in previewFinal) {
+                    // Older than the row's newest message, but the first real one —
+                    // upgrade the preview while keeping the newest date.
+                    byGuid[guid] = existing.copy(lastText = msg.previewText, lastFromMe = msg.fromMe)
+                    previewFinal.add(guid)
+                }
             }
         }
-        return byGuid.values.toList()
+        // Pass 2: collapse a group that iMessage has forked into sibling rooms (same
+        // name + identical participants, different guid) into a single conversation
+        // spanning all their guids. Keyed only for groups; 1:1 chats are left alone.
+        val merged = LinkedHashMap<String, Conversation>()
+        for ((guid, conv) in byGuid) {
+            val key = groupIdentity(conv) ?: guid // non-groups key by their own guid (never merge)
+            val existing = merged[key]
+            merged[key] = existing?.copy(guids = existing.guids + guid) ?: conv
+        }
+        return merged.values.toList()
+    }
+
+    /** A stable identity for a group, so forked sibling rooms collapse: its display
+     *  name plus its sorted participant set. Null for 1:1s / participant-less chats —
+     *  those never merge (keyed by their own guid). */
+    private fun groupIdentity(c: Conversation): String? {
+        if (!c.isGroup || c.participants.isEmpty()) return null
+        return "g|${c.displayName}|${c.participants.sorted().joinToString(",")}"
     }
 
     /** `GET /api/v1/chat/:guid/message` — messages in one conversation, newest first. */
@@ -396,7 +429,10 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
     companion object {
         /** Body text, falling back to an attachment placeholder when null/blank. */
         fun messageText(o: JSONObject): String {
-            val t = o.optString("text", "").trim()
+            // org.json's optString returns the literal "null" (not the fallback) for
+            // an explicit JSON null, so guard with isNull — otherwise a text-less
+            // message renders the word "null".
+            val t = if (o.isNull("text")) "" else o.optString("text", "").trim()
             if (t.isNotEmpty()) return t
             val attachments = o.optJSONArray("attachments")?.length() ?: 0
             return if (attachments > 0) ChatMessage.ATTACHMENT_PLACEHOLDER else ""
