@@ -44,7 +44,14 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -372,13 +379,36 @@ private fun MessageContent(
         }
         if (body != null) {
             Text(
-                text = body,
+                text = linkify(body),
                 style = ChatType.body,
                 color = ChatColors.onSurface,
                 textAlign = textAlign,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+    }
+}
+
+/** Matches bare http/https URLs in message text so they can be made tappable. */
+private val URL_REGEX = Regex("""https?://[^\s]+""")
+
+/**
+ * Turns any http/https URLs in [text] into tappable links (underlined, opened by
+ * the platform's default handler — a browser), leaving the rest as plain text.
+ * A message with no URL just renders verbatim.
+ */
+private fun linkify(text: String): AnnotatedString {
+    val matches = URL_REGEX.findAll(text).toList()
+    if (matches.isEmpty()) return AnnotatedString(text)
+    val linkStyle = TextLinkStyles(style = SpanStyle(textDecoration = TextDecoration.Underline))
+    return buildAnnotatedString {
+        var last = 0
+        for (m in matches) {
+            if (m.range.first > last) append(text.substring(last, m.range.first))
+            withLink(LinkAnnotation.Url(m.value, linkStyle)) { append(m.value) }
+            last = m.range.last + 1
+        }
+        if (last < text.length) append(text.substring(last))
     }
 }
 

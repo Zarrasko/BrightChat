@@ -424,10 +424,18 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
             return (0 until arr.length()).mapNotNull { i ->
                 val a = arr.getJSONObject(i)
                 val guid = a.optString("guid").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val name = a.optString("transferName").takeIf { it.isNotBlank() }
+                // iMessage rich-link previews (sent for URLs — Instagram, etc.) ride
+                // along as a `*.pluginPayloadAttachment` metadata blob, not a real
+                // file. We can't render the preview and the URL is already in the
+                // message text, so drop it rather than show a junk "File · <guid>" row.
+                if (name?.endsWith(".pluginPayloadAttachment", ignoreCase = true) == true) {
+                    return@mapNotNull null
+                }
                 Attachment(
                     guid = guid,
                     mimeType = a.optString("mimeType").takeIf { it.isNotBlank() },
-                    transferName = a.optString("transferName").takeIf { it.isNotBlank() },
+                    transferName = name,
                     width = a.optInt("width", 0),
                     height = a.optInt("height", 0),
                 )
