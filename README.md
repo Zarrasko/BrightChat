@@ -1,66 +1,54 @@
-# chat
+# Chat
 
-A from-scratch **iMessage client** for the [Light Phone III](https://www.thelightphone.com/),
-in the style of vandamd's LightOS tools (black and white, Public Sans, no bubbles).
+An **iMessage client** for the [Light Phone III](https://www.thelightphone.com/),
+inspired by and based on the apps created by [vandamd](https://github.com/vandamd). The app works by talking to an always-on, self-hosted [BlueBubbles Server](https://github.com/BlueBubblesApp/bluebubbles-server), reached privately over [Tailscale](https://tailscale.com/).
 
-It talks to a self-hosted [BlueBubbles Server](https://github.com/BlueBubblesApp/bluebubbles-server)
-running on an always-on Mac signed into iMessage, reached privately over
-[Tailscale](https://tailscale.com/). Built to replace OpenBubbles — lighter on
-battery, and it gets message ordering right because the client owns the sort.
+I built this to replace OpenBubbles on my LPIII, which I found to be both a battery hog and very flaky in terms of displaying and ordering messages correctly.
 
-Open it to a list of conversations (newest activity first); tap one to read the
+Open the app to a list of conversations (newest activity first); tap one to read the
 thread, or tap **New** to start one (searches your contacts by name/number/email).
 Tap **Messages** at the top for settings, **Refresh** to re-pull.
 
-## How it works
+## Prequisites
 
-- Talks to the BlueBubbles Server **REST API** over plain `HttpURLConnection` +
-  `org.json` — no SDK, no Google Play Services. Auth is the server password.
-- A **Socket.IO foreground service** holds one live connection for instant
-  delivery and notifications — no FCM. A single lightweight socket is the whole
-  battery argument over OpenBubbles' Flutter app.
-- The server is reached over your **tailnet**, so it stays LAN-bound and is never
-  exposed publicly. The official BlueBubbles app needs Firebase/FCM for push;
-  running your own server over Tailscale skips that entirely (the socket is the
-  push channel).
-- The server URL and password are entered on first launch and stored on the
-  device only — the password **encrypted at rest** by a hardware-backed
-  AndroidKeyStore AES-GCM key. Both are editable later in Settings.
+There are several things you have to have up and running in order for this to work.
 
-## Set up your own server
+1. A LightPhoneIII modified to reveal the full Android layer. For full instructions on this, I highly recommend fully reading [this guide](https://acrobat.adobe.com/id/urn:aaid:sc:US:0c80fa32-de30-406f-85ca-93ccd92c3c4b).
+2. A BlueBubbles server up and running on an always-on Mac, which is signed into your iMessage account.
+3. Tailscale installed on your Mac *and* and your modified LPIII.
 
-You need three things: a Mac signed into iMessage, BlueBubbles Server on it, and
-Tailscale to reach it privately from the phone.
+## Setup
 
-1. **Run BlueBubbles Server on an always-on Mac.** Install it from
+1. **Install BlueBubbles Server**. Install it from
    [bluebubbles.app](https://bluebubbles.app/install/) on a Mac that is signed
-   into your iMessage account and stays awake (a Mac mini is ideal). During setup
-   it asks you to **set a server password** — remember it; the app uses it to
-   authenticate. The server stays bound to localhost/LAN; you do not need to
-   forward any ports or expose it to the internet.
+   into your iMessage account and stays awake. During setup
+   it asks you to set a server password — remember it; the app uses it to
+   authenticate.
+   
+   In the setup steps, you should **skip / ignore** the Google Firebase section entirely, as well as the Proxy Service. You can set that to LAN only. Tailscale (in the next step) will handle it from here.
 
 2. **Put the Mac and the phone on the same tailnet.** Install
    [Tailscale](https://tailscale.com/download) on both and sign them into the
    same account. On the Mac, expose the BlueBubbles port (default `1234`) over
    HTTPS with Tailscale Serve:
 
-   ```sh
-   tailscale serve --bg 1234
-   ```
+   `tailscale serve --bg 1234`
 
    This gives the Mac a stable `https://<machine>.<tailnet>.ts.net` URL with TLS,
    reachable only from your own devices — no public exposure, no certificates to
    manage. (Any other HTTPS reverse proxy works too; Tailscale Serve is just the
    easiest.) Run `tailscale serve status` to see the URL.
 
-3. **Configure the app.** On first launch, enter that `https://…ts.net` URL and
+3. Install this app. The best way to do it is to put this url into Obtainium.
+
+4. **Configure the app.** On first launch, enter that `https://…ts.net` URL and
    the BlueBubbles server password. The app validates them against the server and
    stores them on the device.
 
 ### Optional: enable the Private API (tapbacks, read receipts, typing)
 
 By default BlueBubbles can only send via AppleScript, which can't send tapbacks,
-mark chats read, or send typing indicators. Those need BlueBubbles' **Private
+mark chats read, or send typing indicators. For a full list of features enabled by the private API, see this page. Those need BlueBubbles' **Private
 API**, which injects a helper into Messages — and that requires turning off two
 macOS protections. It's optional; skip this and everything else still works.
 
@@ -88,29 +76,9 @@ For instant delivery after a reboot without opening the app, enable Tailscale's
 "Block connections without VPN" **off** — the live socket reconnects the moment
 the tunnel comes up.
 
-## Build
+## Install
 
-```sh
-export JAVA_HOME=/opt/homebrew/opt/openjdk@21   # JDK 21 required
-./gradlew assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-```
-
-arm64-only, minSdk 34 (Android 14), target SDK 35. Built for the Light Phone III;
-other Android 14+ devices should work but are untested.
-
-## Status
-
-- **Phase 1 (done):** read-only over REST — conversation list + thread view,
-  pull-to-refresh, correct ordering, contact names.
-- **Phase 2 (done):** sending + a Socket.IO foreground service for live delivery
-  and notifications. The working OpenBubbles replacement.
-- **Phase 3 (in progress):** image attachments (send + receive), contact names in
-  notifications, **tapbacks** (incoming render compactly; long-press a message to
-  send your own), **marking threads read**, and **typing indicators** (send +
-  receive) — the last three need the optional Private API, above. Non-image
-  attachments (video/voice/contact/PDF) show as a tappable row that opens in another
-  app. Still to come: inline video/audio playback.
+Install the app via Obtainium.
 
 ## License
 
