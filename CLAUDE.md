@@ -117,13 +117,18 @@ clears the password and returns to setup.
   only; clears unread across the account's devices); `startTyping(guid)`/
   `stopTyping(guid)` → `POST`/`DELETE /chat/:guid/typing` (Private-API only);
   `messages(guid)` → `GET /chat/:guid/message`
-  (`with=handle,attachment`, `sort=DESC`, guid URL-encoded); `send(guid,text,tempGuid)`
-  → `POST /message/text` (only `chatGuid`+`message` required; we pass a `tempGuid`
-  to correlate the echo and `method:"apple-script"` since Private API is off, and
-  parse the created message from the response);
-  `sendAttachment(guid,bytes,name,mime,tempGuid)` → `POST /message/attachment` (the
-  one **multipart/form-data** call — built by hand, not via `request()` — same
-  `tempGuid`/`apple-script` echo handling as `send`); `downloadAttachment(guid,dest)`
+  (`with=handle,attachment`, `sort=DESC`, guid URL-encoded); `send(guid,text,tempGuid,
+  method)` → `POST /message/text` (only `chatGuid`+`message` required; we pass a
+  `tempGuid` to correlate the echo and a `method` — `private-api` when the server's
+  Private API is live, else `apple-script`. **Group chats require `private-api`:** the
+  AppleScript *fallback* script can't text a group ("Can't use the send message
+  (fallback) script to text a group chat!"), so a group send fails with Private API
+  off. The ViewModel picks the method via `sendMethod()` off the cached `privateApi`
+  flag; parse the created message from the response);
+  `sendAttachment(guid,bytes,name,mime,tempGuid,method)` → `POST /message/attachment`
+  (the one **multipart/form-data** call — built by hand, not via `request()` — same
+  `tempGuid`/`method` echo handling as `send`, same group requirement);
+  `downloadAttachment(guid,dest)`
   → `GET /attachment/:guid/download` (streams the raw bytes to a file, for the inline
   image loader); `newChat(address,text)` →
   `POST /chat/new` (starts a 1:1 by sending the first message — macOS Big Sur+

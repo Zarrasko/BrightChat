@@ -287,6 +287,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- Sending ----------------------------------------------------------
 
+    /** The send method for text/attachments: the Private API when it's live, else the
+     *  AppleScript fallback. Group chats REQUIRE `private-api` — the AppleScript
+     *  fallback script can't text a group, so a group send fails without it. */
+    private fun sendMethod() = if (_state.value.privateApi) "private-api" else "apple-script"
+
     fun sendMessage(text: String) {
         val body = text.trim()
         val convo = _state.value.open ?: return
@@ -301,7 +306,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
             try {
-                val sent = client.send(convo.guid, body, tempGuid)
+                val sent = client.send(convo.guid, body, tempGuid, sendMethod())
                 updateOpenThread(convo.guid) { list ->
                     list.map { if (it.guid == tempGuid) sent else it }.distinctBy { it.guid }
                 }
@@ -440,7 +445,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             updateOpenThread(convo.guid) { it + optimistic }
             _state.update { it.copy(message = null) }
             try {
-                val sent = client.sendAttachment(convo.guid, bytes, name, mime, tempGuid)
+                val sent = client.sendAttachment(convo.guid, bytes, name, mime, tempGuid, sendMethod())
                 updateOpenThread(convo.guid) { list ->
                     list.map { if (it.guid == tempGuid) sent else it }.distinctBy { it.guid }
                 }
@@ -484,7 +489,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val guid = "iMessage;-;$handle"
             val tempGuid = "temp-${System.currentTimeMillis()}-${(0..99999).random()}"
             try {
-                client.sendAttachment(guid, bytes, name, mime, tempGuid)
+                client.sendAttachment(guid, bytes, name, mime, tempGuid, sendMethod())
                 messageCache.remove(guid)
                 val convo = Conversation(
                     guid = guid,

@@ -93,6 +93,10 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         // reads "So you'll watch…" rather than a bare "Loved …".
         val byGuid = LinkedHashMap<String, Conversation>()
         val previewFinal = HashSet<String>() // guids whose preview is a real (non-reaction) message
+        // Newest non-reaction message date per room — the signal for which sibling of a
+        // forked group is the *live* one (the send target). A tapback can land in a dead
+        // old room, so the newest message of *any* kind isn't a reliable send target.
+        val realDateByGuid = HashMap<String, Long>()
         for (i in 0 until data.length()) {
             val m = data.getJSONObject(i)
             val chats = m.optJSONArray("chats") ?: continue
@@ -101,6 +105,9 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                 val chat = chats.getJSONObject(j)
                 val guid = chat.optString("guid")
                 if (guid.isBlank()) continue
+                if (!msg.isReaction) {
+                    realDateByGuid[guid] = maxOf(realDateByGuid[guid] ?: 0L, msg.date)
+                }
                 val existing = byGuid[guid]
                 if (existing == null) {
                     byGuid[guid] = chatToConversation(chat, guid, msg.previewText, msg.date, msg.fromMe)
@@ -116,13 +123,24 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         // Pass 2: collapse a group that iMessage has forked into sibling rooms (same
         // name + identical participants, different guid) into a single conversation
         // spanning all their guids. Keyed only for groups; 1:1 chats are left alone.
-        val merged = LinkedHashMap<String, Conversation>()
+        val groups = LinkedHashMap<String, MutableList<Conversation>>()
         for ((guid, conv) in byGuid) {
             val key = groupIdentity(conv) ?: guid // non-groups key by their own guid (never merge)
-            val existing = merged[key]
-            merged[key] = existing?.copy(guids = existing.guids + guid) ?: conv
+            groups.getOrPut(key) { mutableListOf() }.add(conv)
         }
-        return merged.values.toList()
+        return groups.values.map { rooms ->
+            if (rooms.size == 1) return@map rooms[0]
+            // A forked group. Display fields (preview, recency, name) come from the
+            // newest-overall room, so a tapback in any room still bumps the list. But the
+            // *send target* — Conversation.guid / guids[0] — must be the live room: the
+            // one iMessage routes real (non-reaction) messages to. A tapback can land in a
+            // dead old room and make it newest by date, so ordering by the newest message
+            // of any kind would aim sends at a room AppleScript can't send to ("Couldn't
+            // send"). Order the spanned guids by newest non-reaction message instead.
+            val display = rooms.maxByOrNull { it.lastDate } ?: rooms[0]
+            val sendOrder = rooms.sortedByDescending { realDateByGuid[it.guid] ?: 0L }
+            display.copy(guid = sendOrder.first().guid, guids = sendOrder.map { it.guid })
+        }
     }
 
     /** A stable identity for a group, so forked sibling rooms collapse: its display
@@ -146,16 +164,19 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
     /**
      * `POST /api/v1/message/text` — sends a text into a chat. Only `chatGuid` and
      * `message` are required; we also pass a client `tempGuid` so the echoed
-     * new-message can be correlated, and force `apple-script` since the server's
-     * Private API is off. Returns the created message (real guid) parsed from the
-     * response, falling back to a synthetic one if the body is unexpected.
+     * new-message can be correlated. [method] is `private-api` when the server's
+     * Private API is live, else `apple-script` — and it MUST be `private-api` for
+     * group chats: the AppleScript fallback script can't text a group ("Can't use
+     * the send message (fallback) script to text a group chat!"). Returns the created
+     * message (real guid) parsed from the response, falling back to a synthetic one
+     * if the body is unexpected.
      */
-    fun send(chatGuid: String, text: String, tempGuid: String): ChatMessage {
+    fun send(chatGuid: String, text: String, tempGuid: String, method: String = "apple-script"): ChatMessage {
         val body = JSONObject()
             .put("chatGuid", chatGuid)
             .put("tempGuid", tempGuid)
             .put("message", text)
-            .put("method", "apple-script")
+            .put("method", method)
         val (code, resp) = request("POST", "/api/v1/message/text", body)
         if (code !in 200..299) throw ApiException(code, "send failed ($code)")
         val data = runCatching { JSONObject(resp).optJSONObject("data") }.getOrNull()
@@ -215,9 +236,11 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
     /**
      * `POST /api/v1/message/attachment` — sends a file into a chat as multipart
      * form-data (the one call that isn't JSON, so it's built by hand rather than
-     * via [request]). Like [send] we pass a `tempGuid` to correlate the echo and
-     * force `apple-script` (Private API is off). Returns the created message parsed
-     * from the response, falling back to a placeholder if the body is unexpected.
+     * via [request]). Like [send] we pass a `tempGuid` to correlate the echo and a
+     * [method] (`private-api` when live, else `apple-script`) — group chats need
+     * `private-api`, the AppleScript fallback can't text them. Returns the created
+     * message parsed from the response, falling back to a placeholder if the body is
+     * unexpected.
      */
     fun sendAttachment(
         chatGuid: String,
@@ -225,6 +248,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         filename: String,
         mimeType: String,
         tempGuid: String,
+        method: String = "apple-script",
     ): ChatMessage {
         val safeFile = filename.replace("\"", "").ifBlank { "image.jpg" }
         val boundary = "chatBoundary" + tempGuid.filter { it.isLetterOrDigit() }
@@ -237,7 +261,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
             append(field("chatGuid", chatGuid))
             append(field("tempGuid", tempGuid))
             append(field("name", safeFile))
-            append(field("method", "apple-script"))
+            append(field("method", method))
             append("--$boundary$crlf")
             append("Content-Disposition: form-data; name=\"attachment\"; filename=\"$safeFile\"$crlf")
             append("Content-Type: $mimeType$crlf$crlf")
