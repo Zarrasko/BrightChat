@@ -287,9 +287,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- Sending ----------------------------------------------------------
 
-    /** The send method for text/attachments: the Private API when it's live, else the
-     *  AppleScript fallback. Group chats REQUIRE `private-api` — the AppleScript
-     *  fallback script can't text a group, so a group send fails without it. */
+    /** The send method for text/attachments: the Private API when it's live, else
+     *  AppleScript. We prefer `private-api` because the server's AppleScript path can
+     *  fail to resolve some group guids (our `any;+;chat…` prefix) and then falls back
+     *  to a DM-only script that errors on groups; the Private API sends by DB identity
+     *  and avoids that. See [BlueBubblesApi.send]. (AppleScript can still text groups
+     *  when its standard script resolves — `private-api` is just more reliable here.) */
     private fun sendMethod() = if (_state.value.privateApi) "private-api" else "apple-script"
 
     fun sendMessage(text: String) {

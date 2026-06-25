@@ -165,9 +165,14 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
      * `POST /api/v1/message/text` — sends a text into a chat. Only `chatGuid` and
      * `message` are required; we also pass a client `tempGuid` so the echoed
      * new-message can be correlated. [method] is `private-api` when the server's
-     * Private API is live, else `apple-script` — and it MUST be `private-api` for
-     * group chats: the AppleScript fallback script can't text a group ("Can't use
-     * the send message (fallback) script to text a group chat!"). Returns the created
+     * Private API is live, else `apple-script`. We prefer `private-api` for group
+     * chats: the server's AppleScript path tries the group-capable `sendMessage`
+     * script first, but if that fails to resolve the chat (e.g. our guids carry an
+     * `any;+;chat…` service prefix that `chat id "…"` may not match) it falls back to
+     * the DM-only script, which errors with "Can't use the send message (fallback)
+     * script to text a group chat!". The Private API resolves the chat by its DB
+     * identity and sidesteps that. (Plain AppleScript *can* text groups when the
+     * standard script resolves — this isn't a hard limitation.) Returns the created
      * message (real guid) parsed from the response, falling back to a synthetic one
      * if the body is unexpected.
      */
@@ -237,10 +242,9 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
      * `POST /api/v1/message/attachment` — sends a file into a chat as multipart
      * form-data (the one call that isn't JSON, so it's built by hand rather than
      * via [request]). Like [send] we pass a `tempGuid` to correlate the echo and a
-     * [method] (`private-api` when live, else `apple-script`) — group chats need
-     * `private-api`, the AppleScript fallback can't text them. Returns the created
-     * message parsed from the response, falling back to a placeholder if the body is
-     * unexpected.
+     * [method] (`private-api` when live, else `apple-script`); see [send] for why
+     * `private-api` is preferred for group chats. Returns the created message parsed
+     * from the response, falling back to a placeholder if the body is unexpected.
      */
     fun sendAttachment(
         chatGuid: String,

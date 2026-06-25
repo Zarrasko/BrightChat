@@ -120,14 +120,20 @@ clears the password and returns to setup.
   (`with=handle,attachment`, `sort=DESC`, guid URL-encoded); `send(guid,text,tempGuid,
   method)` → `POST /message/text` (only `chatGuid`+`message` required; we pass a
   `tempGuid` to correlate the echo and a `method` — `private-api` when the server's
-  Private API is live, else `apple-script`. **Group chats require `private-api`:** the
-  AppleScript *fallback* script can't text a group ("Can't use the send message
-  (fallback) script to text a group chat!"), so a group send fails with Private API
-  off. The ViewModel picks the method via `sendMethod()` off the cached `privateApi`
-  flag; parse the created message from the response);
+  Private API is live, else `apple-script`. **We prefer `private-api` for groups**, but
+  it's not a hard requirement: the server's AppleScript path tries the group-capable
+  `sendMessage` script first and only falls back to a DM-only script (which throws
+  "Can't use the send message (fallback) script to text a group chat!") if that fails.
+  Ours fails because our chat guids carry an `any;+;chat…` service prefix that
+  AppleScript's `chat id "…"` may not resolve, so the masking fallback error surfaces;
+  the Private API resolves the chat by DB identity and sidesteps it. (A plain
+  AppleScript/non-Private-API setup *can* text groups when the standard script
+  resolves — e.g. with a canonical `iMessage;+;chat…` guid.) The ViewModel picks the
+  method via `sendMethod()` off the cached `privateApi` flag; parse the created message
+  from the response);
   `sendAttachment(guid,bytes,name,mime,tempGuid,method)` → `POST /message/attachment`
   (the one **multipart/form-data** call — built by hand, not via `request()` — same
-  `tempGuid`/`method` echo handling as `send`, same group requirement);
+  `tempGuid`/`method` echo handling as `send`, same group-send rationale);
   `downloadAttachment(guid,dest)`
   → `GET /attachment/:guid/download` (streams the raw bytes to a file, for the inline
   image loader); `newChat(address,text)` →
