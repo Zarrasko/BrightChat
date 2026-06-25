@@ -113,6 +113,11 @@ data class ChatMessage(
     // Tapbacks folded onto this (normal) message for display. Never serialized;
     // populated by ChatViewModel.foldReactions from the reaction messages.
     val reactions: List<Reaction> = emptyList(),
+    // The client tempGuid we sent this message with, echoed back by the server. Lets
+    // the socket echo of our own send reconcile against the optimistic bubble (whose
+    // guid IS the tempGuid) instead of rendering a second row. Null for messages we
+    // didn't send / weren't sent with a tempGuid.
+    val tempGuid: String? = null,
 ) {
     val images: List<Attachment> get() = attachments.filter { it.isImage }
 

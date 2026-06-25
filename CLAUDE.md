@@ -120,20 +120,13 @@ clears the password and returns to setup.
   (`with=handle,attachment`, `sort=DESC`, guid URL-encoded); `send(guid,text,tempGuid,
   method)` → `POST /message/text` (only `chatGuid`+`message` required; we pass a
   `tempGuid` to correlate the echo and a `method` — `private-api` when the server's
-  Private API is live, else `apple-script`. **We prefer `private-api` for groups**, but
-  it's not a hard requirement: the server's AppleScript path tries the group-capable
-  `sendMessage` script first and only falls back to a DM-only script (which throws
-  "Can't use the send message (fallback) script to text a group chat!") if that fails.
-  Ours fails because our chat guids carry an `any;+;chat…` service prefix that
-  AppleScript's `chat id "…"` may not resolve, so the masking fallback error surfaces;
-  the Private API resolves the chat by DB identity and sidesteps it. (A plain
-  AppleScript/non-Private-API setup *can* text groups when the standard script
-  resolves — e.g. with a canonical `iMessage;+;chat…` guid.) The ViewModel picks the
-  method via `sendMethod()` off the cached `privateApi` flag; parse the created message
-  from the response);
+  Private API is live, else `apple-script`. The ViewModel picks the method via
+  `sendMethod()` off the cached `privateApi` flag, and the *room* to send to via
+  `sendTargets()` (see **Forked-group sends** below); parse the created message from the
+  response);
   `sendAttachment(guid,bytes,name,mime,tempGuid,method)` → `POST /message/attachment`
   (the one **multipart/form-data** call — built by hand, not via `request()` — same
-  `tempGuid`/`method` echo handling as `send`, same group-send rationale);
+  `tempGuid`/`method` echo handling as `send`, same `sendTargets()` room selection);
   `downloadAttachment(guid,dest)`
   → `GET /attachment/:guid/download` (streams the raw bytes to a file, for the inline
   image loader); `newChat(address,text)` →
@@ -182,7 +175,21 @@ clears the password and returns to setup.
   here** — conversations `sortedByDescending { lastDate }`, messages
   `sortedBy { date }` — which is the whole reason this exists. `sendMessage()`
   appends an optimistic message under a temp guid, then swaps in the server's
-  echo (real guid) so the socket's `new-message` dedupes by guid. It collects
+  echo (real guid) so the socket's `new-message` dedupes by guid.
+  **Forked-group sends (`sendTargets` + `sendAcrossRooms`):** a forked group spans
+  several room guids, and not all of them are sendable. With the **Private API** the
+  server resolves a chat by DB identity, so any room works — `sendTargets` returns just
+  `[convo.guid]`. With **AppleScript** (no Private API), the server's `chat id "…"`
+  lookup *fails on a dead/stale fork room* — it throws `-1728` ("Can't get chat id"),
+  which drops the server into its DM-only fallback script that rejects groups ("Can't
+  use the send message (fallback) script to text a group chat!"). The *live* sibling
+  room resolves and delivers fine. So for AppleScript, `sendTargets` returns **all**
+  the group's room guids (UUID-form first, then `chat<number>` forms) and
+  `sendAcrossRooms` tries each until one delivers. This is safe against double-sending:
+  `-1728` fails during resolution, before any message goes out. (Empirically confirmed:
+  one forked group's `chat388…` room `-1728`s while its `chat495…` sibling sends — see
+  the verified-from-server-logs investigation.) Both `sendMessage` and `sendImage` go
+  through this. It collects
   `SocketBus` and folds incoming/updated messages into the list (`bumpConversation`)
   and the open thread; a message for an unknown chat triggers a `refresh()`.
   **Tapbacks:** the open thread keeps a raw message list (`openRaw`, reaction

@@ -81,6 +81,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // *raw* list (reaction messages included) so reopening re-folds correctly.
     private val messageCache = HashMap<String, List<ChatMessage>>()
 
+    // Per-conversation (keyed by primary guid) the forked-group room guid that last
+    // delivered, so AppleScript sends retry it first instead of re-probing a dead room
+    // every time (see sendTargets). Session-lived; the Private API path ignores it.
+    private val lastGoodRoom = HashMap<String, String>()
+
     // The open thread's raw messages — the single source for what's shown. State's
     // `messages` is always foldReactions(openRaw); every open-thread mutation goes
     // through updateOpenThread so tapbacks stay folded onto their targets.
@@ -288,12 +293,51 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // ---- Sending ----------------------------------------------------------
 
     /** The send method for text/attachments: the Private API when it's live, else
-     *  AppleScript. We prefer `private-api` because the server's AppleScript path can
-     *  fail to resolve some group guids (our `any;+;chat…` prefix) and then falls back
-     *  to a DM-only script that errors on groups; the Private API sends by DB identity
-     *  and avoids that. See [BlueBubblesApi.send]. (AppleScript can still text groups
-     *  when its standard script resolves — `private-api` is just more reliable here.) */
+     *  AppleScript. The Private API is more capable (it sends by DB identity, so it
+     *  handles any room of a forked group); the AppleScript path is pickier about the
+     *  room guid — see [sendTarget]. */
     private fun sendMethod() = if (_state.value.privateApi) "private-api" else "apple-script"
+
+    /**
+     * The room guids to try when sending [convo], best first. The Private API resolves
+     * a chat by its DB identity, so the primary (`convo.guid`) alone is enough.
+     * AppleScript is pickier — its `chat id "…"` lookup can't resolve a *dead* room of
+     * a forked group (it throws -1728 "Can't get chat id", which sends the server into
+     * the DM-only fallback script that rejects groups: "Can't use the send message
+     * (fallback) script to text a group chat!"). The live sibling resolves and delivers
+     * fine. So for AppleScript we hand back *every* sibling room and let [sendAcrossRooms]
+     * try each until one delivers — the last room that delivered (cached in
+     * [lastGoodRoom]) first, then UUID-form rooms ahead of `chat<number>` forms, since
+     * those tend to resolve. A 1:1 or single-room group is just `[guid]`.
+     */
+    private fun sendTargets(convo: Conversation, method: String): List<String> {
+        if (method != "apple-script") return listOf(convo.guid)
+        val ordered = convo.guids.sortedBy { it.substringAfterLast(";").startsWith("chat") }
+        val good = lastGoodRoom[convo.guid]?.takeIf { it in convo.guids } ?: return ordered
+        return listOf(good) + ordered.filter { it != good }
+    }
+
+    /**
+     * Sends via the first of [targets] that succeeds; records the winning room in
+     * [lastGoodRoom] under [convoGuid] so the next send tries it first, and returns its
+     * result. Rethrows the last error if all fail. Lets an AppleScript send fall through
+     * a forked group's dead rooms to the live one. Safe against double-sending: the
+     * dead-room failure (-1728) happens during chat resolution, before any message goes
+     * out.
+     */
+    private fun <T> sendAcrossRooms(convoGuid: String, targets: List<String>, send: (String) -> T): T {
+        var last: Throwable? = null
+        for (guid in targets) {
+            try {
+                val result = send(guid)
+                lastGoodRoom[convoGuid] = guid
+                return result
+            } catch (t: Throwable) {
+                last = t
+            }
+        }
+        throw last ?: IllegalStateException("no send targets")
+    }
 
     fun sendMessage(text: String) {
         val body = text.trim()
@@ -309,7 +353,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
             try {
-                val sent = client.send(convo.guid, body, tempGuid, sendMethod())
+                val method = sendMethod()
+                val sent = sendAcrossRooms(convo.guid, sendTargets(convo, method)) { g ->
+                    client.send(g, body, tempGuid, method)
+                }
                 updateOpenThread(convo.guid) { list ->
                     list.map { if (it.guid == tempGuid) sent else it }.distinctBy { it.guid }
                 }
@@ -448,7 +495,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             updateOpenThread(convo.guid) { it + optimistic }
             _state.update { it.copy(message = null) }
             try {
-                val sent = client.sendAttachment(convo.guid, bytes, name, mime, tempGuid, sendMethod())
+                val method = sendMethod()
+                val sent = sendAcrossRooms(convo.guid, sendTargets(convo, method)) { g ->
+                    client.sendAttachment(g, bytes, name, mime, tempGuid, method)
+                }
                 updateOpenThread(convo.guid) { list ->
                     list.map { if (it.guid == tempGuid) sent else it }.distinctBy { it.guid }
                 }
@@ -686,7 +736,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun mergeRaw(list: List<ChatMessage>, m: ChatMessage): List<ChatMessage> {
-        val idx = list.indexOfFirst { it.guid == m.guid }
+        // Match by guid, or — for the socket echo of our own send — by the tempGuid the
+        // server echoes back, since the optimistic bubble still carries it as its guid.
+        // Without the latter the echo (real guid) would render as a second row until the
+        // HTTP send call returns and swaps the temp guid in.
+        val idx = list.indexOfFirst { it.guid == m.guid || (m.tempGuid != null && it.guid == m.tempGuid) }
         return if (idx >= 0) list.toMutableList().also { it[idx] = m } else list + m
     }
 

@@ -480,6 +480,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                 // type as a word (`love`/`-love`), not the raw iMessage int.
                 associatedMessageGuid = o.optString("associatedMessageGuid").takeIf { it.isNotBlank() },
                 associatedMessageType = o.optString("associatedMessageType").takeIf { it.isNotBlank() && it != "null" },
+                tempGuid = o.optString("tempGuid").takeIf { it.isNotBlank() && it != "null" },
             )
         }
 
