@@ -254,6 +254,17 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
     }
 
     /**
+     * `DELETE /api/v1/chat/:guid` — permanently deletes a chat from Messages on the
+     * Mac (Private-API only). The server tells the helper to delete it, then waits up
+     * to ~30s for the local DB to reflect the removal, so this call can be slow.
+     * Irreversible; with Messages-in-iCloud on it can also clear from other devices.
+     */
+    fun deleteChat(chatGuid: String) {
+        val (code, _) = request("DELETE", "/api/v1/chat/${enc(chatGuid)}", null)
+        if (code !in 200..299) throw ApiException(code, "delete chat failed ($code)")
+    }
+
+    /**
      * `POST /api/v1/message/attachment` — sends a file into a chat as multipart
      * form-data (the one call that isn't JSON, so it's built by hand rather than
      * via [request]). Like [send] we pass a `tempGuid` to correlate the echo and a

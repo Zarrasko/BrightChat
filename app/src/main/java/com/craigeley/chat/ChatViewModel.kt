@@ -251,6 +251,38 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Permanently deletes a conversation from Messages on the Mac (swipe-to-delete in
+     * the list). Private-API only — the server gates `DELETE /chat/:guid` on it. A
+     * forked group spans several rooms, so every guid is deleted. Optimistic: the row
+     * disappears immediately; if any room fails we re-pull the list so it reappears.
+     */
+    fun deleteConversation(conversation: Conversation) {
+        if (!_state.value.privateApi) {
+            _state.update { it.copy(message = "Deleting needs the Private API") }
+            return
+        }
+        val client = api ?: return
+        // Drop the row now (and close it if it's the open thread); drop its cache too.
+        _state.update { s ->
+            s.copy(
+                conversations = s.conversations.filterNot { it.guid == conversation.guid },
+                open = s.open?.takeUnless { it.guid == conversation.guid },
+            )
+        }
+        if (_state.value.open == null) { openRaw = emptyList(); threadJob?.cancel() }
+        messageCache.remove(conversation.guid)
+        viewModelScope.launch(Dispatchers.IO) {
+            val failed = conversation.guids.any { runCatching { client.deleteChat(it) }.isFailure }
+            // The server can take ~30s per room (it waits for the local DB), so by now
+            // the list may have moved on — a refresh reconciles either way: it restores
+            // a row that failed to delete, and confirms the ones that succeeded are gone.
+            loadConversations()
+            // After the reload (which clears `message`), surface any failure.
+            if (failed) _state.update { it.copy(message = "Couldn’t delete the conversation") }
+        }
+    }
+
+    /**
      * Applies [transform] to the open thread's raw messages and republishes the
      * folded view — but only if [convoGuid] is still the open thread, so a late
      * send/echo can't clobber a thread the user has since navigated away from.

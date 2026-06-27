@@ -3,8 +3,11 @@
 package com.craigeley.chat.ui
 
 import android.text.format.DateUtils
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,18 +26,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.craigeley.chat.ChatViewModel
 import com.craigeley.chat.Conversation
 import com.craigeley.chat.Status
 import com.craigeley.chat.ui.theme.ChatColors
 import com.craigeley.chat.ui.theme.ChatType
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 /** The conversation list — newest activity first, tap to open, tap title for settings. */
 @Composable
@@ -95,7 +105,16 @@ fun ConversationsScreen(viewModel: ChatViewModel, onOpenSettings: () -> Unit, on
                     // otherwise the real message text, prefixed "You: " when it's ours.
                     val subtitle = convo.lastReaction?.summary(state.contacts)
                         ?: ((if (convo.lastFromMe) "You: " else "") + convo.lastText)
-                    ConversationRow(convo, state.contacts.title(convo), subtitle) { viewModel.open(convo) }
+                    ConversationRow(
+                        convo = convo,
+                        title = state.contacts.title(convo),
+                        subtitle = subtitle,
+                        // Deleting a chat needs the Private API (server gate); only then
+                        // do we let the row swipe to reveal Delete.
+                        canDelete = state.privateApi,
+                        onDelete = { viewModel.deleteConversation(convo) },
+                        onClick = { viewModel.open(convo) },
+                    )
                 }
             }
         }
@@ -103,43 +122,95 @@ fun ConversationsScreen(viewModel: ChatViewModel, onOpenSettings: () -> Unit, on
 }
 
 @Composable
-private fun ConversationRow(convo: Conversation, title: String, subtitle: String, onClick: () -> Unit) {
+private fun ConversationRow(
+    convo: Conversation,
+    title: String,
+    subtitle: String,
+    canDelete: Boolean,
+    onDelete: () -> Unit,
+    onClick: () -> Unit,
+) {
     val haptics = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                interactionSource = interaction,
-                indication = null,
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onClick()
-                },
-            )
-            .padding(vertical = 14.dp),
-    ) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = title,
-                style = ChatType.body,
-                color = ChatColors.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(text = relTime(convo.lastDate), style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
+    val scope = rememberCoroutineScope()
+    // How far the row slides left to reveal Delete. Keyed to the guid so a recycled
+    // row for a different chat starts closed.
+    val revealPx = with(LocalDensity.current) { 96.dp.toPx() }
+    val offsetX = remember(convo.guid) { Animatable(0f) }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        // Behind the row: the Delete action, uncovered as the row slides left. Tapping
+        // it deletes (the row vanishes optimistically) — the swipe is its own confirm.
+        if (canDelete) {
+            Box(modifier = Modifier.matchParentSize(), contentAlignment = Alignment.CenterEnd) {
+                HapticText(
+                    text = "Delete",
+                    style = ChatType.body,
+                    color = ChatColors.onSurface,
+                    onClick = onDelete,
+                )
+            }
         }
-        if (subtitle.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = subtitle,
-                style = ChatType.meta,
-                color = ChatColors.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                // Opaque so the Delete action stays hidden under the row until swiped.
+                .background(ChatColors.background)
+                .then(
+                    if (canDelete) {
+                        Modifier.pointerInput(convo.guid) {
+                            detectHorizontalDragGestures(
+                                onHorizontalDrag = { change, drag ->
+                                    change.consume()
+                                    scope.launch {
+                                        offsetX.snapTo((offsetX.value + drag).coerceIn(-revealPx, 0f))
+                                    }
+                                },
+                                // Settle open past the halfway point, else snap closed.
+                                onDragEnd = {
+                                    val target = if (offsetX.value < -revealPx / 2f) -revealPx else 0f
+                                    scope.launch { offsetX.animateTo(target) }
+                                },
+                            )
+                        }
+                    } else {
+                        Modifier
+                    },
+                )
+                .combinedClickable(
+                    interactionSource = interaction,
+                    indication = null,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        // While open, a tap just closes the row rather than opening it.
+                        if (offsetX.value < -1f) scope.launch { offsetX.animateTo(0f) } else onClick()
+                    },
+                )
+                .padding(vertical = 14.dp),
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = title,
+                    style = ChatType.body,
+                    color = ChatColors.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(text = relTime(convo.lastDate), style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
+            }
+            if (subtitle.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = ChatType.meta,
+                    color = ChatColors.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
