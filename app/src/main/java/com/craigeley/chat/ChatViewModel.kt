@@ -697,15 +697,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { s ->
             val convos = s.conversations.map { c ->
                 if (incoming.chatGuid in c.guids) {
-                    // A tapback bumps recency but keeps the real-message preview (it'd
-                    // otherwise read "Loved …"); a normal message updates both.
+                    // A tapback bumps recency and surfaces as "Liz loved an image"
+                    // ([lastReaction]); a removal clears that overlay; a normal message
+                    // updates the text preview and clears any reaction overlay.
                     if (incoming.message.isReaction) {
-                        c.copy(lastDate = incoming.message.date)
+                        c.copy(
+                            lastDate = incoming.message.date,
+                            lastReaction = incoming.message.reactionPreview(::cachedMessage),
+                        )
                     } else {
                         c.copy(
                             lastText = incoming.message.previewText,
                             lastDate = incoming.message.date,
                             lastFromMe = incoming.message.fromMe,
+                            lastReaction = null,
                         )
                     }
                 } else {
@@ -744,10 +749,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return if (idx >= 0) list.toMutableList().also { it[idx] = m } else list + m
     }
 
+    /** Looks up a message by guid in whatever's cached (the open thread, or any
+     *  previously-opened thread), so a live tapback can describe its target. Null
+     *  when the target isn't loaded — the preview then reads "a message". */
+    private fun cachedMessage(guid: String): ChatMessage? {
+        openRaw.firstOrNull { it.guid == guid }?.let { return it }
+        for (list in messageCache.values) list.firstOrNull { it.guid == guid }?.let { return it }
+        return null
+    }
+
     private fun bumpConversation(guid: String, text: String, date: Long, fromMe: Boolean) {
         _state.update { s ->
             val convos = s.conversations.map { c ->
-                if (guid in c.guids) c.copy(lastText = text, lastDate = date, lastFromMe = fromMe) else c
+                // A real message (this is only called for sends) clears any reaction overlay.
+                if (guid in c.guids) c.copy(lastText = text, lastDate = date, lastFromMe = fromMe, lastReaction = null) else c
             }.sortedByDescending { it.lastDate }
             s.copy(conversations = convos)
         }

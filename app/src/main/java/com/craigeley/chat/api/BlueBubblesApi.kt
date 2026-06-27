@@ -87,12 +87,11 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         val (code, respText) = request("POST", "/api/v1/message/query", body)
         if (code !in 200..299) throw ApiException(code, "message/query failed ($code)")
         val data = JSONObject(respText).optJSONArray("data") ?: JSONArray()
-        // Pass 1: one row per chat room, newest activity first. The newest message
-        // sets recency (lastDate) — a tapback bumps the thread, like iMessage — but
-        // for the *preview text* we prefer the newest non-reaction message, so a row
-        // reads "So you'll watch…" rather than a bare "Loved …".
-        val byGuid = LinkedHashMap<String, Conversation>()
-        val previewFinal = HashSet<String>() // guids whose preview is a real (non-reaction) message
+        // Parse every swept message once, indexed by guid, so a tapback can describe
+        // its target ("an image" vs a quote) for the list. The target is an *older*
+        // message (later in this DESC sweep), so we need the full index up front.
+        val rows = ArrayList<Pair<JSONArray, ChatMessage>>(data.length())
+        val msgByGuid = HashMap<String, ChatMessage>()
         // Newest non-reaction message date per room — the signal for which sibling of a
         // forked group is the *live* one (the send target). A tapback can land in a dead
         // old room, so the newest message of *any* kind isn't a reliable send target.
@@ -101,6 +100,17 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
             val m = data.getJSONObject(i)
             val chats = m.optJSONArray("chats") ?: continue
             val msg = parseMessage(m)
+            rows.add(chats to msg)
+            msgByGuid[msg.guid] = msg
+        }
+        // Pass 1: one row per chat room, newest activity first. The newest message
+        // sets recency (lastDate) — a tapback bumps the thread, like iMessage. When
+        // that newest message is a tapback we surface it as "Liz loved an image"
+        // ([lastReaction]); otherwise the preview is the newest real message text, and
+        // a row whose newest message is a *reaction removal* falls back to that too.
+        val byGuid = LinkedHashMap<String, Conversation>()
+        val previewFinal = HashSet<String>() // guids whose text preview is a real (non-reaction) message
+        for ((chats, msg) in rows) {
             for (j in 0 until chats.length()) {
                 val chat = chats.getJSONObject(j)
                 val guid = chat.optString("guid")
@@ -110,11 +120,16 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                 }
                 val existing = byGuid[guid]
                 if (existing == null) {
+                    // [lastReaction] is set only when the newest message is a real
+                    // tapback; [lastText] still gets the older real message below as a
+                    // fallback. A reaction *removal* sets neither and just bumps recency.
+                    val reaction = msg.reactionPreview { g -> msgByGuid[g] }
                     byGuid[guid] = chatToConversation(chat, guid, msg.previewText, msg.date, msg.fromMe)
+                        .copy(lastReaction = reaction)
                     if (!msg.isReaction) previewFinal.add(guid)
                 } else if (!msg.isReaction && guid !in previewFinal) {
                     // Older than the row's newest message, but the first real one —
-                    // upgrade the preview while keeping the newest date.
+                    // upgrade the text preview while keeping the newest date / reaction.
                     byGuid[guid] = existing.copy(lastText = msg.previewText, lastFromMe = msg.fromMe)
                     previewFinal.add(guid)
                 }

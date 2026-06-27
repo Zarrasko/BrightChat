@@ -13,6 +13,10 @@ data class Conversation(
     val lastText: String,
     val lastDate: Long,             // epoch millis; 0 when unknown
     val lastFromMe: Boolean,
+    // Set when the newest activity is a tapback, so the list can show "Liz loved an
+    // image" instead of the older real message ([lastText] still holds that fallback).
+    // Cleared the moment a normal message arrives. See BlueBubblesApi.conversations.
+    val lastReaction: ReactionPreview? = null,
     // Every chat-room guid this conversation spans. Usually just [guid]; for a group
     // that iMessage has forked into sibling rooms with the same name + participants,
     // it lists all of them ordered by newest *non-reaction* message, so [guid] is the
@@ -77,6 +81,17 @@ enum class ReactionType(val apiValue: String) {
     EMPHASIZE("emphasize"),
     QUESTION("question");
 
+    /** Past-tense verb for the conversation-list summary ("Liz loved an image"). */
+    val verb: String
+        get() = when (this) {
+            LOVE -> "loved"
+            LIKE -> "liked"
+            DISLIKE -> "disliked"
+            LAUGH -> "laughed at"
+            EMPHASIZE -> "emphasized"
+            QUESTION -> "questioned"
+        }
+
     companion object {
         /** Maps a server `associatedMessageType` string (`love` or `-love`) to a
          *  type, ignoring the add/remove sign. Null if it isn't a reaction (e.g.
@@ -95,6 +110,27 @@ data class Reaction(
     val fromMe: Boolean,
     val sender: String?,      // reactor's handle address; null when from me
 )
+
+/**
+ * Conversation-list descriptor for a chat whose newest activity is a tapback, so
+ * the row reads "Liz loved an image" the way iMessage does (rather than falling
+ * back to the older real message). The reactor's name is resolved at render time
+ * (via [Contacts]) — [reactor] is their raw handle, null when the tapback is mine.
+ * [target] already describes what was reacted to ("an image", a quoted text, or
+ * "a message" when the target isn't to hand). See [ChatMessage.reactionPreview].
+ */
+data class ReactionPreview(
+    val type: ReactionType,
+    val fromMe: Boolean,
+    val reactor: String?,
+    val target: String,
+) {
+    /** The one-line summary, resolving the reactor to a name ("You" when mine). */
+    fun summary(contacts: Contacts): String {
+        val who = if (fromMe) "You" else reactor?.let { contacts.sender(it) } ?: "Someone"
+        return "$who ${type.verb} $target"
+    }
+}
 
 /** One message within a conversation. */
 data class ChatMessage(
@@ -170,6 +206,27 @@ data class ChatMessage(
             // Placeholder text but no parsed attachments (e.g. an optimistic fallback).
             return if (text == ATTACHMENT_PLACEHOLDER) "[Attachment]" else ""
         }
+
+    /**
+     * If this message is a tapback (and not a *removal*), a [ReactionPreview] for the
+     * conversation list, resolving its target via [findTarget] to describe what was
+     * reacted to ("an image" / a quoted text / "a message" when the target isn't
+     * cached). Null for normal messages and reaction removals (those revert the list
+     * to the underlying real message).
+     */
+    fun reactionPreview(findTarget: (String) -> ChatMessage?): ReactionPreview? {
+        val type = reactionType ?: return null
+        if (isReactionRemoval) return null
+        val target = reactionTargetGuid?.let(findTarget)
+        val desc = when {
+            target == null -> "a message"
+            target.images.isNotEmpty() -> "an image"
+            target.attachments.isNotEmpty() -> "an attachment"
+            target.text.isNotBlank() && target.text != ATTACHMENT_PLACEHOLDER -> "“${target.text.trim()}”"
+            else -> "a message"
+        }
+        return ReactionPreview(type, fromMe, sender, desc)
+    }
 
     companion object {
         /** Stand-in body for an attachment-only message (no real text). */

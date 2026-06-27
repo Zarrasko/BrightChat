@@ -91,7 +91,11 @@ fun ConversationsScreen(viewModel: ChatViewModel, onOpenSettings: () -> Unit, on
             }
             else -> LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 items(state.conversations, key = { it.guid }) { convo ->
-                    ConversationRow(convo, state.contacts.title(convo)) { viewModel.open(convo) }
+                    // A tapback as the newest activity shows as "Liz loved an image";
+                    // otherwise the real message text, prefixed "You: " when it's ours.
+                    val subtitle = convo.lastReaction?.summary(state.contacts)
+                        ?: ((if (convo.lastFromMe) "You: " else "") + convo.lastText)
+                    ConversationRow(convo, state.contacts.title(convo), subtitle) { viewModel.open(convo) }
                 }
             }
         }
@@ -99,7 +103,7 @@ fun ConversationsScreen(viewModel: ChatViewModel, onOpenSettings: () -> Unit, on
 }
 
 @Composable
-private fun ConversationRow(convo: Conversation, title: String, onClick: () -> Unit) {
+private fun ConversationRow(convo: Conversation, title: String, subtitle: String, onClick: () -> Unit) {
     val haptics = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
     Column(
@@ -127,10 +131,10 @@ private fun ConversationRow(convo: Conversation, title: String, onClick: () -> U
             Spacer(modifier = Modifier.width(12.dp))
             Text(text = relTime(convo.lastDate), style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
         }
-        if (convo.lastText.isNotEmpty()) {
+        if (subtitle.isNotEmpty()) {
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = (if (convo.lastFromMe) "You: " else "") + convo.lastText,
+                text = subtitle,
                 style = ChatType.meta,
                 color = ChatColors.onSurfaceVariant,
                 maxLines = 2,
