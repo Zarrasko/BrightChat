@@ -4,6 +4,7 @@ package com.craigeley.chat.ui
 
 import android.content.Context
 import android.text.format.DateUtils
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -56,6 +57,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.craigeley.chat.Attachment
 import com.craigeley.chat.ChatMessage
@@ -79,6 +81,19 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     // Private API is live — otherwise reacting can't be sent, so we don't offer it.
     var reactingTo by remember { mutableStateOf<String?>(null) }
 
+    // The message the next send replies to (chosen from the long-press menu),
+    // shown as a banner above the compose bar until sent or cancelled.
+    var replyingTo by remember(convo.guid) { mutableStateOf<ChatMessage?>(null) }
+
+    // Chat details (tap the title): participants, rename, add/remove, leave.
+    // Groups only — a 1:1 has nothing to manage.
+    var showDetails by remember(convo.guid) { mutableStateOf(false) }
+    if (showDetails) {
+        BackHandler { showDetails = false }
+        ChatDetailsScreen(viewModel, onBack = { showDetails = false })
+        return
+    }
+
     // System photo picker (no permission needed; falls back to the document picker
     // where the dedicated picker isn't present). A pick sends straight away.
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -100,6 +115,9 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     // actually mean something (a group has no single read state).
     val receiptGuid = if (convo.isGroup) null else state.messages.lastOrNull { it.fromMe }?.guid
 
+    // Guid → message, so a reply row can quote the message it points back at.
+    val byGuid = remember(state.messages) { state.messages.associateBy { it.guid } }
+
     // The list is reverse-laid-out (newest pinned to the bottom), so opening a
     // thread shows the latest immediately — no scroll to watch. Only nudge to the
     // bottom for a *new* newest message, and only if the user is already down there
@@ -116,6 +134,12 @@ fun ThreadScreen(viewModel: ChatViewModel) {
             title = state.contacts.title(convo),
             onBack = viewModel::closeThread,
             modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
+            // Group details (members, rename, leave) live behind the title.
+            onTitleClick = if (convo.isGroup) {
+                { showDetails = true }
+            } else {
+                null
+            },
         )
 
         if (state.messages.isEmpty() && state.threadLoading) {
@@ -138,6 +162,10 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                         state.contacts,
                         showLabel = message.guid in labeled,
                         showReceipt = message.guid == receiptGuid,
+                        // The quoted original when this message is an inline reply.
+                        replyQuote = message.threadOriginatorGuid?.let { g ->
+                            byGuid[g]?.shortDescription ?: "an earlier message"
+                        },
                         loadImage = viewModel::loadImage,
                         onOpenAttachment = viewModel::openAttachment,
                         canReact = state.privateApi,
@@ -145,6 +173,10 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                         onLongPress = { if (state.privateApi) reactingTo = message.guid },
                         onReact = { type ->
                             viewModel.sendReaction(message, type)
+                            reactingTo = null
+                        },
+                        onReply = {
+                            replyingTo = message
                             reactingTo = null
                         },
                         onDismissPicker = { reactingTo = null },
@@ -167,8 +199,34 @@ fun ThreadScreen(viewModel: ChatViewModel) {
             TypingIndicator()
         }
 
+        // Reply banner: what the next send will reply to, with a cancel ×.
+        replyingTo?.let { target ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Replying to ${target.shortDescription}",
+                    style = ChatType.hint,
+                    color = ChatColors.onSurfaceDim,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                HapticText(
+                    text = "×",
+                    style = ChatType.body,
+                    color = ChatColors.onSurfaceDim,
+                    onClick = { replyingTo = null },
+                )
+            }
+        }
+
         ComposeBar(
-            onSend = viewModel::sendMessage,
+            onSend = { text ->
+                viewModel.sendMessage(text, replyingTo?.guid)
+                replyingTo = null
+            },
             onPickImage = {
                 pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             },
@@ -272,12 +330,14 @@ private fun MessageRow(
     contacts: Contacts,
     showLabel: Boolean,
     showReceipt: Boolean,
+    replyQuote: String?,
     loadImage: suspend (Attachment) -> ImageBitmap?,
     onOpenAttachment: (Attachment) -> Unit,
     canReact: Boolean,
     pickerOpen: Boolean,
     onLongPress: () -> Unit,
     onReact: (ReactionType) -> Unit,
+    onReply: () -> Unit,
     onDismissPicker: () -> Unit,
 ) {
     // A group-system row (rename, member change) is an event line, not a turn —
@@ -306,18 +366,38 @@ private fun MessageRow(
             Text(text = label, style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
             Spacer(modifier = Modifier.height(4.dp))
         }
+        // An inline reply points back at what it answers: a dim quote line above
+        // the turn, hugging the same side.
+        if (replyQuote != null) {
+            Text(
+                text = "↳ $replyQuote",
+                style = ChatType.hint,
+                color = ChatColors.onSurfaceDim,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(MESSAGE_MAX_WIDTH),
+                textAlign = if (message.fromMe) TextAlign.End else TextAlign.Start,
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+        }
         // Content is width-capped; the leftover gutter on the opposite side carries
         // any tapbacks (`<- ♥` / `♥ ->`), pointing back at the turn. 0.8/0.2 weights
         // keep the same cap whether or not there's a reaction.
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             if (message.fromMe) ReactionGutter(message, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
-            MessageContent(message, loadImage, onOpenAttachment, canReact, pickerOpen, onLongPress, onReact, onDismissPicker, Modifier.weight(MESSAGE_MAX_WIDTH))
+            MessageContent(message, loadImage, onOpenAttachment, canReact, pickerOpen, onLongPress, onReact, onReply, onDismissPicker, Modifier.weight(MESSAGE_MAX_WIDTH))
             if (!message.fromMe) ReactionGutter(message, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
         }
-        // The delivery receipt under your newest sent message — nothing until the
-        // server reports it delivered, then "Read <when>" once read. Live updates
-        // arrive as updated-message socket events through the normal merge.
-        if (showReceipt) {
+        // "Not delivered" on any sent message the Mac later failed to deliver
+        // (`error` set on the echo or a message-send-error event) — the failure the
+        // app used to swallow. Full white: this line matters.
+        if (message.fromMe && message.error != 0) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(text = "Not delivered", style = ChatType.hint, color = ChatColors.onSurface)
+        } else if (showReceipt) {
+            // The delivery receipt under your newest sent message — nothing until
+            // the server reports it delivered, then "Read <when>" once read. Live
+            // updates arrive as updated-message socket events through the merge.
             receiptText(message)?.let { line ->
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(text = line, style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
@@ -389,6 +469,7 @@ private fun MessageContent(
     pickerOpen: Boolean,
     onLongPress: () -> Unit,
     onReact: (ReactionType) -> Unit,
+    onReply: () -> Unit,
     onDismissPicker: () -> Unit,
     modifier: Modifier,
 ) {
@@ -406,9 +487,13 @@ private fun MessageContent(
         ),
         horizontalAlignment = align,
     ) {
-        // The tapback picker (long-press) sits above the turn it targets.
+        // The long-press menu — the six tapbacks plus Reply — sits above the turn.
         if (pickerOpen) {
-            ReactionPicker(selected = message.reactions.firstOrNull { it.fromMe }?.type, onReact = onReact)
+            ReactionPicker(
+                selected = message.reactions.firstOrNull { it.fromMe }?.type,
+                onReact = onReact,
+                onReply = onReply,
+            )
             Spacer(modifier = Modifier.height(6.dp))
         }
         message.images.forEach { image ->
@@ -457,7 +542,7 @@ private fun linkify(text: String): AnnotatedString {
 /** The six tapbacks as a row of the drawn glyphs; the user's current one (if any)
  *  shows bright so re-tapping it reads as "remove". */
 @Composable
-private fun ReactionPicker(selected: ReactionType?, onReact: (ReactionType) -> Unit) {
+private fun ReactionPicker(selected: ReactionType?, onReact: (ReactionType) -> Unit, onReply: () -> Unit) {
     val haptics = LocalHapticFeedback.current
     Row(
         horizontalArrangement = Arrangement.spacedBy(18.dp),
@@ -480,6 +565,13 @@ private fun ReactionPicker(selected: ReactionType?, onReact: (ReactionType) -> U
                 )
             }
         }
+        // Inline reply rides the same menu (both are Private-API sends).
+        HapticText(
+            text = "Reply",
+            style = ChatType.hint,
+            color = ChatColors.onSurfaceVariant,
+            onClick = onReply,
+        )
     }
 }
 

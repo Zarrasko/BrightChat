@@ -55,6 +55,10 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
     val state by viewModel.state.collectAsState()
     var query by remember { mutableStateOf("") }
     var recipients by remember { mutableStateOf<List<Contact>>(emptyList()) }
+    // Recipients the server says can't receive iMessages (Private-API check; empty
+    // when the check isn't available). Sending is blocked while any are present —
+    // an iMessage to such an address *appears* to send and dies silently on the Mac.
+    var unavailable by remember { mutableStateOf<Set<String>>(emptySet()) }
     val focus = remember { FocusRequester() }
 
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
@@ -62,6 +66,9 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
     fun addRecipient(contact: Contact) {
         if (recipients.none { it.address.equals(contact.address, ignoreCase = true) }) {
             recipients = recipients + contact
+            viewModel.checkIMessage(contact.address) { ok ->
+                if (!ok) unavailable = unavailable + contact.address
+            }
         }
         query = ""
         runCatching { focus.requestFocus() }
@@ -95,13 +102,20 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
                     HapticText(
                         text = "${contact.name} ×",
                         style = ChatType.body,
-                        color = ChatColors.onSurfaceVariant,
+                        // A can't-deliver recipient reads disabled; the line below
+                        // the divider says why.
+                        color = if (contact.address in unavailable) {
+                            ChatColors.onSurfaceDisabled
+                        } else {
+                            ChatColors.onSurfaceVariant
+                        },
                         maxLines = 1,
                         modifier = Modifier.padding(end = 12.dp),
                         onClick = {
                             recipients = recipients.filterNot {
                                 it.address.equals(contact.address, ignoreCase = true)
                             }
+                            unavailable = unavailable - contact.address
                         },
                     )
                 }
@@ -130,6 +144,20 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
         }
         HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
 
+        // Recipients the availability check flagged: name why sending is blocked.
+        val blocked = recipients.filter { it.address in unavailable }
+        if (blocked.isNotEmpty()) {
+            Text(
+                text = blocked.joinToString(", ") { it.name } +
+                    (if (blocked.size == 1) " isn’t" else " aren’t") +
+                    " on iMessage — the message can’t be delivered",
+                style = ChatType.hint,
+                color = ChatColors.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            )
+        }
+
+        val canSend = recipients.isNotEmpty() && blocked.isEmpty()
         val sendNew: (String) -> Unit = { viewModel.sendNewMessage(recipients.map { it.address }, it) }
         val pickForCompose: (() -> Unit)? = if (recipients.size == 1) {
             { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
@@ -181,8 +209,8 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
                     }
                 }
             }
-            if (recipients.isNotEmpty()) ComposeBar(onSend = sendNew, onPickImage = pickForCompose)
-        } else if (recipients.isNotEmpty()) {
+            if (canSend) ComposeBar(onSend = sendNew, onPickImage = pickForCompose)
+        } else if (canSend) {
             // Composing: the message field hugs the "To" divider (no gap, no second
             // line) so it's right under the recipient; the empty room falls below it.
             ComposeBar(onSend = sendNew, onPickImage = pickForCompose, showTopDivider = false)

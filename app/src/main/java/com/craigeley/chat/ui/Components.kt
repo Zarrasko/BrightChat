@@ -66,9 +66,16 @@ fun HapticText(
 }
 
 /** Top row shared by the sub-screens: a back chevron on the left and a centred
- *  title (the trailing spacer balances the chevron so the title sits centred). */
+ *  title (the trailing spacer balances the chevron so the title sits centred).
+ *  A non-null [onTitleClick] makes the title itself tappable (the thread uses
+ *  this to open the chat's details). */
 @Composable
-fun ScreenHeader(title: String, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun ScreenHeader(
+    title: String,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    onTitleClick: (() -> Unit)? = null,
+) {
     Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         HapticText(
             text = "‹",
@@ -77,13 +84,23 @@ fun ScreenHeader(title: String, onBack: () -> Unit, modifier: Modifier = Modifie
             onClick = onBack,
         )
         Spacer(modifier = Modifier.weight(1f))
-        Text(
-            text = title,
-            style = ChatType.body,
-            color = ChatColors.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (onTitleClick != null) {
+            HapticText(
+                text = title,
+                style = ChatType.body,
+                color = ChatColors.onSurfaceVariant,
+                maxLines = 1,
+                onClick = onTitleClick,
+            )
+        } else {
+            Text(
+                text = title,
+                style = ChatType.body,
+                color = ChatColors.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Spacer(modifier = Modifier.weight(1f))
         Spacer(modifier = Modifier.width(24.dp))
     }

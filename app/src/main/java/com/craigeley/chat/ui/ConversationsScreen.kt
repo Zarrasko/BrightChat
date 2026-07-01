@@ -2,7 +2,10 @@
 
 package com.craigeley.chat.ui
 
+import android.content.Context
 import android.text.format.DateUtils
+import java.text.DateFormat
+import java.util.Date
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -31,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
@@ -199,7 +203,11 @@ private fun ConversationRow(
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(modifier = Modifier.width(12.dp))
-                Text(text = relTime(convo.lastDate), style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
+                Text(
+                    text = listTime(LocalContext.current, convo.lastDate),
+                    style = ChatType.hint,
+                    color = ChatColors.onSurfaceDisabled,
+                )
             }
             if (subtitle.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(2.dp))
@@ -215,10 +223,17 @@ private fun ConversationRow(
     }
 }
 
-/** Relative timestamp ("3:14 PM", "Yesterday", "Mon") for the list. */
-private fun relTime(ts: Long): String =
-    if (ts <= 0L) "" else DateUtils.getRelativeTimeSpanString(
-        ts,
-        System.currentTimeMillis(),
-        DateUtils.MINUTE_IN_MILLIS,
-    ).toString()
+/**
+ * The list's timestamp, iMessage-style: a clock time for today ("3:14 PM"),
+ * "Yesterday", the weekday within the last week ("Monday"), then a short date
+ * ("7/1/26"). Absolute past a day — "18 hours ago" stops being parseable.
+ */
+private fun listTime(context: Context, ts: Long): String {
+    if (ts <= 0L) return ""
+    if (DateUtils.isToday(ts)) return DateUtils.formatDateTime(context, ts, DateUtils.FORMAT_SHOW_TIME)
+    if (DateUtils.isToday(ts + DateUtils.DAY_IN_MILLIS)) return "Yesterday"
+    if (System.currentTimeMillis() - ts < 7 * DateUtils.DAY_IN_MILLIS) {
+        return DateUtils.formatDateTime(context, ts, DateUtils.FORMAT_SHOW_WEEKDAY)
+    }
+    return DateFormat.getDateInstance(DateFormat.SHORT).format(Date(ts))
+}

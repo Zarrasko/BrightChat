@@ -191,12 +191,24 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
      * message (real guid) parsed from the response, falling back to a synthetic one
      * if the body is unexpected.
      */
-    fun send(chatGuid: String, text: String, tempGuid: String, method: String = "apple-script"): ChatMessage {
+    fun send(
+        chatGuid: String,
+        text: String,
+        tempGuid: String,
+        method: String = "apple-script",
+        replyToGuid: String? = null,
+    ): ChatMessage {
         val body = JSONObject()
             .put("chatGuid", chatGuid)
             .put("tempGuid", tempGuid)
             .put("message", text)
             .put("method", method)
+        if (replyToGuid != null) {
+            // An inline reply (`selectedMessageGuid`) — Private-API only; callers
+            // gate the reply UI on the Private API being live.
+            body.put("selectedMessageGuid", replyToGuid)
+            body.put("partIndex", 0)
+        }
         val resp = requestChecked("POST", "/api/v1/message/text", body, what = "send")
         return dataObject(resp)?.let { parseMessage(it) }
             ?: ChatMessage(tempGuid, text, System.currentTimeMillis(), fromMe = true, sender = null)
@@ -256,6 +268,47 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
      */
     fun deleteChat(chatGuid: String) {
         requestChecked("DELETE", "/api/v1/chat/${enc(chatGuid)}", null, what = "delete chat")
+    }
+
+    /** `PUT /api/v1/chat/:guid` — renames a group (Private-API only; the server
+     *  rejects renaming a 1:1). The rename shows to every member, like iMessage. */
+    fun renameChat(chatGuid: String, displayName: String) {
+        val body = JSONObject().put("displayName", displayName)
+        requestChecked("PUT", "/api/v1/chat/${enc(chatGuid)}", body, what = "rename")
+    }
+
+    /** `POST /api/v1/chat/:guid/participant/add` — adds [address] to a group
+     *  (Private-API only). iMessage may fork the group into a new room for the new
+     *  membership; a refresh picks that up. */
+    fun addParticipant(chatGuid: String, address: String) {
+        val body = JSONObject().put("address", address)
+        requestChecked("POST", "/api/v1/chat/${enc(chatGuid)}/participant/add", body, what = "add member")
+    }
+
+    /** `POST /api/v1/chat/:guid/participant/remove` — removes [address] from a
+     *  group (Private-API only). */
+    fun removeParticipant(chatGuid: String, address: String) {
+        val body = JSONObject().put("address", address)
+        requestChecked("POST", "/api/v1/chat/${enc(chatGuid)}/participant/remove", body, what = "remove member")
+    }
+
+    /** `POST /api/v1/chat/:guid/leave` — leaves a group (Private-API only). */
+    fun leaveChat(chatGuid: String) {
+        requestChecked("POST", "/api/v1/chat/${enc(chatGuid)}/leave", null, what = "leave")
+    }
+
+    /**
+     * `GET /api/v1/handle/availability/imessage` — whether [address] can receive
+     * iMessages (Private-API only). Used to warn before starting a chat with a
+     * non-iMessage number — such a send otherwise *appears* to work and dies
+     * silently on the Mac.
+     */
+    fun iMessageAvailable(address: String): Boolean {
+        val text = requestChecked(
+            "GET", "/api/v1/handle/availability/imessage", null,
+            what = "availability", extraQuery = "address=${enc(address)}",
+        )
+        return dataObject(text)?.optBoolean("available", false) == true
     }
 
     /**
@@ -518,6 +571,11 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                 itemType = o.optInt("itemType", 0),
                 groupTitle = o.optString("groupTitle").takeIf { it.isNotBlank() && it != "null" },
                 groupActionType = o.optInt("groupActionType", 0),
+                // Non-zero = this sent message failed to deliver ("Not delivered").
+                error = o.optInt("error", 0),
+                // Present when the message is an inline reply to an earlier one.
+                threadOriginatorGuid = o.optString("threadOriginatorGuid")
+                    .takeIf { it.isNotBlank() && it != "null" },
                 // Present only on tapbacks; the ViewModel folds such messages onto
                 // their target rather than rendering them. The server reports the
                 // type as a word (`love`/`-love`), not the raw iMessage int.

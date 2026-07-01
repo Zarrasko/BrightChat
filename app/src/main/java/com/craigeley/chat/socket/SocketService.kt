@@ -59,6 +59,10 @@ class SocketService : Service() {
         s.on(Socket.EVENT_CONNECT_ERROR, Emitter.Listener { Log.w(TAG, "connect error: ${it.firstOrNull()}") })
         s.on("new-message", Emitter.Listener { onMessage(it, isNew = true) })
         s.on("updated-message", Emitter.Listener { onMessage(it, isNew = false) })
+        // A send the Mac accepted but couldn't deliver (e.g. not an iMessage
+        // address) — the payload is the message with its `error` set; merging it
+        // flips the bubble to "Not delivered" instead of failing silently.
+        s.on("message-send-error", Emitter.Listener { onMessage(it, isNew = false) })
         s.on("typing-indicator", Emitter.Listener { onTyping(it) })
         // Group-system changes arrive as their own event types but carry the same
         // serialized message payload (embedded chats included), so they route

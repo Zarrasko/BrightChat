@@ -71,6 +71,29 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   `refresh()`. Note: renaming a *forked* group can legitimately split its merged
   row, since `groupIdentity` keys on name + participants and dead sibling rooms
   keep the old name.
+  **Replies (done, Private-API):** long-press → Reply queues the next send as an
+  inline reply (`selectedMessageGuid` on `message/text`); a banner above the
+  compose bar shows the target until sent/cancelled. Messages with a
+  `threadOriginatorGuid` render a dim `↳ “quote”` line above the turn
+  (`ChatMessage.shortDescription` describes the original; "an earlier message"
+  when it isn't loaded).
+  **Group management (done, Private-API):** tapping a *group* thread's title opens
+  `ChatDetailsScreen` — rename (`PUT /chat/:guid`, sent to **every** room of a
+  forked group so the name+participants merge key holds), member list with
+  add/remove (`POST /chat/:guid/participant/add|remove`; iMessage may fork a new
+  room on add), and leave (`POST /chat/:guid/leave`, all rooms). Destructive taps
+  confirm by second tap. Read-only member list without the Private API.
+  **Failed sends (done):** `ChatMessage.error` is parsed; any sent message with a
+  non-zero error shows a full-white "Not delivered" line (replacing its receipt).
+  The socket subscribes to `message-send-error` (routed like `updated-message`)
+  so the flag lands live — previously a send the Mac accepted but couldn't
+  deliver (e.g. a non-iMessage number) failed silently. Complemented by a
+  **new-message availability check** (`GET /handle/availability/imessage`,
+  Private-API): adding a recipient verifies they can receive iMessages; a flagged
+  recipient dims, a line explains, and the compose bar hides until they're removed.
+  **List timestamps** are iMessage-style absolute (`ConversationsScreen.listTime`):
+  time today, "Yesterday", weekday within a week, then a short date — not
+  "18 hours ago".
   **Forked group chats (done):** iMessage can split one group into sibling chat
   rooms — same name, identical participants, different guid — with messages divided
   across them by "era". BlueBubbles reports each room as its own chat, so the list

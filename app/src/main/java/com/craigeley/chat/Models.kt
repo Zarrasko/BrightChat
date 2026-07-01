@@ -158,6 +158,14 @@ data class ChatMessage(
     val itemType: Int = 0,
     val groupTitle: String? = null,
     val groupActionType: Int = 0,
+    // Non-zero when a message *I* sent failed to deliver (e.g. the address isn't
+    // on iMessage). The failure can land after the send call succeeds — the server
+    // flags it via `updated-message`/`message-send-error` — so without this a
+    // dead send looks identical to a good one.
+    val error: Int = 0,
+    // Set when this message is an inline reply: the guid of the message it replies
+    // to (what the Private API's `selectedMessageGuid` send param names).
+    val threadOriginatorGuid: String? = null,
     // Set only on reaction messages: the message this tapback targets (raw, may be
     // prefixed `p:0/` or `bp:`) and its `associatedMessageType` (the server's word
     // form, e.g. `love`/`-love`). Such messages aren't shown as rows — the ViewModel
@@ -269,16 +277,19 @@ data class ChatMessage(
     fun reactionPreview(findTarget: (String) -> ChatMessage?): ReactionPreview? {
         val type = reactionType ?: return null
         if (isReactionRemoval) return null
-        val target = reactionTargetGuid?.let(findTarget)
-        val desc = when {
-            target == null -> "a message"
-            target.images.isNotEmpty() -> "an image"
-            target.attachments.isNotEmpty() -> "an attachment"
-            target.text.isNotBlank() && target.text != ATTACHMENT_PLACEHOLDER -> "“${target.text.trim()}”"
-            else -> "a message"
-        }
+        val desc = reactionTargetGuid?.let(findTarget)?.shortDescription ?: "a message"
         return ReactionPreview(type, fromMe, sender, desc)
     }
+
+    /** A one-phrase stand-in for this message when another line points at it —
+     *  a tapback summary's target, or a reply's quoted original. */
+    val shortDescription: String
+        get() = when {
+            images.isNotEmpty() -> "an image"
+            attachments.isNotEmpty() -> "an attachment"
+            text.isNotBlank() && text != ATTACHMENT_PLACEHOLDER -> "“${text.trim()}”"
+            else -> "a message"
+        }
 
     companion object {
         /** Stand-in body for an attachment-only message (no real text). */

@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class Status { Idle, Loading, Ready, Error }
 
@@ -423,20 +424,27 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun sendMessage(text: String) {
+    /** Sends [text] into the open thread — as an inline reply to [replyToGuid]
+     *  when given (Private-API only; ignored otherwise, and a not-yet-acked temp
+     *  guid can't be replied to). */
+    fun sendMessage(text: String, replyToGuid: String? = null) {
         val body = text.trim()
         val convo = _state.value.open ?: return
         if (body.isEmpty()) return
         finishTyping(convo.guid) // sending clears our typing bubble
+        val reply = replyToGuid?.takeIf { _state.value.privateApi && !it.startsWith("temp-") }
         // Optimistic: show it immediately under a temp guid, then swap in the
         // server's echo (real guid) so the socket's new-message dedupes cleanly.
         val tempGuid = newTempGuid()
-        val optimistic = ChatMessage(tempGuid, body, System.currentTimeMillis(), fromMe = true, sender = null)
+        val optimistic = ChatMessage(
+            tempGuid, body, System.currentTimeMillis(), fromMe = true, sender = null,
+            threadOriginatorGuid = reply,
+        )
         updateOpenThread(convo.guid) { it + optimistic }
         _state.update { it.copy(message = null) }
         viewModelScope.launch(Dispatchers.IO) {
             performSend(convo, tempGuid, "Couldn’t send") { client, g, method ->
-                client.send(g, body, tempGuid, method)
+                client.send(g, body, tempGuid, method, reply)
             }
         }
     }
@@ -478,6 +486,120 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             } catch (t: Throwable) {
                 rollbackOptimistic(convo.guid, tempGuid, "Couldn’t react")
             }
+        }
+    }
+
+    // ---- Group management (Private API) ------------------------------------
+
+    /**
+     * Renames the open group — across *all* its rooms (best-effort), so a forked
+     * group's dead siblings keep the same name and the name+participants merge key
+     * holds instead of splitting the row. Succeeds if any room renamed; the
+     * `group-name-change` socket echo and the refresh reconcile the rest.
+     */
+    fun renameGroup(name: String) {
+        val convo = _state.value.open ?: return
+        val newName = name.trim()
+        if (!_state.value.privateApi || !convo.isGroup || newName.isEmpty()) return
+        val client = api ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val results = convo.guids.map { g -> runCatching { client.renameChat(g, newName) } }
+            if (results.none { it.isSuccess }) {
+                _state.update { it.copy(message = "Couldn’t rename") }
+                return@launch
+            }
+            _state.update { s ->
+                s.copy(
+                    open = s.open?.takeIf { it.guid == convo.guid }?.copy(displayName = newName) ?: s.open,
+                    conversations = s.conversations.map { c ->
+                        if (c.guid == convo.guid) c.copy(displayName = newName) else c
+                    },
+                )
+            }
+            loadConversations()
+        }
+    }
+
+    /** Adds [address] to the open group. iMessage may fork the group into a new
+     *  room for the new membership — the refresh reflects whatever it did. */
+    fun addMember(address: String) {
+        val convo = _state.value.open ?: return
+        val addr = address.trim()
+        if (!_state.value.privateApi || !convo.isGroup || addr.isEmpty()) return
+        val client = api ?: return
+        _state.update { it.copy(message = "Adding…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                client.addParticipant(convo.guid, addr)
+                _state.update { s ->
+                    s.copy(
+                        open = s.open?.takeIf { it.guid == convo.guid }
+                            ?.let { it.copy(participants = it.participants + addr) } ?: s.open,
+                        message = null,
+                    )
+                }
+                loadConversations()
+            } catch (t: Throwable) {
+                _state.update { it.copy(message = "Couldn’t add — are they on iMessage?") }
+            }
+        }
+    }
+
+    /** Removes [address] from the open group. */
+    fun removeMember(address: String) {
+        val convo = _state.value.open ?: return
+        if (!_state.value.privateApi || !convo.isGroup) return
+        val client = api ?: return
+        _state.update { it.copy(message = "Removing…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                client.removeParticipant(convo.guid, address)
+                _state.update { s ->
+                    s.copy(
+                        open = s.open?.takeIf { it.guid == convo.guid }
+                            ?.let { o -> o.copy(participants = o.participants.filterNot { it == address }) }
+                            ?: s.open,
+                        message = null,
+                    )
+                }
+                loadConversations()
+            } catch (t: Throwable) {
+                _state.update { it.copy(message = "Couldn’t remove them") }
+            }
+        }
+    }
+
+    /** Leaves the open group (every room of a forked group, best-effort), then
+     *  drops back to the list. iMessage refuses on too-small groups — that
+     *  surfaces as the failure message. */
+    fun leaveGroup() {
+        val convo = _state.value.open ?: return
+        if (!_state.value.privateApi || !convo.isGroup) return
+        val client = api ?: return
+        _state.update { it.copy(message = "Leaving…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            val results = convo.guids.map { g -> runCatching { client.leaveChat(g) } }
+            if (results.none { it.isSuccess }) {
+                _state.update { it.copy(message = "Couldn’t leave the conversation") }
+                return@launch
+            }
+            closeThread()
+            _state.update { it.copy(message = null) }
+            loadConversations()
+        }
+    }
+
+    /** Whether [address] can receive iMessages, delivered via [onResult] (skipped
+     *  entirely when the Private API is down — the check needs it — or on a failed
+     *  call, so "unknown" never blocks anyone). */
+    fun checkIMessage(address: String, onResult: (Boolean) -> Unit) {
+        if (!_state.value.privateApi) return
+        val client = api ?: return
+        viewModelScope.launch {
+            val available = withContext(Dispatchers.IO) {
+                runCatching { client.iMessageAvailable(address) }.getOrNull()
+            }
+            if (available != null) onResult(available)
         }
     }
 
