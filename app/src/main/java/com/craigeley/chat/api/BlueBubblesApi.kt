@@ -116,6 +116,10 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                     realDateByGuid[guid] = maxOf(realDateByGuid[guid] ?: 0L, msg.date)
                 }
                 val existing = byGuid[guid]
+                // Group events (renames, member changes) bump recency like anything
+                // else, but the *text* preview should be real speech — they have no
+                // text of their own and would otherwise blank the row's preview.
+                val isSpeech = !msg.isReaction && !msg.isGroupEvent
                 if (existing == null) {
                     // [lastReaction] is set only when the newest message is a real
                     // tapback; [lastText] still gets the older real message below as a
@@ -123,8 +127,8 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                     val reaction = msg.reactionPreview { g -> msgByGuid[g] }
                     byGuid[guid] = chatToConversation(chat, guid, msg.previewText, msg.date, msg.fromMe)
                         .copy(lastReaction = reaction)
-                    if (!msg.isReaction) previewFinal.add(guid)
-                } else if (!msg.isReaction && guid !in previewFinal) {
+                    if (isSpeech) previewFinal.add(guid)
+                } else if (isSpeech && guid !in previewFinal) {
                     // Older than the row's newest message, but the first real one —
                     // upgrade the text preview while keeping the newest date / reaction.
                     byGuid[guid] = existing.copy(lastText = msg.previewText, lastFromMe = msg.fromMe)
@@ -506,6 +510,14 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                 fromMe = o.optBoolean("isFromMe", false),
                 sender = handle?.optString("address")?.takeIf { it.isNotBlank() },
                 attachments = parseAttachments(o),
+                // Delivery receipts (epoch millis, 0/null until they happen).
+                dateDelivered = o.optLong("dateDelivered", 0L),
+                dateRead = o.optLong("dateRead", 0L),
+                // Group-system rows (renames, member changes) — no text of their
+                // own; rendered as centered event lines, not message turns.
+                itemType = o.optInt("itemType", 0),
+                groupTitle = o.optString("groupTitle").takeIf { it.isNotBlank() && it != "null" },
+                groupActionType = o.optInt("groupActionType", 0),
                 // Present only on tapbacks; the ViewModel folds such messages onto
                 // their target rather than rendering them. The server reports the
                 // type as a word (`love`/`-love`), not the raw iMessage int.

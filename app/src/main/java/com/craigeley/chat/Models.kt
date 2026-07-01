@@ -132,6 +132,13 @@ data class ReactionPreview(
     }
 }
 
+/**
+ * The group-system actions we render as centered event lines in a thread
+ * (a rename, a member change) rather than as message turns. Derived from the
+ * message's `itemType`/`groupActionType`; see [ChatMessage.groupEvent].
+ */
+enum class GroupEvent { RENAMED, MEMBER_ADDED, MEMBER_REMOVED, MEMBER_LEFT, PHOTO_CHANGED }
+
 /** One message within a conversation. */
 data class ChatMessage(
     val guid: String,
@@ -140,6 +147,17 @@ data class ChatMessage(
     val fromMe: Boolean,
     val sender: String?,      // handle address; null when from me (shown in groups)
     val attachments: List<Attachment> = emptyList(),
+    // Delivery receipts on a message *I* sent: when it reached the recipient and
+    // when they read it (0 = unknown / hasn't happened). Both arrive on the initial
+    // fetch and again via `updated-message` socket events as the status changes.
+    val dateDelivered: Long = 0,
+    val dateRead: Long = 0,
+    // Group-system rows: non-zero itemType marks a rename / member change / etc.
+    // rather than actual speech. `groupTitle` carries the new name on a rename;
+    // `groupActionType` disambiguates within an itemType (see [groupEvent]).
+    val itemType: Int = 0,
+    val groupTitle: String? = null,
+    val groupActionType: Int = 0,
     // Set only on reaction messages: the message this tapback targets (raw, may be
     // prefixed `p:0/` or `bp:`) and its `associatedMessageType` (the server's word
     // form, e.g. `love`/`-love`). Such messages aren't shown as rows — the ViewModel
@@ -159,6 +177,40 @@ data class ChatMessage(
 
     /** Non-image attachments — rendered as tappable file rows, not inline. */
     val files: List<Attachment> get() = attachments.filter { !it.isImage }
+
+    /** A group-system row (rename, member change) rather than actual speech. Such
+     *  rows have no text, so without special rendering they'd show as blank turns. */
+    val isGroupEvent: Boolean get() = itemType != 0
+
+    /** Which group event this row is — or null for an itemType we don't render
+     *  (those rows are dropped in `ChatViewModel.foldReactions`). The itemType/
+     *  groupActionType pairs match the Messages database's own encoding. */
+    val groupEvent: GroupEvent?
+        get() = when {
+            itemType == 2 -> GroupEvent.RENAMED
+            itemType == 1 && groupActionType == 0 -> GroupEvent.MEMBER_ADDED
+            itemType == 1 && groupActionType == 1 -> GroupEvent.MEMBER_REMOVED
+            itemType == 3 && groupActionType == 0 -> GroupEvent.MEMBER_LEFT
+            itemType == 3 -> GroupEvent.PHOTO_CHANGED
+            else -> null
+        }
+
+    /**
+     * The centered line for a group-event row, with [actor] already resolved to a
+     * display name ("You" / "Liz"). The affected member of an add/remove is only a
+     * handle ROWID in the payload, so it stays "someone". Null for events we
+     * don't render.
+     */
+    fun groupEventText(actor: String): String? = when (groupEvent) {
+        GroupEvent.RENAMED ->
+            groupTitle?.takeIf { it.isNotBlank() }?.let { "$actor named the conversation “$it”" }
+                ?: "$actor removed the conversation name"
+        GroupEvent.MEMBER_ADDED -> "$actor added someone to the conversation"
+        GroupEvent.MEMBER_REMOVED -> "$actor removed someone from the conversation"
+        GroupEvent.MEMBER_LEFT -> "$actor left the conversation"
+        GroupEvent.PHOTO_CHANGED -> "$actor changed the group photo"
+        null -> null
+    }
 
     /** This message is itself a tapback (folded onto its target, not shown alone). */
     val isReaction: Boolean

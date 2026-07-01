@@ -2,6 +2,8 @@
 
 package com.craigeley.chat.ui
 
+import android.content.Context
+import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,6 +45,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -92,6 +95,11 @@ fun ThreadScreen(viewModel: ChatViewModel) {
         }
     }
 
+    // The one message that shows a delivery receipt ("Delivered" / "Read 3:14 PM"):
+    // your newest sent message, like iMessage — and only in a 1:1, where receipts
+    // actually mean something (a group has no single read state).
+    val receiptGuid = if (convo.isGroup) null else state.messages.lastOrNull { it.fromMe }?.guid
+
     // The list is reverse-laid-out (newest pinned to the bottom), so opening a
     // thread shows the latest immediately — no scroll to watch. Only nudge to the
     // bottom for a *new* newest message, and only if the user is already down there
@@ -129,6 +137,7 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                         convo,
                         state.contacts,
                         showLabel = message.guid in labeled,
+                        showReceipt = message.guid == receiptGuid,
                         loadImage = viewModel::loadImage,
                         onOpenAttachment = viewModel::openAttachment,
                         canReact = state.privateApi,
@@ -262,6 +271,7 @@ private fun MessageRow(
     convo: Conversation,
     contacts: Contacts,
     showLabel: Boolean,
+    showReceipt: Boolean,
     loadImage: suspend (Attachment) -> ImageBitmap?,
     onOpenAttachment: (Attachment) -> Unit,
     canReact: Boolean,
@@ -270,6 +280,12 @@ private fun MessageRow(
     onReact: (ReactionType) -> Unit,
     onDismissPicker: () -> Unit,
 ) {
+    // A group-system row (rename, member change) is an event line, not a turn —
+    // centered and dim, with no label, gutter, or tapback affordances.
+    if (message.isGroupEvent) {
+        GroupEventRow(message, contacts)
+        return
+    }
     // Name labels on both sides — "You" for your turns, the sender's name for
     // incoming (falling back to the 1:1 counterpart when a message has no handle) —
     // but only on the first message of a same-speaker run.
@@ -298,8 +314,55 @@ private fun MessageRow(
             MessageContent(message, loadImage, onOpenAttachment, canReact, pickerOpen, onLongPress, onReact, onDismissPicker, Modifier.weight(MESSAGE_MAX_WIDTH))
             if (!message.fromMe) ReactionGutter(message, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
         }
+        // The delivery receipt under your newest sent message — nothing until the
+        // server reports it delivered, then "Read <when>" once read. Live updates
+        // arrive as updated-message socket events through the normal merge.
+        if (showReceipt) {
+            receiptText(message)?.let { line ->
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(text = line, style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
+            }
+        }
     }
 }
+
+/** A group event ("Liz named the conversation “X”") as a centered dim line —
+ *  the row form for messages that are system actions rather than speech. */
+@Composable
+private fun GroupEventRow(message: ChatMessage, contacts: Contacts) {
+    val actor = when {
+        message.fromMe -> "You"
+        message.sender != null -> contacts.sender(message.sender)
+        else -> "Someone"
+    }
+    val line = message.groupEventText(actor) ?: return
+    Text(
+        text = line,
+        style = ChatType.hint,
+        color = ChatColors.onSurfaceDim,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+    )
+}
+
+/** The receipt line for a sent message: "Read 3:14 PM" (or "Read Yesterday" for
+ *  older) once read, else "Delivered" once delivered, else nothing. */
+@Composable
+private fun receiptText(message: ChatMessage): String? {
+    val context = LocalContext.current
+    return when {
+        message.dateRead > 0 -> "Read " + readTime(context, message.dateRead)
+        message.dateDelivered > 0 -> "Delivered"
+        else -> null
+    }
+}
+
+private fun readTime(context: Context, ts: Long): String =
+    if (DateUtils.isToday(ts)) {
+        DateUtils.formatDateTime(context, ts, DateUtils.FORMAT_SHOW_TIME)
+    } else {
+        DateUtils.getRelativeTimeSpanString(ts, System.currentTimeMillis(), DateUtils.DAY_IN_MILLIS).toString()
+    }
 
 /** The gutter cell beside a turn — its tapbacks (if any) hugging the message edge
  *  at the top, so they read as belonging to the first line. */

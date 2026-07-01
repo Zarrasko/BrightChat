@@ -304,12 +304,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * Folds tapback messages onto their targets: a reaction message isn't shown as
      * its own row but attached to the message it targets as a [Reaction]. A reactor
      * holds at most one tapback per message, so we key by (target, reactor) and let
-     * the latest add win — a removal (3000s) clears it. Output is sorted by date.
+     * the latest add win — a removal (3000s) clears it. Group-event rows we can't
+     * describe (an itemType with no [GroupEvent] mapping — e.g. FaceTime call
+     * markers) are dropped here too: they have no text and would render as blank
+     * turns. Output is sorted by date.
      */
     private fun foldReactions(raw: List<ChatMessage>): List<ChatMessage> {
-        if (raw.none { it.isReaction }) return raw.sortedBy { it.date }
+        val rows = raw.filterNot { it.isGroupEvent && it.groupEvent == null }
+        if (rows.none { it.isReaction }) return rows.sortedBy { it.date }
         val active = LinkedHashMap<Pair<String, String>, Reaction?>()
-        for (r in raw.filter { it.isReaction }.sortedBy { it.date }) {
+        for (r in rows.filter { it.isReaction }.sortedBy { it.date }) {
             val target = r.reactionTargetGuid ?: continue
             val type = r.reactionType ?: continue
             val reactorKey = if (r.fromMe) "me" else (r.sender ?: "?")
@@ -319,7 +323,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         for ((key, reaction) in active) {
             if (reaction != null) byTarget.getOrPut(key.first) { mutableListOf() }.add(reaction)
         }
-        return raw.asSequence()
+        return rows.asSequence()
             .filterNot { it.isReaction }
             .map { m -> byTarget[m.guid]?.let { m.copy(reactions = it) } ?: m }
             .sortedBy { it.date }
@@ -750,16 +754,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { s ->
             val convos = s.conversations.map { c ->
                 if (incoming.chatGuid in c.guids) {
-                    // A tapback bumps recency and surfaces as "Liz loved an image"
-                    // ([lastReaction]); a removal clears that overlay; a normal message
-                    // updates the text preview and clears any reaction overlay.
-                    if (incoming.message.isReaction) {
-                        c.copy(
+                    when {
+                        // A group event (rename, member change) bumps recency but
+                        // isn't speech — the text preview keeps the newest real message.
+                        incoming.message.isGroupEvent -> c.copy(
+                            lastDate = maxOf(c.lastDate, incoming.message.date),
+                        )
+                        // A tapback bumps recency and surfaces as "Liz loved an image"
+                        // ([lastReaction]); a removal clears that overlay; a normal message
+                        // updates the text preview and clears any reaction overlay.
+                        incoming.message.isReaction -> c.copy(
                             lastDate = incoming.message.date,
                             lastReaction = incoming.message.reactionPreview(::cachedMessage),
                         )
-                    } else {
-                        c.copy(
+                        else -> c.copy(
                             lastText = incoming.message.previewText,
                             lastDate = incoming.message.date,
                             lastFromMe = incoming.message.fromMe,
@@ -771,6 +779,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }.sortedByDescending { it.lastDate }
             s.copy(conversations = convos)
+        }
+        // A rename should reflect immediately in the open thread's title; the list
+        // row's stored displayName comes from the refresh below.
+        if (incoming.message.groupEvent == GroupEvent.RENAMED) {
+            _state.update { s ->
+                val open = s.open
+                if (open != null && incoming.chatGuid in open.guids) {
+                    s.copy(open = open.copy(displayName = incoming.chatDisplayName))
+                } else {
+                    s
+                }
+            }
+            refresh()
         }
         // Fold the message into the open thread's raw list (a tapback lands on its
         // target; a normal message appends). foldReactions re-runs in updateOpenThread.

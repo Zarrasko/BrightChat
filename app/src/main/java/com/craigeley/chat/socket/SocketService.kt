@@ -60,6 +60,13 @@ class SocketService : Service() {
         s.on("new-message", Emitter.Listener { onMessage(it, isNew = true) })
         s.on("updated-message", Emitter.Listener { onMessage(it, isNew = false) })
         s.on("typing-indicator", Emitter.Listener { onTyping(it) })
+        // Group-system changes arrive as their own event types but carry the same
+        // serialized message payload (embedded chats included), so they route
+        // through the normal message path — the thread shows them as event rows
+        // and the list bumps. They never notify (see onMessage's isGroupEvent gate).
+        for (event in listOf("group-name-change", "participant-added", "participant-removed", "participant-left")) {
+            s.on(event, Emitter.Listener { onMessage(it, isNew = true) })
+        }
         s.connect()
     }
 
@@ -75,8 +82,9 @@ class SocketService : Service() {
         val data = args?.firstOrNull() as? JSONObject ?: return
         val incoming = BlueBubblesApi.messageEvent(data, isNew) ?: return
         SocketBus.incoming.tryEmit(incoming)
-        // Notify only for genuinely new incoming messages the user can't see.
-        if (isNew && !incoming.message.fromMe && !AppForeground.active) {
+        // Notify only for genuinely new incoming messages the user can't see —
+        // not group events (renames etc.), whose `text` is empty.
+        if (isNew && !incoming.message.fromMe && !incoming.message.isGroupEvent && !AppForeground.active) {
             // Prefer an explicit (group) chat name; otherwise resolve the sender's
             // address to a contact name from the persisted index, falling back to
             // the raw address. Read fresh so it reflects the latest address book.

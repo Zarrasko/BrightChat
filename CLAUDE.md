@@ -54,6 +54,23 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   than shown as junk file rows. URLs in a message body are linkified
   (`ThreadScreen.linkify` → `LinkAnnotation.Url`) so they're tappable (underlined,
   open in the browser).
+  **Read receipts — display (done):** messages carry `dateDelivered`/`dateRead`;
+  the thread shows a dim "Delivered" / "Read 3:14 PM" line under your newest sent
+  message in a 1:1 (not groups — no single read state). Status changes arrive live
+  as `updated-message` socket events through the existing guid merge; no Private
+  API needed to *display* (only `markRead` sending is gated).
+  **Group-event rows (done):** renames/member changes are messages with
+  `itemType != 0` (no text — they used to render as blank turns). Known events
+  (rename / member added/removed/left / photo change, see `GroupEvent` in
+  `Models.kt`) render as a centered dim line ("Liz named the conversation “X”");
+  unknown itemTypes (e.g. FaceTime markers) are dropped in `foldReactions`. The
+  socket also subscribes to `group-name-change`/`participant-*` events (same
+  serialized-message payload as `new-message`, routed through `messageEvent`; never
+  notified). In the list they bump recency but the text preview keeps the newest
+  real message; a live rename updates the open thread's title and triggers a
+  `refresh()`. Note: renaming a *forked* group can legitimately split its merged
+  row, since `groupIdentity` keys on name + participants and dead sibling rooms
+  keep the old name.
   **Forked group chats (done):** iMessage can split one group into sibling chat
   rooms — same name, identical participants, different guid — with messages divided
   across them by "era". BlueBubbles reports each room as its own chat, so the list
