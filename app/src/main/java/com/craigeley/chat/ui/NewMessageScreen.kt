@@ -76,21 +76,11 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
     }
 
     Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 20.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            HapticText(
-                text = "‹",
-                style = ChatType.title,
-                color = ChatColors.onSurface,
-                onClick = viewModel::cancelNewMessage,
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            Text(text = "New Message", style = ChatType.body, color = ChatColors.onSurfaceVariant)
-            Spacer(modifier = Modifier.weight(1f))
-            Spacer(modifier = Modifier.width(24.dp))
-        }
+        ScreenHeader(
+            title = "New Message",
+            onBack = viewModel::cancelNewMessage,
+            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
+        )
 
         // "To" line: chosen recipients as removable chips, then an inline field to
         // add more. FlowRow lets chips wrap and the field flow after them, native-style.

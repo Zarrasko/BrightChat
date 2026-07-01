@@ -53,7 +53,6 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.craigeley.chat.Attachment
 import com.craigeley.chat.ChatMessage
@@ -105,28 +104,11 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     }
 
     Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 20.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            HapticText(
-                text = "‹",
-                style = ChatType.title,
-                color = ChatColors.onSurface,
-                onClick = viewModel::closeThread,
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            Text(
-                text = state.contacts.title(convo),
-                style = ChatType.body,
-                color = ChatColors.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            // Balances the back chevron so the title sits centred.
-            Spacer(modifier = Modifier.width(24.dp))
-        }
+        ScreenHeader(
+            title = state.contacts.title(convo),
+            onBack = viewModel::closeThread,
+            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
+        )
 
         if (state.messages.isEmpty() && state.threadLoading) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -288,8 +270,6 @@ private fun MessageRow(
     onReact: (ReactionType) -> Unit,
     onDismissPicker: () -> Unit,
 ) {
-    val align = if (message.fromMe) Alignment.End else Alignment.Start
-    val textAlign = if (message.fromMe) TextAlign.End else TextAlign.Start
     // Name labels on both sides — "You" for your turns, the sender's name for
     // incoming (falling back to the 1:1 counterpart when a message has no handle) —
     // but only on the first message of a same-speaker run.
@@ -300,12 +280,12 @@ private fun MessageRow(
         convo.participants.size == 1 -> contacts.sender(convo.participants[0])
         else -> null
     }
-    val body = message.bodyText
-    val interaction = remember { MutableInteractionSource() }
-    val hasReactions = message.reactions.isNotEmpty()
     // The name label sits above the turn (not inside the content column) so the
     // gutter reaction lines up with the message's first line, not the label.
-    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = align) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = if (message.fromMe) Alignment.End else Alignment.Start,
+    ) {
         if (label != null) {
             Text(text = label, style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
             Spacer(modifier = Modifier.height(4.dp))
@@ -314,13 +294,9 @@ private fun MessageRow(
         // any tapbacks (`<- ♥` / `♥ ->`), pointing back at the turn. 0.8/0.2 weights
         // keep the same cap whether or not there's a reaction.
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-            if (message.fromMe) {
-                ReactionGutter(message, hasReactions, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
-                MessageContent(message, body, align, textAlign, loadImage, onOpenAttachment, canReact, pickerOpen, onLongPress, onReact, onDismissPicker, interaction, Modifier.weight(MESSAGE_MAX_WIDTH))
-            } else {
-                MessageContent(message, body, align, textAlign, loadImage, onOpenAttachment, canReact, pickerOpen, onLongPress, onReact, onDismissPicker, interaction, Modifier.weight(MESSAGE_MAX_WIDTH))
-                ReactionGutter(message, hasReactions, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
-            }
+            if (message.fromMe) ReactionGutter(message, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
+            MessageContent(message, loadImage, onOpenAttachment, canReact, pickerOpen, onLongPress, onReact, onDismissPicker, Modifier.weight(MESSAGE_MAX_WIDTH))
+            if (!message.fromMe) ReactionGutter(message, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
         }
     }
 }
@@ -328,25 +304,22 @@ private fun MessageRow(
 /** The gutter cell beside a turn — its tapbacks (if any) hugging the message edge
  *  at the top, so they read as belonging to the first line. */
 @Composable
-private fun ReactionGutter(message: ChatMessage, hasReactions: Boolean, modifier: Modifier) {
+private fun ReactionGutter(message: ChatMessage, modifier: Modifier) {
     Box(
         modifier = modifier,
         contentAlignment = if (message.fromMe) Alignment.TopEnd else Alignment.TopStart,
     ) {
-        if (hasReactions) {
+        if (message.reactions.isNotEmpty()) {
             GutterReactions(message.reactions, message.fromMe, modifier = Modifier.padding(horizontal = 4.dp))
         }
     }
 }
 
-/** The message itself: optional name label, the long-press tapback picker, inline
- *  images, then the text — no bubbles, just a column hugging its side. */
+/** The message itself: the long-press tapback picker, inline images, tappable file
+ *  rows, then the text — no bubbles, just a column hugging its side. */
 @Composable
 private fun MessageContent(
     message: ChatMessage,
-    body: String?,
-    align: Alignment.Horizontal,
-    textAlign: TextAlign,
     loadImage: suspend (Attachment) -> ImageBitmap?,
     onOpenAttachment: (Attachment) -> Unit,
     canReact: Boolean,
@@ -354,9 +327,12 @@ private fun MessageContent(
     onLongPress: () -> Unit,
     onReact: (ReactionType) -> Unit,
     onDismissPicker: () -> Unit,
-    interaction: MutableInteractionSource,
     modifier: Modifier,
 ) {
+    val align = if (message.fromMe) Alignment.End else Alignment.Start
+    val textAlign = if (message.fromMe) TextAlign.End else TextAlign.Start
+    val body = message.bodyText
+    val interaction = remember { MutableInteractionSource() }
     Column(
         modifier = modifier.combinedClickable(
             interactionSource = interaction,

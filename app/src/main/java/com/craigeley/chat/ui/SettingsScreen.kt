@@ -1,13 +1,11 @@
 package com.craigeley.chat.ui
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -45,22 +43,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
             .padding(ChatDimens.screenPadding),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            HapticText(
-                text = "‹",
-                style = ChatType.title,
-                color = ChatColors.onSurface,
-                onClick = onBack,
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            Text(text = "Settings", style = ChatType.body, color = ChatColors.onSurfaceVariant)
-            Spacer(modifier = Modifier.weight(1f))
-            // Balances the back chevron so the title sits centred.
-            Spacer(modifier = Modifier.width(16.dp))
-        }
+        ScreenHeader(title = "Settings", onBack = onBack)
 
         Spacer(modifier = Modifier.weight(1f))
 

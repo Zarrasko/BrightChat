@@ -42,10 +42,6 @@ object Store {
 
     fun hasPassword(context: Context): Boolean = !password(context).isNullOrBlank()
 
-    fun clearPassword(context: Context) {
-        prefs(context).edit().remove(KEY_PASSWORD).apply()
-    }
-
     /**
      * Persists the contact index so the [com.craigeley.chat.socket.SocketService] —
      * which can run with no activity/ViewModel alive (e.g. started at boot) — can

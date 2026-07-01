@@ -38,18 +38,16 @@ data class ServerInfo(val reachable: Boolean, val privateApiReady: Boolean)
  */
 class BlueBubblesApi(private val baseUrl: String, private val password: String) {
 
-    /** `GET /api/v1/server/info` — used to validate the password on setup. */
-    fun validate(): Boolean = request("GET", "/api/v1/server/info", null).first in 200..299
-
     /**
-     * `GET /api/v1/server/info` — like [validate] but also reads whether the Private
-     * API is live (`private_api` && `helper_connected`), so the app can offer
-     * tapbacks only when the server can actually send them.
+     * `GET /api/v1/server/info` — validates the URL/password (setup relies on
+     * [ServerInfo.reachable]) and reads whether the Private API is live
+     * (`private_api` && `helper_connected`), so the app can offer tapbacks only
+     * when the server can actually send them.
      */
     fun serverInfo(): ServerInfo {
         val (code, text) = request("GET", "/api/v1/server/info", null)
         if (code !in 200..299) return ServerInfo(reachable = false, privateApiReady = false)
-        val data = runCatching { JSONObject(text).optJSONObject("data") }.getOrNull()
+        val data = dataObject(text)
         val privateApi = data?.optBoolean("private_api", false) == true
         val helper = data?.optBoolean("helper_connected", false) == true
         return ServerInfo(reachable = true, privateApiReady = privateApi && helper)
@@ -84,8 +82,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
             // tell text-less messages apart from genuinely empty ones.
             .put("with", JSONArray().put("chats").put("chats.participants").put("attachment"))
             .put("sort", "DESC")
-        val (code, respText) = request("POST", "/api/v1/message/query", body)
-        if (code !in 200..299) throw ApiException(code, "message/query failed ($code)")
+        val respText = requestChecked("POST", "/api/v1/message/query", body, what = "message/query")
         val data = JSONObject(respText).optJSONArray("data") ?: JSONArray()
         // Parse every swept message once, indexed by guid, so a tapback can describe
         // its target ("an image" vs a quote) for the list. The target is an *older*
@@ -170,8 +167,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
     fun messages(chatGuid: String, limit: Int = 100, offset: Int = 0): List<ChatMessage> {
         val path = "/api/v1/chat/${enc(chatGuid)}/message"
         val query = "with=handle,attachment&sort=DESC&limit=$limit&offset=$offset"
-        val (code, text) = request("GET", path, null, extraQuery = query)
-        if (code !in 200..299) throw ApiException(code, "message query failed ($code)")
+        val text = requestChecked("GET", path, null, what = "message query", extraQuery = query)
         val data = JSONObject(text).optJSONArray("data") ?: JSONArray()
         return (0 until data.length()).map { parseMessage(data.getJSONObject(it)) }
     }
@@ -197,10 +193,8 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
             .put("tempGuid", tempGuid)
             .put("message", text)
             .put("method", method)
-        val (code, resp) = request("POST", "/api/v1/message/text", body)
-        if (code !in 200..299) throw ApiException(code, "send failed ($code)")
-        val data = runCatching { JSONObject(resp).optJSONObject("data") }.getOrNull()
-        return data?.let { parseMessage(it) }
+        val resp = requestChecked("POST", "/api/v1/message/text", body, what = "send")
+        return dataObject(resp)?.let { parseMessage(it) }
             ?: ChatMessage(tempGuid, text, System.currentTimeMillis(), fromMe = true, sender = null)
     }
 
@@ -222,11 +216,9 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
             .put("selectedMessageGuid", selectedMessageGuid)
             .put("reaction", reaction)
             .put("partIndex", partIndex)
-        val (code, resp) = request("POST", "/api/v1/message/react", body)
-        if (code !in 200..299) throw ApiException(code, "react failed ($code)")
-        val data = runCatching { JSONObject(resp).optJSONObject("data") }.getOrNull()
-        return data?.let { parseMessage(it) }
-            ?: throw ApiException(code, "react: no message returned")
+        val resp = requestChecked("POST", "/api/v1/message/react", body, what = "react")
+        return dataObject(resp)?.let { parseMessage(it) }
+            ?: throw IOException("react: no message returned")
     }
 
     /**
@@ -236,8 +228,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
      * reading on another device). Idempotent; callers fire it best-effort.
      */
     fun markRead(chatGuid: String) {
-        val (code, _) = request("POST", "/api/v1/chat/${enc(chatGuid)}/read", null)
-        if (code !in 200..299) throw ApiException(code, "mark read failed ($code)")
+        requestChecked("POST", "/api/v1/chat/${enc(chatGuid)}/read", null, what = "mark read")
     }
 
     /**
@@ -260,8 +251,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
      * Irreversible; with Messages-in-iCloud on it can also clear from other devices.
      */
     fun deleteChat(chatGuid: String) {
-        val (code, _) = request("DELETE", "/api/v1/chat/${enc(chatGuid)}", null)
-        if (code !in 200..299) throw ApiException(code, "delete chat failed ($code)")
+        requestChecked("DELETE", "/api/v1/chat/${enc(chatGuid)}", null, what = "delete chat")
     }
 
     /**
@@ -318,8 +308,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
             val resp = stream?.bufferedReader()?.use { it.readText() } ?: ""
             if (code !in 200..299) throw ApiException(code, "send attachment failed ($code)")
-            val data = runCatching { JSONObject(resp).optJSONObject("data") }.getOrNull()
-            data?.let { parseMessage(it) }
+            dataObject(resp)?.let { parseMessage(it) }
                 ?: ChatMessage(tempGuid, ChatMessage.ATTACHMENT_PLACEHOLDER, System.currentTimeMillis(), fromMe = true, sender = null)
         } finally {
             conn.disconnect()
@@ -369,10 +358,9 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
             .put("message", text)
             .put("service", service)
             .put("method", if (isGroup) "private-api" else "apple-script")
-        val (code, resp) = request("POST", "/api/v1/chat/new", body)
-        if (code !in 200..299) throw ApiException(code, "new chat failed ($code)")
-        val guid = JSONObject(resp).optJSONObject("data")?.optString("guid")
-        return guid?.takeIf { it.isNotBlank() } ?: throw ApiException(code, "new chat: no guid returned")
+        val resp = requestChecked("POST", "/api/v1/chat/new", body, what = "new chat")
+        val guid = dataObject(resp)?.optString("guid")
+        return guid?.takeIf { it.isNotBlank() } ?: throw IOException("new chat: no guid returned")
     }
 
     /**
@@ -381,8 +369,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
      * display name). [com.craigeley.chat.Contacts.from] turns this into a lookup.
      */
     fun contacts(): List<Pair<String, String>> {
-        val (code, text) = request("GET", "/api/v1/contact", null)
-        if (code !in 200..299) throw ApiException(code, "contact failed ($code)")
+        val text = requestChecked("GET", "/api/v1/contact", null, what = "contact")
         val data = JSONObject(text).optJSONArray("data") ?: JSONArray()
         val out = ArrayList<Pair<String, String>>()
         for (i in 0 until data.length()) {
@@ -440,6 +427,24 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
     // ---- transport --------------------------------------------------------
 
     private fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
+
+    /** [request], returning the body text and throwing an [ApiException] labelled
+     *  [what] on a non-2xx status — the shape almost every endpoint wants. */
+    private fun requestChecked(
+        method: String,
+        path: String,
+        body: JSONObject?,
+        what: String,
+        extraQuery: String? = null,
+    ): String {
+        val (code, text) = request(method, path, body, extraQuery)
+        if (code !in 200..299) throw ApiException(code, "$what failed ($code)")
+        return text
+    }
+
+    /** The response body's `data` object, or null when the shape is unexpected. */
+    private fun dataObject(resp: String): JSONObject? =
+        runCatching { JSONObject(resp).optJSONObject("data") }.getOrNull()
 
     private fun request(
         method: String,

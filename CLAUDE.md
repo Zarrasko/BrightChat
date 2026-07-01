@@ -108,8 +108,8 @@ clears the password and returns to setup.
 - **`BlueBubblesApi`** (`api/BlueBubblesApi.kt`) — the REST surface, plain
   `HttpURLConnection` + `org.json` (no networking dependency, like hive/pod).
   Auth is the server password as the `password` query param on every call.
-  `validate()` → `GET /server/info` (bool reachable); `serverInfo()` → same endpoint
-  but also reads `private_api && helper_connected` into a `ServerInfo` so the app can
+  `serverInfo()` → `GET /server/info` (`ServerInfo.reachable` is the setup check)
+  and also reads `private_api && helper_connected` into the `ServerInfo` so the app can
   gate tapback *sending* on the Private API being live; `react(guid,selectedMsgGuid,
   reaction,partIndex)` → `POST /message/react` (Private-API only; `reaction` is a
   `ReactionType.apiValue`, prefix `-` to remove; returns the created reaction message

@@ -1,7 +1,12 @@
 package com.craigeley.chat
 
 import android.app.Application
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.craigeley.chat.api.ApiException
@@ -10,6 +15,7 @@ import com.craigeley.chat.api.Store
 import com.craigeley.chat.socket.AppForeground
 import com.craigeley.chat.socket.SocketBus
 import com.craigeley.chat.socket.SocketService
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -108,23 +114,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (url.isBlank() || pw.isEmpty()) return
         _state.update { it.copy(status = Status.Loading, message = "Connecting…") }
         viewModelScope.launch(Dispatchers.IO) {
-            // Normalize the URL the same way we store it, then validate against it.
-            Store.setBaseUrl(app, url)
-            val base = Store.baseUrl(app) ?: return@launch
-            val client = BlueBubblesApi(base, pw)
-            val info = runCatching { client.serverInfo() }.getOrNull()
-            if (info?.reachable == true) {
-                Store.setPassword(app, pw)
-                Store.setPrivateApi(app, info.privateApiReady)
-                api = client
-                _state.update { it.copy(isConfigured = true, privateApi = info.privateApiReady, message = null) }
-                loadConversations()
-                startSocket()
-            } else {
-                _state.update {
-                    it.copy(status = Status.Error, message = "Couldn’t reach the server — check the URL and password")
-                }
-            }
+            val client = connectClient(url, pw, "Couldn’t reach the server — check the URL and password")
+                ?: return@launch
+            Store.setPassword(app, pw)
+            _state.update { it.copy(isConfigured = true) }
+            loadConversations()
+            startSocket()
         }
     }
 
@@ -135,24 +130,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val pw = Store.password(app)?.takeIf { it.isNotBlank() } ?: return
         _state.update { it.copy(status = Status.Loading, message = "Connecting…") }
         viewModelScope.launch(Dispatchers.IO) {
-            Store.setBaseUrl(app, url)
-            val base = Store.baseUrl(app) ?: return@launch
-            val client = BlueBubblesApi(base, pw)
-            val info = runCatching { client.serverInfo() }.getOrNull()
-            if (info?.reachable == true) {
-                api = client
-                Store.setPrivateApi(app, info.privateApiReady)
-                _state.update { it.copy(privateApi = info.privateApiReady, message = null) }
-                // Bounce the socket so it reconnects to the new host.
-                stopSocket()
-                startSocket()
-                loadConversations()
-            } else {
-                _state.update {
-                    it.copy(status = Status.Error, message = "Couldn’t reach that server — check the URL")
-                }
-            }
+            connectClient(url, pw, "Couldn’t reach that server — check the URL") ?: return@launch
+            // Bounce the socket so it reconnects to the new host.
+            stopSocket()
+            startSocket()
+            loadConversations()
         }
+    }
+
+    /**
+     * Shared tail of [saveSetup]/[updateServerUrl]: normalizes + stores [url] (the
+     * same way it's read back), validates it against [pw], and installs the client
+     * as [api], caching the Private API flag. Returns null — with [failureMessage]
+     * surfaced as an error — when the server can't be reached.
+     */
+    private fun connectClient(url: String, pw: String, failureMessage: String): BlueBubblesApi? {
+        Store.setBaseUrl(app, url)
+        val base = Store.baseUrl(app) ?: return null
+        val client = BlueBubblesApi(base, pw)
+        val info = runCatching { client.serverInfo() }.getOrNull()
+        if (info?.reachable != true) {
+            _state.update { it.copy(status = Status.Error, message = failureMessage) }
+            return null
+        }
+        api = client
+        Store.setPrivateApi(app, info.privateApiReady)
+        _state.update { it.copy(privateApi = info.privateApiReady, message = null) }
+        return client
     }
 
     // ---- Conversation list ------------------------------------------------
@@ -371,6 +375,50 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         throw last ?: IllegalStateException("no send targets")
     }
 
+    /** A client-side guid for an optimistic message, swapped for the server echo's
+     *  real guid on reconcile. The `temp-` prefix marks a not-yet-acked message. */
+    private fun newTempGuid(prefix: String = "temp") =
+        "$prefix-${System.currentTimeMillis()}-${(0..99999).random()}"
+
+    /** Swaps the optimistic [tempGuid] row for the server's [sent] echo, deduping
+     *  in case the socket echo already landed under the real guid. */
+    private fun reconcileEcho(convoGuid: String, tempGuid: String, sent: ChatMessage) {
+        updateOpenThread(convoGuid) { list ->
+            list.map { if (it.guid == tempGuid) sent else it }.distinctBy { it.guid }
+        }
+    }
+
+    /** Drops the optimistic [tempGuid] row after a failed send and surfaces [error]. */
+    private fun rollbackOptimistic(convoGuid: String, tempGuid: String, error: String) {
+        updateOpenThread(convoGuid) { list -> list.filterNot { it.guid == tempGuid } }
+        _state.update { it.copy(message = error) }
+    }
+
+    /**
+     * Shared tail of [sendMessage]/[sendImage]: runs [call] against the first room
+     * of [convo] that delivers (see [sendAcrossRooms]), then reconciles the
+     * optimistic [tempGuid] row with the echo and bumps the conversation list —
+     * or rolls the optimistic row back with [errorMessage]. Call off-main.
+     */
+    private fun performSend(
+        convo: Conversation,
+        tempGuid: String,
+        errorMessage: String,
+        call: (BlueBubblesApi, String, String) -> ChatMessage,
+    ) {
+        val client = api ?: return
+        try {
+            val method = sendMethod()
+            val sent = sendAcrossRooms(convo.guid, sendTargets(convo, method)) { g ->
+                call(client, g, method)
+            }
+            reconcileEcho(convo.guid, tempGuid, sent)
+            bumpConversation(convo.guid, sent.previewText, sent.date, fromMe = true)
+        } catch (t: Throwable) {
+            rollbackOptimistic(convo.guid, tempGuid, errorMessage)
+        }
+    }
+
     fun sendMessage(text: String) {
         val body = text.trim()
         val convo = _state.value.open ?: return
@@ -378,24 +426,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         finishTyping(convo.guid) // sending clears our typing bubble
         // Optimistic: show it immediately under a temp guid, then swap in the
         // server's echo (real guid) so the socket's new-message dedupes cleanly.
-        val tempGuid = "temp-${System.currentTimeMillis()}-${(0..99999).random()}"
+        val tempGuid = newTempGuid()
         val optimistic = ChatMessage(tempGuid, body, System.currentTimeMillis(), fromMe = true, sender = null)
         updateOpenThread(convo.guid) { it + optimistic }
         _state.update { it.copy(message = null) }
         viewModelScope.launch(Dispatchers.IO) {
-            val client = api ?: return@launch
-            try {
-                val method = sendMethod()
-                val sent = sendAcrossRooms(convo.guid, sendTargets(convo, method)) { g ->
-                    client.send(g, body, tempGuid, method)
-                }
-                updateOpenThread(convo.guid) { list ->
-                    list.map { if (it.guid == tempGuid) sent else it }.distinctBy { it.guid }
-                }
-                bumpConversation(convo.guid, sent.previewText, sent.date, fromMe = true)
-            } catch (t: Throwable) {
-                updateOpenThread(convo.guid) { list -> list.filterNot { it.guid == tempGuid } }
-                _state.update { it.copy(message = "Couldn’t send") }
+            performSend(convo, tempGuid, "Couldn’t send") { client, g, method ->
+                client.send(g, body, tempGuid, method)
             }
         }
     }
@@ -418,7 +455,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         val removing = target.reactions.firstOrNull { it.fromMe }?.type == type
         val apiValue = if (removing) "-${type.apiValue}" else type.apiValue
-        val tempGuid = "temp-react-${System.currentTimeMillis()}-${(0..99999).random()}"
+        val tempGuid = newTempGuid("temp-react")
         val optimistic = ChatMessage(
             guid = tempGuid,
             text = "",
@@ -433,12 +470,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val client = api ?: return@launch
             try {
                 val sent = client.react(convo.guid, target.guid, apiValue)
-                updateOpenThread(convo.guid) { list ->
-                    list.map { if (it.guid == tempGuid) sent else it }.distinctBy { it.guid }
-                }
+                reconcileEcho(convo.guid, tempGuid, sent)
             } catch (t: Throwable) {
-                updateOpenThread(convo.guid) { list -> list.filterNot { it.guid == tempGuid } }
-                _state.update { it.copy(message = "Couldn’t react") }
+                rollbackOptimistic(convo.guid, tempGuid, "Couldn’t react")
             }
         }
     }
@@ -447,7 +481,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Decoded inline image for [attachment] (downloaded + cached on first use),
      *  or null if it isn't an image / can't be fetched. Called from the thread UI. */
-    suspend fun loadImage(attachment: Attachment): androidx.compose.ui.graphics.ImageBitmap? {
+    suspend fun loadImage(attachment: Attachment): ImageBitmap? {
         val client = api ?: return null
         return Attachments.image(app, client, attachment)
     }
@@ -462,14 +496,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(message = "Downloading…") }
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val dir = java.io.File(app.cacheDir, "shared").apply { mkdirs() }
+                val dir = File(app.cacheDir, "shared").apply { mkdirs() }
                 val safe = (attachment.transferName ?: attachment.guid)
                     .replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { attachment.guid }
-                val dest = java.io.File(dir, safe)
+                val dest = File(dir, safe)
                 if (!dest.exists() || dest.length() == 0L) client.downloadAttachment(attachment.guid, dest)
-                val uri = androidx.core.content.FileProvider.getUriForFile(
-                    app, "${app.packageName}.fileprovider", dest,
-                )
+                val uri = FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", dest)
                 val mime = attachment.mimeType ?: "application/octet-stream"
                 _state.update { it.copy(message = null) }
                 val view = Intent(Intent.ACTION_VIEW).apply {
@@ -478,7 +510,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 try {
                     app.startActivity(view)
-                } catch (e: android.content.ActivityNotFoundException) {
+                } catch (e: ActivityNotFoundException) {
                     val send = Intent(Intent.ACTION_SEND).apply {
                         type = mime
                         putExtra(Intent.EXTRA_STREAM, uri)
@@ -501,50 +533,47 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * cache under the temp guid so the normal loader renders them without a round
      * trip — then swaps in the server's echo (real guid) so the socket dedupes.
      */
-    fun sendImage(uri: android.net.Uri) {
+    fun sendImage(uri: Uri) {
         val convo = _state.value.open ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            val client = api ?: return@launch
-            val resolver = app.contentResolver
-            val bytes = runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
-            if (bytes == null || bytes.isEmpty()) {
-                _state.update { it.copy(message = "Couldn’t read that image") }
-                return@launch
-            }
-            val mime = resolver.getType(uri) ?: "image/jpeg"
-            val name = queryDisplayName(uri) ?: "image.jpg"
-            val tempGuid = "temp-${System.currentTimeMillis()}-${(0..99999).random()}"
+            val img = readPickedImage(uri) ?: return@launch
+            val tempGuid = newTempGuid()
             // Seed the cache so the optimistic bubble renders the local image.
-            Attachments.cacheLocal(app, tempGuid, bytes)
+            Attachments.cacheLocal(app, tempGuid, img.bytes)
             val optimistic = ChatMessage(
                 guid = tempGuid,
                 text = ChatMessage.ATTACHMENT_PLACEHOLDER,
                 date = System.currentTimeMillis(),
                 fromMe = true,
                 sender = null,
-                attachments = listOf(Attachment(tempGuid, mime, name, width = 0, height = 0)),
+                attachments = listOf(Attachment(tempGuid, img.mime, img.name, width = 0, height = 0)),
             )
             updateOpenThread(convo.guid) { it + optimistic }
             _state.update { it.copy(message = null) }
-            try {
-                val method = sendMethod()
-                val sent = sendAcrossRooms(convo.guid, sendTargets(convo, method)) { g ->
-                    client.sendAttachment(g, bytes, name, mime, tempGuid, method)
-                }
-                updateOpenThread(convo.guid) { list ->
-                    list.map { if (it.guid == tempGuid) sent else it }.distinctBy { it.guid }
-                }
-                bumpConversation(convo.guid, sent.previewText, sent.date, fromMe = true)
-            } catch (t: Throwable) {
-                updateOpenThread(convo.guid) { list -> list.filterNot { it.guid == tempGuid } }
-                _state.update { it.copy(message = "Couldn’t send image") }
+            performSend(convo, tempGuid, "Couldn’t send image") { client, g, method ->
+                client.sendAttachment(g, img.bytes, img.name, img.mime, tempGuid, method)
             }
         }
     }
 
-    private fun queryDisplayName(uri: android.net.Uri): String? =
+    /** A picked image's bytes plus the metadata a send needs. */
+    private class PickedImage(val bytes: ByteArray, val mime: String, val name: String)
+
+    /** Reads the image behind a picker [uri] (bytes, mime, display name), or null —
+     *  with the error surfaced — when it can't be read. Call off-main. */
+    private fun readPickedImage(uri: Uri): PickedImage? {
+        val resolver = app.contentResolver
+        val bytes = runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+        if (bytes == null || bytes.isEmpty()) {
+            _state.update { it.copy(message = "Couldn’t read that image") }
+            return null
+        }
+        return PickedImage(bytes, resolver.getType(uri) ?: "image/jpeg", queryDisplayName(uri) ?: "image.jpg")
+    }
+
+    private fun queryDisplayName(uri: Uri): String? =
         runCatching {
-            app.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                 ?.use { if (it.moveToFirst() && it.columnCount > 0) it.getString(0) else null }
         }.getOrNull()
 
@@ -556,25 +585,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * normalized to the E.164 handle iMessage keys its guids by (`newChat`'s
      * AppleScript resolves loose addresses for text, but a constructed guid can't).
      */
-    fun sendNewImage(address: String, uri: android.net.Uri) {
+    fun sendNewImage(address: String, uri: Uri) {
         val addr = address.trim()
         if (addr.isEmpty()) return
         _state.update { it.copy(composingNew = false, message = "Sending…") }
         viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
-            val resolver = app.contentResolver
-            val bytes = runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
-            if (bytes == null || bytes.isEmpty()) {
-                _state.update { it.copy(message = "Couldn’t read that image") }
-                return@launch
-            }
-            val mime = resolver.getType(uri) ?: "image/jpeg"
-            val name = queryDisplayName(uri) ?: "image.jpg"
+            val img = readPickedImage(uri) ?: return@launch
             val handle = imessageHandle(addr)
             val guid = "iMessage;-;$handle"
-            val tempGuid = "temp-${System.currentTimeMillis()}-${(0..99999).random()}"
             try {
-                client.sendAttachment(guid, bytes, name, mime, tempGuid, sendMethod())
+                client.sendAttachment(guid, img.bytes, img.name, img.mime, newTempGuid(), sendMethod())
                 messageCache.remove(guid)
                 val convo = Conversation(
                     guid = guid,
