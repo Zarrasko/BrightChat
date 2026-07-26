@@ -23,8 +23,8 @@ android {
         applicationId = "com.craigeley.chat"
         minSdk = 34   // Light Phone III runs Android 14 — the only target device.
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.1.5"
+        versionCode = 8
+        versionName = "0.1.6"
 
         ndk {
             abiFilters += listOf("arm64-v8a")

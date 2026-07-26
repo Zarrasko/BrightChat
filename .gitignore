@@ -5,6 +5,7 @@ local.properties
 .DS_Store
 *.iml
 .kotlin/
+.fastembed_cache/
 # Release signing — NEVER commit. Back these up somewhere safe (e.g. a password
 # manager); if the keystore or its password is lost, the app can never be updated.
 keystore.properties
