@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         handlePasswordExtra(intent)
+        handleChatGuidExtra(intent)
     }
 
     // Hide the status + navigation bars for a full-screen, edge-to-edge look
@@ -65,7 +66,7 @@ class MainActivity : ComponentActivity() {
         // Hide the top status bar only; keep the nav bar so the bottom compose
         // field clears the gesture strip. Transient-on-swipe, re-applied on focus.
         WindowInsetsControllerCompat(window, window.decorView).apply {
-            hide(WindowInsetsCompat.Type.statusBars())
+            hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
     }
@@ -88,6 +89,17 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handlePasswordExtra(intent)
+        handleChatGuidExtra(intent)
+    }
+
+    /** A tapped message notification carries its chat's guid — jump straight to
+     *  that thread rather than wherever the app was left. */
+    private fun handleChatGuidExtra(intent: Intent?) {
+        val guid = intent?.getStringExtra(Notifications.EXTRA_CHAT_GUID)
+            ?.takeIf { it.isNotBlank() } ?: return
+        // Consume it so an activity recreation doesn't re-trigger the jump.
+        intent.removeExtra(Notifications.EXTRA_CHAT_GUID)
+        viewModel.openByGuid(guid)
     }
 
     /**

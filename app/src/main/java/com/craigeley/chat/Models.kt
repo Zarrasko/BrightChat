@@ -24,6 +24,11 @@ data class Conversation(
     // land in a dead old room, and AppleScript can't send there.) The thread
     // fetches/merges messages across all of them. See BlueBubblesApi.conversations.
     val guids: List<String> = listOf(guid),
+    // The newest incoming message hasn't been read anywhere on the account (derived
+    // from its dateRead — chat.db stamps it when the chat is read on any device, and
+    // Messages-in-iCloud syncs that to the Mac). Cleared live by opening the thread
+    // here, or by a `chat-read-status-changed` socket event when read elsewhere.
+    val unread: Boolean = false,
 ) {
     /** Human title: an explicit group name if set, otherwise the participants. */
     val title: String
@@ -321,3 +326,12 @@ data class IncomingMessage(
  * continues — so the ViewModel auto-expires a stale "typing" if no refresh arrives.
  */
 data class TypingEvent(val chatGuid: String, val typing: Boolean)
+
+/**
+ * A `chat-read-status-changed` socket event: [chatGuid] was read ([read] true)
+ * somewhere on the account — the Mac, an iPhone, or our own markRead. The server
+ * derives it by polling chat.db's lastReadMessageTimestamp, so it needs no
+ * Private API. Used to clear the list's unread marker (and the chat's
+ * notification) when the user reads the thread on another device.
+ */
+data class ReadStatusEvent(val chatGuid: String, val read: Boolean)

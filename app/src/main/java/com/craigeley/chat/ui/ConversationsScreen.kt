@@ -195,7 +195,9 @@ private fun ConversationRow(
         ) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = title,
+                    // Text-only unread marker, in keeping with the B&W style; the
+                    // brighter subtitle below reinforces it.
+                    text = (if (convo.unread) "• " else "") + title,
                     style = ChatType.body,
                     color = ChatColors.onSurface,
                     maxLines = 1,
@@ -214,7 +216,7 @@ private fun ConversationRow(
                 Text(
                     text = subtitle,
                     style = ChatType.meta,
-                    color = ChatColors.onSurfaceVariant,
+                    color = if (convo.unread) ChatColors.onSurface else ChatColors.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )

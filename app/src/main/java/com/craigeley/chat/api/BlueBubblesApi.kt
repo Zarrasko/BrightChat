@@ -107,6 +107,12 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         // a row whose newest message is a *reaction removal* falls back to that too.
         val byGuid = LinkedHashMap<String, Conversation>()
         val previewFinal = HashSet<String>() // guids whose text preview is a real (non-reaction) message
+        // Per room: is its newest incoming message still unread? Decided by the first
+        // (= newest, DESC sweep) non-group-event message seen — chat.db stamps
+        // dateRead on incoming messages when the chat is read on any device, so
+        // `!fromMe && dateRead == 0` means unread account-wide. Group events are
+        // skipped: they never get a dateRead and would pin the marker forever.
+        val unreadByGuid = HashMap<String, Boolean>()
         for ((chats, msg) in rows) {
             for (j in 0 until chats.length()) {
                 val chat = chats.getJSONObject(j)
@@ -114,6 +120,9 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                 if (guid.isBlank()) continue
                 if (!msg.isReaction) {
                     realDateByGuid[guid] = maxOf(realDateByGuid[guid] ?: 0L, msg.date)
+                }
+                if (!msg.isGroupEvent && guid !in unreadByGuid) {
+                    unreadByGuid[guid] = !msg.fromMe && msg.dateRead == 0L
                 }
                 val existing = byGuid[guid]
                 // Group events (renames, member changes) bump recency like anything
@@ -142,7 +151,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         val groups = LinkedHashMap<String, MutableList<Conversation>>()
         for ((guid, conv) in byGuid) {
             val key = groupIdentity(conv) ?: guid // non-groups key by their own guid (never merge)
-            groups.getOrPut(key) { mutableListOf() }.add(conv)
+            groups.getOrPut(key) { mutableListOf() }.add(conv.copy(unread = unreadByGuid[guid] == true))
         }
         return groups.values.map { rooms ->
             if (rooms.size == 1) return@map rooms[0]

@@ -98,6 +98,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // through updateOpenThread so tapbacks stay folded onto their targets.
     private var openRaw: List<ChatMessage> = emptyList()
 
+    // Per-conversation (primary guid → lastDate at the time) unread markers cleared
+    // on this device. Papers over the window between our markRead and the server's
+    // chat.db reflecting it — without this a refresh would re-derive unread from a
+    // not-yet-stamped dateRead and resurrect the dot on a thread just read here. A
+    // newer message (lastDate past the recorded one) shows unread again. Session-
+    // lived: across launches the server's own read state is correct.
+    private val clearedUnread = HashMap<String, Long>()
+
+    // A chat to open as soon as the conversation list has loaded — set when a
+    // notification tap arrives before the list exists (cold start).
+    private var pendingOpenGuid: String? = null
+
     init {
         observeSocket()
         if (api != null) {
@@ -173,6 +185,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(status = Status.Loading, message = null) }
         try {
             val convos = client.conversations().sortedByDescending { it.lastDate }
+                // Honor unreads already cleared on this device (see clearedUnread).
+                .map { c ->
+                    if (c.unread && (clearedUnread[c.guid] ?: 0L) >= c.lastDate) c.copy(unread = false) else c
+                }
             // Re-check Private API liveness so enabling/disabling it on the server
             // (or the helper dropping) reflects without re-running setup.
             val privateApi = runCatching { client.serverInfo() }.getOrNull()
@@ -202,8 +218,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     message = null,
                 )
             }
+            // A notification tap that landed before the list existed (cold start) —
+            // open its thread now, unless the user has already navigated somewhere.
+            pendingOpenGuid?.let { guid ->
+                pendingOpenGuid = null
+                if (_state.value.open == null && !_state.value.composingNew) {
+                    convos.firstOrNull { guid in it.guids }?.let(::open)
+                }
+            }
         } catch (t: Throwable) {
             handleError(t)
+        }
+    }
+
+    /**
+     * Opens the conversation containing [chatGuid] — the notification deep link.
+     * If the list isn't loaded yet (app launched from the notification), the open
+     * is queued and fires when [loadConversations] lands.
+     */
+    fun openByGuid(chatGuid: String) {
+        val convo = _state.value.conversations.firstOrNull { chatGuid in it.guids }
+        if (convo != null) {
+            open(convo)
+        } else {
+            pendingOpenGuid = chatGuid
+            refresh()
         }
     }
 
@@ -220,6 +259,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         conversation.guids.forEach { markReadIfPrivate(it) }
+        clearUnread(conversation.guid)
+        Notifications.clearChat(app, conversation.guids)
         threadJob?.cancel()
         threadJob = viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
@@ -811,6 +852,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             SocketBus.typing.collect { applyTyping(it) }
         }
+        viewModelScope.launch {
+            SocketBus.readStatus.collect { applyReadStatus(it) }
+        }
     }
 
     // ---- Typing indicators ------------------------------------------------
@@ -873,6 +917,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun applyIncoming(incoming: IncomingMessage) {
         val known = _state.value.conversations.any { incoming.chatGuid in it.guids }
+        // Looking right at the thread — don't flag unread, and mark read below.
+        val viewing = _state.value.open?.guids?.contains(incoming.chatGuid) == true && AppForeground.active
+        // A genuinely new message (or tapback) from someone else, not on screen →
+        // the row goes unread. Group events bump recency but aren't unread-worthy
+        // (they also never get a dateRead, so the load derivation skips them too).
+        val flagUnread = incoming.isNew && !incoming.message.fromMe &&
+            !incoming.message.isGroupEvent && !viewing
         _state.update { s ->
             val convos = s.conversations.map { c ->
                 if (incoming.chatGuid in c.guids) {
@@ -888,12 +939,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         incoming.message.isReaction -> c.copy(
                             lastDate = incoming.message.date,
                             lastReaction = incoming.message.reactionPreview(::cachedMessage),
+                            unread = c.unread || flagUnread,
                         )
                         else -> c.copy(
                             lastText = incoming.message.previewText,
                             lastDate = incoming.message.date,
                             lastFromMe = incoming.message.fromMe,
                             lastReaction = null,
+                            unread = c.unread || flagUnread,
                         )
                     }
                 } else {
@@ -919,13 +972,36 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // target; a normal message appends). foldReactions re-runs in updateOpenThread.
         updateOpenThread(incoming.chatGuid) { mergeRaw(it, incoming.message) }
         // If it's an incoming message in the thread you're looking at, mark the chat
-        // read so the unread clears on your other devices too.
-        if (!incoming.message.fromMe && _state.value.open?.guids?.contains(incoming.chatGuid) == true && AppForeground.active) {
+        // read so the unread clears on your other devices too — and record the clear
+        // locally so a refresh can't resurrect the dot before the server catches up.
+        if (!incoming.message.fromMe && viewing) {
             markReadIfPrivate(incoming.chatGuid)
+            _state.value.conversations.firstOrNull { incoming.chatGuid in it.guids }
+                ?.let { clearUnread(it.guid) }
         }
         // A message for a chat not currently in the list (e.g. a brand-new
         // conversation) — pull the list again so it appears with full metadata.
         if (!known) refresh()
+    }
+
+    /** A `chat-read-status-changed` from the socket: the chat was read somewhere
+     *  (another device, or our own markRead echoing back) — drop its unread dot. */
+    private fun applyReadStatus(event: ReadStatusEvent) {
+        if (!event.read) return
+        _state.value.conversations.firstOrNull { event.chatGuid in it.guids }
+            ?.let { clearUnread(it.guid) }
+    }
+
+    /** Clears [convoGuid]'s unread marker in the list and records it in
+     *  [clearedUnread] so the next refresh can't resurrect it (the server's
+     *  dateRead stamp can lag our markRead). */
+    private fun clearUnread(convoGuid: String) {
+        val convo = _state.value.conversations.firstOrNull { it.guid == convoGuid } ?: return
+        clearedUnread[convoGuid] = maxOf(clearedUnread[convoGuid] ?: 0L, convo.lastDate)
+        if (!convo.unread) return
+        _state.update { s ->
+            s.copy(conversations = s.conversations.map { if (it.guid == convoGuid) it.copy(unread = false) else it })
+        }
     }
 
     /** Marks [chatGuid] read on the server (best-effort, off-main), but only when

@@ -94,6 +94,29 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   **List timestamps** are iMessage-style absolute (`ConversationsScreen.listTime`):
   time today, "Yesterday", weekday within a week, then a short date — not
   "18 hours ago".
+  **Unread markers (done):** a row with unread messages shows a text-only `• `
+  before its title plus a full-white preview line. Derived in
+  `BlueBubblesApi.conversations()` from the newest non-group-event message per
+  room: `!fromMe && dateRead == 0` (chat.db stamps `dateRead` on incoming messages
+  when the chat is read on *any* device, so this is account-wide; group events are
+  skipped — they never get a stamp and would pin the dot). Live: `applyIncoming`
+  flags a new incoming message/tapback unless that thread is open + foregrounded.
+  Cleared by opening the thread here, or by the **`chat-read-status-changed`**
+  socket event (the server's chat.db poller — no Private API needed) when the chat
+  is read on the Mac/iPhone, which also dismisses the chat's notification. The
+  ViewModel's session-lived `clearedUnread` (primary guid → lastDate at clear)
+  stops a refresh from resurrecting a just-cleared dot while the server's
+  `dateRead` stamp catches up with our `markRead`.
+  **Notification deep-links (done):** message notifications are per-chat (id
+  hashed from the chat guid, so each thread keeps its own and a newer message
+  replaces it) and tapping one opens that thread: the PendingIntent carries
+  `Notifications.EXTRA_CHAT_GUID`, `MainActivity` (singleTask — onCreate or
+  onNewIntent) hands it to `ChatViewModel.openByGuid`, which matches by guid
+  *membership* (forked groups) and — on a cold start, before the list exists —
+  queues the open via `pendingOpenGuid` until `loadConversations` lands.
+  `Notifications.clear` (app foregrounded) enumerates `activeNotifications`
+  rather than tracking ids, so it survives process restarts; the
+  foreground-service notification is skipped.
   **Forked group chats (done):** iMessage can split one group into sibling chat
   rooms — same name, identical participants, different guid — with messages divided
   across them by "era". BlueBubbles reports each room as its own chat, so the list

@@ -7,6 +7,7 @@ import android.os.IBinder
 import android.util.Log
 import com.craigeley.chat.Contacts
 import com.craigeley.chat.Notifications
+import com.craigeley.chat.ReadStatusEvent
 import com.craigeley.chat.TypingEvent
 import com.craigeley.chat.api.BlueBubblesApi
 import com.craigeley.chat.api.Store
@@ -64,6 +65,10 @@ class SocketService : Service() {
         // flips the bubble to "Not delivered" instead of failing silently.
         s.on("message-send-error", Emitter.Listener { onMessage(it, isNew = false) })
         s.on("typing-indicator", Emitter.Listener { onTyping(it) })
+        // The chat was read somewhere on the account (Mac, iPhone, or our own
+        // markRead) — the server's chat.db poller reports it, no Private API needed.
+        // Clears the list's unread marker and the chat's now-stale notification.
+        s.on("chat-read-status-changed", Emitter.Listener { onReadStatus(it) })
         // Group-system changes arrive as their own event types but carry the same
         // serialized message payload (embedded chats included), so they route
         // through the normal message path — the thread shows them as event rows
@@ -72,6 +77,17 @@ class SocketService : Service() {
             s.on(event, Emitter.Listener { onMessage(it, isNew = true) })
         }
         s.connect()
+    }
+
+    /** A `chat-read-status-changed` event — `{ chatGuid, read }`. Bridged to the
+     *  ViewModel (unread marker) and, when read, dismisses the chat's notification
+     *  so an alert already read on another device doesn't linger here. */
+    private fun onReadStatus(args: Array<out Any?>?) {
+        val data = args?.firstOrNull() as? JSONObject ?: return
+        val guid = data.optString("chatGuid").takeIf { it.isNotBlank() } ?: return
+        val read = data.optBoolean("read", false)
+        SocketBus.readStatus.tryEmit(ReadStatusEvent(guid, read))
+        if (read) Notifications.clearChat(this, listOf(guid))
     }
 
     /** A `typing-indicator` event — `{ display, guid }` — bridged to the ViewModel.
@@ -96,7 +112,7 @@ class SocketService : Service() {
                 val sender = incoming.message.sender
                 sender?.let { contacts().name(it) ?: it } ?: "Message"
             }
-            Notifications.post(this, title, incoming.message.text)
+            Notifications.post(this, title, incoming.message.text, incoming.chatGuid)
         }
     }
 

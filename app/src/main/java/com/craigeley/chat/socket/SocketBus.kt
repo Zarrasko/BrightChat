@@ -1,6 +1,7 @@
 package com.craigeley.chat.socket
 
 import com.craigeley.chat.IncomingMessage
+import com.craigeley.chat.ReadStatusEvent
 import com.craigeley.chat.TypingEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
 
@@ -12,4 +13,5 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 object SocketBus {
     val incoming = MutableSharedFlow<IncomingMessage>(extraBufferCapacity = 64)
     val typing = MutableSharedFlow<TypingEvent>(extraBufferCapacity = 32)
+    val readStatus = MutableSharedFlow<ReadStatusEvent>(extraBufferCapacity = 32)
 }
