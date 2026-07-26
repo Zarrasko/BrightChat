@@ -49,15 +49,39 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   the last of the Phase 3 list; only inline *playback* of video/audio and history
   pagination remain unbuilt.)
   **Full-screen image viewer (done):** tapping an inline image opens
-  `ImageViewerScreen` (`ui/ImageViewerScreen.kt`) — same early-return pattern as
-  `ChatDetailsScreen`, same loader/caches as the inline render so it appears
-  instantly. Pinch to zoom (capped at 4×, matching the 1080px decode cap), drag
+  `ImageViewerScreen` (`ui/ImageViewerScreen.kt`) — drawn as an opaque overlay
+  *on top of* the thread (a `Box`, **not** `ChatDetailsScreen`'s early-return
+  pattern: that unmounted the `LazyColumn`, so dismissing lost the scroll
+  position and re-loaded every inline image — the disorienting-return bug).
+  Same loader/caches as the inline render so it appears instantly. Pinch to zoom (capped at 4×, matching the 1080px decode cap), drag
   to pan while zoomed, double-tap to toggle zoom at the tapped point; a single
   tap or Back closes. Pure black, no chrome. The image row's own
   `combinedClickable` re-offers the long-press so tapbacks on images still work
   (the column's handler would otherwise be shadowed by the image's), and a tap
   while the tapback picker is open dismisses the picker instead of opening the
   viewer.
+  **Color while viewing (done):** the viewer lifts LightOS's forced grayscale for
+  exactly its own lifetime — vandamd's zero-camera trick. The phone's B&W look is
+  the accessibility daltonizer pinned to mode 0 (simulate monochromacy), a secure
+  setting; `ColorMode` (`ColorMode.kt`) flips
+  `accessibility_display_daltonizer_enabled` off on `acquire` (viewer enters
+  composition, via `DisposableEffect`) and restores the saved mode on `release` —
+  a SurfaceFlinger color-matrix change, so both flips are instant. **Hiding the
+  restore is the viewer's close sequence**, not a timer (timers were tried and
+  failed both ways — whichever side of the dismissal frame the flip landed on,
+  either the full-screen photo or its inline thumbnail visibly desaturated):
+  tap/Back sets `closing`, the photo fades out to the black background (120ms),
+  `release` fires while the screen is pure black — black is identical in color
+  and mono, the one moment the flip can't be seen — a ~70ms hold lets the async
+  settings write land, then `onClose()` reveals the thread, already B&W.
+  `onAppHidden` restores immediately, no fade (another app's colors are showing).
+  `MainActivity.onStop/onStart` → `onAppHidden`/`onAppVisible` keep the rest of
+  the phone B&W if the app is backgrounded mid-view and re-lift on return.
+  Requires a one-time `adb shell pm grant com.craigeley.chat
+  android.permission.WRITE_SECURE_SETTINGS` (signature-level; declared with
+  `tools:ignore="ProtectedPermissions"`); ungranted, every call no-ops and the
+  viewer stays grayscale. Known gap (zero has it too): a process death mid-view
+  leaves the phone in color until the app next runs.
   **Links (done):** iMessage attaches a `*.pluginPayloadAttachment` rich-link
   preview blob to every URL it sends; we can't render the preview and the URL is
   already in the text, so these are dropped at parse time (`parseAttachments`) rather

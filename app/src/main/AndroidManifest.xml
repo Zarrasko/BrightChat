@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Lifts LightOS's forced grayscale while the full-screen image viewer is
+         open (see ColorMode). Signature-level, so it only works after a one-time
+         adb grant; ungranted, the app just stays B&W. -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- remoteMessaging (not dataSync): it's the semantically correct type and,

@@ -77,11 +77,15 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         AppForeground.active = true
         Notifications.clear(this)
+        // Re-lift grayscale if the user left with the image viewer open.
+        ColorMode.onAppVisible(this)
     }
 
     override fun onStop() {
         super.onStop()
         AppForeground.active = false
+        // The rest of the phone must stay B&W even if the viewer is still open.
+        ColorMode.onAppHidden(this)
     }
 
     // singleTask, so a re-launch with a fresh extra comes through here.

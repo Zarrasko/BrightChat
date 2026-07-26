@@ -71,6 +71,21 @@ macOS protections. It's optional; skip this and everything else still works.
    and `"helper_connected": true` — the app reads this to decide whether to offer
    tapbacks etc.)
 
+### Optional: full-color photo viewing
+
+The Light Phone's grayscale is Android's accessibility color-correction filter,
+which apps can lift with a permission only grantable over adb. With it granted,
+tapping a photo in a thread shows it in **full color** for exactly as long as
+the viewer is open — the phone returns to grayscale the moment you dismiss it
+(the same trick as [zero](https://github.com/vandamd/zero)'s red-text mode):
+
+```sh
+adb shell pm grant com.craigeley.chat android.permission.WRITE_SECURE_SETTINGS
+```
+
+One-time; it survives app updates. Without it, photos simply open in grayscale
+like the rest of the phone.
+
 For instant delivery after a reboot without opening the app, enable Tailscale's
 **Always-on VPN** on the phone (Android Settings → Network → VPN) and leave
 "Block connections without VPN" **off** — the live socket reconnects the moment

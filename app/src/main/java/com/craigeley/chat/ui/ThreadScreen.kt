@@ -94,13 +94,12 @@ fun ThreadScreen(viewModel: ChatViewModel) {
         return
     }
 
-    // Full-screen image viewer (tap an inline image). Same early-return pattern
-    // as the details screen: it *replaces* the thread until closed (tap or Back).
+    // Full-screen image viewer (tap an inline image). Drawn as an opaque overlay
+    // on top of the thread — NOT the details screen's early-return pattern — so the
+    // LazyColumn (and its scroll position) never leaves composition: dismissing
+    // lands exactly where you were, and the thread is already rendered underneath,
+    // which is also what hides the delayed grayscale restore (see ColorMode).
     var viewingImage by remember(convo.guid) { mutableStateOf<Attachment?>(null) }
-    viewingImage?.let { image ->
-        ImageViewerScreen(image, viewModel::loadImage, onClose = { viewingImage = null })
-        return
-    }
 
     // System photo picker (no permission needed; falls back to the document picker
     // where the dedicated picker isn't present). A pick sends straight away.
@@ -137,110 +136,118 @@ fun ThreadScreen(viewModel: ChatViewModel) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 20.dp)) {
-        ScreenHeader(
-            title = state.contacts.title(convo),
-            onBack = viewModel::closeThread,
-            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
-            // Group details (members, rename, leave) live behind the title.
-            onTitleClick = if (convo.isGroup) {
-                { showDetails = true }
-            } else {
-                null
-            },
-        )
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 20.dp)) {
+            ScreenHeader(
+                title = state.contacts.title(convo),
+                onBack = viewModel::closeThread,
+                modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
+                // Group details (members, rename, leave) live behind the title.
+                onTitleClick = if (convo.isGroup) {
+                    { showDetails = true }
+                } else {
+                    null
+                },
+            )
 
-        if (state.messages.isEmpty() && state.threadLoading) {
-            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text(text = "Loading…", style = ChatType.body, color = ChatColors.onSurfaceDisabled)
+            if (state.messages.isEmpty() && state.threadLoading) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text(text = "Loading…", style = ChatType.body, color = ChatColors.onSurfaceDisabled)
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    reverseLayout = true,
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    // Newest first so reverseLayout pins it to the bottom.
+                    items(state.messages.asReversed(), key = { it.guid }) { message ->
+                        MessageRow(
+                            message,
+                            convo,
+                            state.contacts,
+                            showLabel = message.guid in labeled,
+                            showReceipt = message.guid == receiptGuid,
+                            // The quoted original when this message is an inline reply.
+                            replyQuote = message.threadOriginatorGuid?.let { g ->
+                                byGuid[g]?.shortDescription ?: "an earlier message"
+                            },
+                            loadImage = viewModel::loadImage,
+                            onImageTap = { viewingImage = it },
+                            onOpenAttachment = viewModel::openAttachment,
+                            canReact = state.privateApi,
+                            pickerOpen = reactingTo == message.guid,
+                            onLongPress = { if (state.privateApi) reactingTo = message.guid },
+                            onReact = { type ->
+                                viewModel.sendReaction(message, type)
+                                reactingTo = null
+                            },
+                            onReply = {
+                                replyingTo = message
+                                reactingTo = null
+                            },
+                            onDismissPicker = { reactingTo = null },
+                        )
+                    }
+                }
             }
-        } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                reverseLayout = true,
-                contentPadding = PaddingValues(top = 8.dp, bottom = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                // Newest first so reverseLayout pins it to the bottom.
-                items(state.messages.asReversed(), key = { it.guid }) { message ->
-                    MessageRow(
-                        message,
-                        convo,
-                        state.contacts,
-                        showLabel = message.guid in labeled,
-                        showReceipt = message.guid == receiptGuid,
-                        // The quoted original when this message is an inline reply.
-                        replyQuote = message.threadOriginatorGuid?.let { g ->
-                            byGuid[g]?.shortDescription ?: "an earlier message"
-                        },
-                        loadImage = viewModel::loadImage,
-                        onImageTap = { viewingImage = it },
-                        onOpenAttachment = viewModel::openAttachment,
-                        canReact = state.privateApi,
-                        pickerOpen = reactingTo == message.guid,
-                        onLongPress = { if (state.privateApi) reactingTo = message.guid },
-                        onReact = { type ->
-                            viewModel.sendReaction(message, type)
-                            reactingTo = null
-                        },
-                        onReply = {
-                            replyingTo = message
-                            reactingTo = null
-                        },
-                        onDismissPicker = { reactingTo = null },
+
+            state.message?.let { msg ->
+                Text(
+                    text = msg,
+                    style = ChatType.hint,
+                    color = ChatColors.onSurfaceDim,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                )
+            }
+
+            if (state.typingChatGuid == convo.guid) {
+                TypingIndicator()
+            }
+
+            // Reply banner: what the next send will reply to, with a cancel ×.
+            replyingTo?.let { target ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Replying to ${target.shortDescription}",
+                        style = ChatType.hint,
+                        color = ChatColors.onSurfaceDim,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    HapticText(
+                        text = "×",
+                        style = ChatType.body,
+                        color = ChatColors.onSurfaceDim,
+                        onClick = { replyingTo = null },
                     )
                 }
             }
-        }
 
-        state.message?.let { msg ->
-            Text(
-                text = msg,
-                style = ChatType.hint,
-                color = ChatColors.onSurfaceDim,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            ComposeBar(
+                onSend = { text ->
+                    viewModel.sendMessage(text, replyingTo?.guid)
+                    replyingTo = null
+                },
+                onPickImage = {
+                    pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                onTextChange = viewModel::onComposeTextChanged,
             )
         }
 
-        if (state.typingChatGuid == convo.guid) {
-            TypingIndicator()
+        // The open image covers everything (opaque, gesture-consuming); the
+        // thread stays composed — and visible again the instant this leaves.
+        viewingImage?.let { image ->
+            ImageViewerScreen(image, viewModel::loadImage, onClose = { viewingImage = null })
         }
-
-        // Reply banner: what the next send will reply to, with a cancel ×.
-        replyingTo?.let { target ->
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Replying to ${target.shortDescription}",
-                    style = ChatType.hint,
-                    color = ChatColors.onSurfaceDim,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                HapticText(
-                    text = "×",
-                    style = ChatType.body,
-                    color = ChatColors.onSurfaceDim,
-                    onClick = { replyingTo = null },
-                )
-            }
-        }
-
-        ComposeBar(
-            onSend = { text ->
-                viewModel.sendMessage(text, replyingTo?.guid)
-                replyingTo = null
-            },
-            onPickImage = {
-                pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-            },
-            onTextChange = viewModel::onComposeTextChanged,
-        )
     }
 }
 

@@ -1,6 +1,8 @@
 package com.craigeley.chat.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -8,6 +10,8 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -22,9 +26,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.material3.Text
 import com.craigeley.chat.Attachment
+import com.craigeley.chat.ColorMode
+import kotlinx.coroutines.delay
 import com.craigeley.chat.ui.theme.ChatColors
 import com.craigeley.chat.ui.theme.ChatType
 
@@ -35,6 +42,15 @@ private const val MAX_SCALE = 4f
 
 /** The scale a double-tap jumps to (a second double-tap returns to fit). */
 private const val DOUBLE_TAP_SCALE = 2.5f
+
+/** Dismissal: how long the photo takes to fade out to the black background. */
+private const val FADE_OUT_MS = 120
+
+/** Dismissal: how long to hold the all-black frame after the grayscale restore
+ *  before revealing the thread — the settings write propagates asynchronously
+ *  (system_server → SurfaceFlinger), so give it a few frames to land while the
+ *  screen is still black and the flip is invisible. */
+private const val RESTORE_SETTLE_MS = 70L
 
 /**
  * Full-screen viewer for one image attachment, opened by tapping it in the
@@ -49,7 +65,33 @@ fun ImageViewerScreen(
     loadImage: suspend (Attachment) -> ImageBitmap?,
     onClose: () -> Unit,
 ) {
-    BackHandler(onBack = onClose)
+    // True color for exactly as long as the viewer is up (vandamd's zero trick;
+    // see ColorMode — a no-op without the one-time WRITE_SECURE_SETTINGS grant).
+    // Backgrounding mid-view is handled by MainActivity's onStop/onStart.
+    val context = LocalContext.current
+    DisposableEffect(Unit) {
+        ColorMode.acquire(context)
+        // Normally already released mid-close (below); this catches the viewer
+        // being disposed some other way (e.g. the whole thread closing).
+        onDispose { ColorMode.release(context) }
+    }
+
+    // Closing plays a short exit so the grayscale flip can't be seen: fade the
+    // photo out to the black background, restore grayscale while the screen is
+    // pure black (black is identical in color and mono — the one moment the flip
+    // is invisible), hold a few frames for the flip to land, then dismiss. The
+    // thread appears already-B&W; nothing on screen ever visibly desaturates.
+    var closing by remember { mutableStateOf(false) }
+    val fade = remember { Animatable(1f) }
+    LaunchedEffect(closing) {
+        if (!closing) return@LaunchedEffect
+        fade.animateTo(0f, tween(FADE_OUT_MS))
+        ColorMode.release(context)
+        delay(RESTORE_SETTLE_MS)
+        onClose()
+    }
+
+    BackHandler { closing = true }
 
     val bitmap by produceState<ImageBitmap?>(initialValue = null, attachment.guid) {
         value = loadImage(attachment)
@@ -78,7 +120,7 @@ fun ImageViewerScreen(
             .onSizeChanged { container = it }
             .pointerInput(Unit) {
                 detectTapGestures(
-                    onTap = { onClose() },
+                    onTap = { closing = true },
                     onDoubleTap = { tap ->
                         if (scale > 1f) {
                             scale = 1f
@@ -120,6 +162,7 @@ fun ImageViewerScreen(
                         scaleY = scale
                         translationX = offset.x
                         translationY = offset.y
+                        alpha = fade.value
                     },
             )
         } else {
