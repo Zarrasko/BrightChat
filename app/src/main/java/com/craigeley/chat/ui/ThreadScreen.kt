@@ -94,6 +94,14 @@ fun ThreadScreen(viewModel: ChatViewModel) {
         return
     }
 
+    // Full-screen image viewer (tap an inline image). Same early-return pattern
+    // as the details screen: it *replaces* the thread until closed (tap or Back).
+    var viewingImage by remember(convo.guid) { mutableStateOf<Attachment?>(null) }
+    viewingImage?.let { image ->
+        ImageViewerScreen(image, viewModel::loadImage, onClose = { viewingImage = null })
+        return
+    }
+
     // System photo picker (no permission needed; falls back to the document picker
     // where the dedicated picker isn't present). A pick sends straight away.
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -167,6 +175,7 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                             byGuid[g]?.shortDescription ?: "an earlier message"
                         },
                         loadImage = viewModel::loadImage,
+                        onImageTap = { viewingImage = it },
                         onOpenAttachment = viewModel::openAttachment,
                         canReact = state.privateApi,
                         pickerOpen = reactingTo == message.guid,
@@ -332,6 +341,7 @@ private fun MessageRow(
     showReceipt: Boolean,
     replyQuote: String?,
     loadImage: suspend (Attachment) -> ImageBitmap?,
+    onImageTap: (Attachment) -> Unit,
     onOpenAttachment: (Attachment) -> Unit,
     canReact: Boolean,
     pickerOpen: Boolean,
@@ -385,7 +395,7 @@ private fun MessageRow(
         // keep the same cap whether or not there's a reaction.
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             if (message.fromMe) ReactionGutter(message, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
-            MessageContent(message, loadImage, onOpenAttachment, canReact, pickerOpen, onLongPress, onReact, onReply, onDismissPicker, Modifier.weight(MESSAGE_MAX_WIDTH))
+            MessageContent(message, loadImage, onImageTap, onOpenAttachment, canReact, pickerOpen, onLongPress, onReact, onReply, onDismissPicker, Modifier.weight(MESSAGE_MAX_WIDTH))
             if (!message.fromMe) ReactionGutter(message, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
         }
         // "Not delivered" on any sent message the Mac later failed to deliver
@@ -464,6 +474,7 @@ private fun ReactionGutter(message: ChatMessage, modifier: Modifier) {
 private fun MessageContent(
     message: ChatMessage,
     loadImage: suspend (Attachment) -> ImageBitmap?,
+    onImageTap: (Attachment) -> Unit,
     onOpenAttachment: (Attachment) -> Unit,
     canReact: Boolean,
     pickerOpen: Boolean,
@@ -497,7 +508,16 @@ private fun MessageContent(
             Spacer(modifier = Modifier.height(6.dp))
         }
         message.images.forEach { image ->
-            AttachmentImage(image, loadImage)
+            AttachmentImage(
+                attachment = image,
+                load = loadImage,
+                // A tap while the tapback picker is open dismisses it (matching a
+                // tap anywhere else on the turn); otherwise it opens the viewer.
+                onTap = { if (pickerOpen) onDismissPicker() else onImageTap(image) },
+                // The image sits on top of the column's combinedClickable, so
+                // re-offer the long-press here or images couldn't be reacted to.
+                onLongPress = if (canReact) onLongPress else null,
+            )
             Spacer(modifier = Modifier.height(if (body != null) 6.dp else 4.dp))
         }
         message.files.forEach { file ->
@@ -577,19 +597,39 @@ private fun ReactionPicker(selected: ReactionType?, onReact: (ReactionType) -> U
 
 /** One inline image: loads (download + cache + decode) off-thread via [load],
  *  showing a dim placeholder until the bitmap is ready. Height-capped so a tall
- *  photo can't swallow the thread; width fills the message column. */
+ *  photo can't swallow the thread; width fills the message column. Tapping it
+ *  opens the full-screen viewer ([onTap]); long-press still reaches the tapback
+ *  picker via [onLongPress] (the image's own gesture handler would otherwise
+ *  swallow it). */
 @Composable
-private fun AttachmentImage(attachment: Attachment, load: suspend (Attachment) -> ImageBitmap?) {
+private fun AttachmentImage(
+    attachment: Attachment,
+    load: suspend (Attachment) -> ImageBitmap?,
+    onTap: () -> Unit,
+    onLongPress: (() -> Unit)?,
+) {
     val bitmap by produceState<ImageBitmap?>(initialValue = null, attachment.guid) {
         value = load(attachment)
     }
     val image = bitmap
     if (image != null) {
+        val haptics = LocalHapticFeedback.current
         Image(
             bitmap = image,
             contentDescription = attachment.transferName,
             contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 360.dp)
+                .combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onTap()
+                    },
+                    onLongClick = onLongPress,
+                ),
         )
     } else {
         Text(text = "[Image]", style = ChatType.hint, color = ChatColors.onSurfaceDisabled)

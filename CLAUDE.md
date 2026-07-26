@@ -48,6 +48,16 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   (`ACTION_VIEW` → share chooser → "can't open" line) via a `FileProvider`. (This is
   the last of the Phase 3 list; only inline *playback* of video/audio and history
   pagination remain unbuilt.)
+  **Full-screen image viewer (done):** tapping an inline image opens
+  `ImageViewerScreen` (`ui/ImageViewerScreen.kt`) — same early-return pattern as
+  `ChatDetailsScreen`, same loader/caches as the inline render so it appears
+  instantly. Pinch to zoom (capped at 4×, matching the 1080px decode cap), drag
+  to pan while zoomed, double-tap to toggle zoom at the tapped point; a single
+  tap or Back closes. Pure black, no chrome. The image row's own
+  `combinedClickable` re-offers the long-press so tapbacks on images still work
+  (the column's handler would otherwise be shadowed by the image's), and a tap
+  while the tapback picker is open dismisses the picker instead of opening the
+  viewer.
   **Links (done):** iMessage attaches a `*.pluginPayloadAttachment` rich-link
   preview blob to every URL it sends; we can't render the preview and the URL is
   already in the text, so these are dropped at parse time (`parseAttachments`) rather
