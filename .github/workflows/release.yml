@@ -1,6 +1,8 @@
 name: Release
 
-# Fires when a v* tag is pushed (e.g. git-flow-next "finish release" in Tower).
+# Fires when a v* tag is pushed (e.g. git-flow-next "finish release" in Tower) —
+# and, on this fork, on every push to the branches below, so an APK publishes
+# automatically the moment a build finishes (Obtainium picks up the Release).
 # Builds + signs the release APK and publishes a GitHub Release with it attached,
 # which is what Obtainium watches. Signing material comes from repo secrets — the
 # keystore never lives in git.
@@ -8,6 +10,9 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - develop
+      - pinned-chats-and-picker-fix
 
 permissions:
   contents: write   # needed to create the Release
@@ -51,12 +56,26 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleRelease --no-daemon
 
+      # A tag push releases as the tag; a branch push mints its own tag from the
+      # gradle versionName + run number (e.g. v0.5.1-ci.12), so every finished
+      # build lands as a Release that Obtainium can install.
+      - name: Compute release tag
+        id: tag
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            V=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
+            echo "tag=v${V}-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Stage APK with versioned name
-        run: cp app/build/outputs/apk/release/app-release.apk "chat-${GITHUB_REF_NAME}.apk"
+        run: cp app/build/outputs/apk/release/app-release.apk "chat-${{ steps.tag.outputs.tag }}.apk"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: chat-${{ github.ref_name }}.apk
+          tag_name: ${{ steps.tag.outputs.tag }}
+          files: chat-${{ steps.tag.outputs.tag }}.apk
           generate_release_notes: true
           fail_on_unmatched_files: true
