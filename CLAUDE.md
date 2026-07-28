@@ -175,6 +175,31 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   `rememberFreshImagePicker` (`ui/Components.kt`), used by both compose bars.
   Needs `READ_MEDIA_IMAGES` (asked once on first "+"); denied, the rescan
   no-ops and the picker still opens, just stale.
+  **FaceTime (done, Private-API + macOS Monterey+):** built on FaceTime *web
+  links*, since the native protocol isn't reachable — the server can mint a link
+  (`POST /facetime/session` → `BlueBubblesApi.newFaceTimeLink`; the Mac's
+  FaceTime app generates it, pre-admits joiners, and leaves) and anyone joins
+  via facetime.apple.com, which is plain WebRTC that the system WebView renders.
+  `ui/FaceTimeScreen` is that WebView: an opaque overlay on the thread (image-
+  viewer pattern — the LazyColumn never leaves composition), JS + DOM storage +
+  autoplay on, `onPermissionRequest` granted only to Apple's origin and only
+  after Android's own CAMERA/RECORD_AUDIO runtime grants (asked on entry; a
+  denial still joins listen-only), grayscale lifted for the call's lifetime via
+  `ColorMode`, torn down (`about:blank` + destroy) on close so the camera/mic
+  actually release; a "×" top-right is the guaranteed exit alongside the page's
+  own leave button. Outgoing: the thread header's **Call** control —
+  deliberately minor: dim hint text, and a first tap only *arms* it ("Start?"
+  brightens for 3s), the second tap fires `ChatViewModel.startFaceTime`, which
+  mints the link, **sends it into the chat as a normal message** (that's the
+  invite — the other side taps it on their device) and opens it in
+  `FaceTimeScreen` (`UiState.faceTimeUrl`/`faceTimeBusy`; busy shows "…" and
+  single-fires). Incoming: any `facetime.apple.com` link in a message body opens
+  in-app instead of the (nonexistent) browser — `linkify` attaches a
+  `LinkInteractionListener` to just those URLs (a listener *replaces* the
+  platform handler, so only FaceTime links get one). Known gaps: no
+  `ft-call-status-changed` socket handling yet (a native FaceTime *call* — not a
+  link — only surfaces once the server answers it), and process death mid-call
+  leaves the phone in color (same gap as the image viewer).
 
 Note: messaging yourself (note-to-self) legitimately shows each message twice —
 iMessage stores a sent *and* a received row (two GUIDs). Normal chats don't; the

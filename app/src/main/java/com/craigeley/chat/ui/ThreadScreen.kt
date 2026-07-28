@@ -47,6 +47,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.LinkInteractionListener
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
@@ -131,6 +132,19 @@ fun ThreadScreen(viewModel: ChatViewModel) {
         }
     }
 
+    // The header's FaceTime control, small and deliberate: a first tap only *arms*
+    // it (the dim "Call" brightens to "Start?"), a second within 3s actually mints
+    // the link — so a stray tap near the top edge can't start a call. Disarms
+    // itself after the window, and re-keys per chat. Private-API only (link
+    // minting is server-gated), like the tapback picker.
+    var callArmed by remember(convo.guid) { mutableStateOf(false) }
+    LaunchedEffect(callArmed) {
+        if (callArmed) {
+            kotlinx.coroutines.delay(3_000)
+            callArmed = false
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 20.dp)) {
             ScreenHeader(
@@ -140,6 +154,31 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                 // Group details (members, rename, leave) live behind the title.
                 onTitleClick = if (convo.isGroup) {
                     { showDetails = true }
+                } else {
+                    null
+                },
+                trailing = if (state.privateApi) {
+                    {
+                        HapticText(
+                            text = when {
+                                state.faceTimeBusy -> "…"
+                                callArmed -> "Start?"
+                                else -> "Call"
+                            },
+                            style = ChatType.hint,
+                            color = if (callArmed) ChatColors.onSurface else ChatColors.onSurfaceDisabled,
+                            onClick = {
+                                when {
+                                    state.faceTimeBusy -> {}
+                                    callArmed -> {
+                                        callArmed = false
+                                        viewModel.startFaceTime()
+                                    }
+                                    else -> callArmed = true
+                                }
+                            },
+                        )
+                    }
                 } else {
                     null
                 },
@@ -184,6 +223,9 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                                 reactingTo = null
                             },
                             onDismissPicker = { reactingTo = null },
+                            // facetime.apple.com links open the in-app call screen
+                            // (there's no browser on this phone to hand them to).
+                            onFaceTime = viewModel::openFaceTime,
                         )
                     }
                 }
@@ -240,6 +282,12 @@ fun ThreadScreen(viewModel: ChatViewModel) {
         // thread stays composed — and visible again the instant this leaves.
         viewingImage?.let { image ->
             ImageViewerScreen(image, viewModel::loadImage, onClose = { viewingImage = null })
+        }
+
+        // A live FaceTime covers everything the same way (the header's Call
+        // control, or a tapped facetime.apple.com link in a message).
+        state.faceTimeUrl?.let { url ->
+            FaceTimeScreen(url, onClose = viewModel::closeFaceTime)
         }
     }
 }
@@ -349,6 +397,7 @@ private fun MessageRow(
     onReact: (ReactionType) -> Unit,
     onReply: () -> Unit,
     onDismissPicker: () -> Unit,
+    onFaceTime: (String) -> Unit,
 ) {
     // A group-system row (rename, member change) is an event line, not a turn —
     // centered and dim, with no label, gutter, or tapback affordances.
@@ -395,7 +444,7 @@ private fun MessageRow(
         // keep the same cap whether or not there's a reaction.
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             if (message.fromMe) ReactionGutter(message, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
-            MessageContent(message, loadImage, onImageTap, onOpenAttachment, canReact, pickerOpen, onLongPress, onReact, onReply, onDismissPicker, Modifier.weight(MESSAGE_MAX_WIDTH))
+            MessageContent(message, loadImage, onImageTap, onOpenAttachment, canReact, pickerOpen, onLongPress, onReact, onReply, onDismissPicker, onFaceTime, Modifier.weight(MESSAGE_MAX_WIDTH))
             if (!message.fromMe) ReactionGutter(message, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
         }
         // "Not delivered" on any sent message the Mac later failed to deliver
@@ -482,6 +531,7 @@ private fun MessageContent(
     onReact: (ReactionType) -> Unit,
     onReply: () -> Unit,
     onDismissPicker: () -> Unit,
+    onFaceTime: (String) -> Unit,
     modifier: Modifier,
 ) {
     val align = if (message.fromMe) Alignment.End else Alignment.Start
@@ -526,7 +576,7 @@ private fun MessageContent(
         }
         if (body != null) {
             Text(
-                text = linkify(body),
+                text = linkify(body, onFaceTime),
                 style = ChatType.body,
                 color = ChatColors.onSurface,
                 textAlign = textAlign,
@@ -544,7 +594,7 @@ private val URL_REGEX = Regex("""https?://[^\s]+""")
  * the platform's default handler — a browser), leaving the rest as plain text.
  * A message with no URL just renders verbatim.
  */
-private fun linkify(text: String): AnnotatedString {
+private fun linkify(text: String, onFaceTime: (String) -> Unit): AnnotatedString {
     val matches = URL_REGEX.findAll(text).toList()
     if (matches.isEmpty()) return AnnotatedString(text)
     val linkStyle = TextLinkStyles(style = SpanStyle(textDecoration = TextDecoration.Underline))
@@ -552,7 +602,16 @@ private fun linkify(text: String): AnnotatedString {
         var last = 0
         for (m in matches) {
             if (m.range.first > last) append(text.substring(last, m.range.first))
-            withLink(LinkAnnotation.Url(m.value, linkStyle)) { append(m.value) }
+            // FaceTime links open the in-app call screen (this phone has no
+            // browser to hand them to); everything else keeps the platform
+            // handler. The null listener *is* the platform handler — passing a
+            // listener always overrides it, so only set one for FaceTime.
+            val listener = if (m.value.contains("facetime.apple.com")) {
+                LinkInteractionListener { onFaceTime(m.value) }
+            } else {
+                null
+            }
+            withLink(LinkAnnotation.Url(m.value, linkStyle, listener)) { append(m.value) }
             last = m.range.last + 1
         }
         if (last < text.length) append(text.substring(last))

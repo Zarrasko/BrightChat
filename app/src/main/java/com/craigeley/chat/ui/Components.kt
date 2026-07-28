@@ -114,13 +114,15 @@ fun HapticText(
 /** Top row shared by the sub-screens: a back chevron on the left and a centred
  *  title (the trailing spacer balances the chevron so the title sits centred).
  *  A non-null [onTitleClick] makes the title itself tappable (the thread uses
- *  this to open the chat's details). */
+ *  this to open the chat's details). A non-null [trailing] renders in place of
+ *  the balancing spacer (the thread's small FaceTime control). */
 @Composable
 fun ScreenHeader(
     title: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onTitleClick: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         HapticText(
@@ -148,6 +150,6 @@ fun ScreenHeader(
             )
         }
         Spacer(modifier = Modifier.weight(1f))
-        Spacer(modifier = Modifier.width(24.dp))
+        if (trailing != null) trailing() else Spacer(modifier = Modifier.width(24.dp))
     }
 }

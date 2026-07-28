@@ -45,6 +45,8 @@ data class UiState(
     val privateApi: Boolean = false,           // server's Private API live → tapbacks available
     val typingChatGuid: String? = null,        // chat whose other party is currently typing
     val pinned: Set<String> = emptySet(),      // room guids of pinned chats (sort to top)
+    val faceTimeUrl: String? = null,           // a live FaceTime link → in-app call screen
+    val faceTimeBusy: Boolean = false,         // link generation in flight (header shows …)
     val message: String? = null,               // transient status / error line
 )
 
@@ -299,6 +301,46 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         openRaw = emptyList()
         threadJob?.cancel()
         _state.update { it.copy(open = null, messages = emptyList(), threadLoading = false) }
+    }
+
+    /**
+     * Starts a FaceTime for the open chat (Private-API only, macOS Monterey+):
+     * the Mac mints a FaceTime web link, we drop it into the conversation as a
+     * normal message so the other side can tap it on their device, and open it
+     * ourselves in the in-app call screen ([UiState.faceTimeUrl] → FaceTimeScreen).
+     * Link generation drives the FaceTime app on the Mac, so it can take a few
+     * seconds — [UiState.faceTimeBusy] keeps the header control single-fire and
+     * lets it show progress meanwhile.
+     */
+    fun startFaceTime() {
+        val client = api ?: return
+        val convo = _state.value.open ?: return
+        if (!_state.value.privateApi || _state.value.faceTimeBusy) return
+        _state.update { it.copy(faceTimeBusy = true, message = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val link = client.newFaceTimeLink()
+                withContext(Dispatchers.Main) {
+                    // Send the invite into the chat we started from (guarded like
+                    // updateOpenThread — don't send into a thread navigated away from).
+                    if (_state.value.open?.guid == convo.guid) sendMessage(link)
+                    _state.update { it.copy(faceTimeUrl = link, faceTimeBusy = false) }
+                }
+            } catch (t: Throwable) {
+                _state.update { it.copy(faceTimeBusy = false, message = "Couldn’t start FaceTime") }
+            }
+        }
+    }
+
+    /** Opens an already-known FaceTime link (a tapped facetime.apple.com URL in a
+     *  message) in the in-app call screen. No Private API needed — joining is just
+     *  web FaceTime. */
+    fun openFaceTime(url: String) {
+        _state.update { it.copy(faceTimeUrl = url) }
+    }
+
+    fun closeFaceTime() {
+        _state.update { it.copy(faceTimeUrl = null) }
     }
 
     /**

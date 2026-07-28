@@ -257,6 +257,21 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
     }
 
     /**
+     * `POST /api/v1/facetime/session` — asks the Mac to mint a new FaceTime web
+     * link (Private-API only, macOS Monterey+). The server generates the link via
+     * the FaceTime app, sets it to auto-admit joiners, and leaves the call itself;
+     * anyone with the link then joins through facetime.apple.com (web FaceTime —
+     * which is how this app joins too, in a WebView; see ui/FaceTimeScreen). Link
+     * generation drives the actual FaceTime app on the Mac, so it can take a few
+     * seconds.
+     */
+    fun newFaceTimeLink(): String {
+        val resp = requestChecked("POST", "/api/v1/facetime/session", null, what = "FaceTime link")
+        return dataObject(resp)?.optString("link")?.takeIf { it.isNotBlank() }
+            ?: throw IOException("FaceTime: no link returned")
+    }
+
+    /**
      * `POST`/`DELETE /api/v1/chat/:guid/typing` — show or clear your typing bubble
      * on the other party's device (Private-API only). Best-effort; callers ignore
      * failures and gate on the Private API being live.

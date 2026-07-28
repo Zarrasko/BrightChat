@@ -16,6 +16,13 @@
          The picker itself needs no permission; this is only for walking
          DCIM/Pictures to hand new files to the media scanner. -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- Web FaceTime (facetime.apple.com in the in-app WebView) is WebRTC — the
+         page asks for camera + mic, which the WebView can only grant once the app
+         holds these (see ui/FaceTimeScreen; asked on entering a call). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- remoteMessaging (not dataSync): it's the semantically correct type and,
          crucially, it's one of the FGS types allowed to start from BOOT_COMPLETED
