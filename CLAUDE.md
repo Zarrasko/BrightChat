@@ -158,6 +158,24 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   tapback surfaced as its own "Loved …" thread. We collapse them: see
   `BlueBubblesApi.conversations` + `groupIdentity` and `Conversation.guids` below.
 
+  **Pinned chats (done):** long-press a list row to pin/unpin. Pinned rows float
+  to the top under a dim "Pinned" header (newest-first among themselves, the rest
+  below unchanged). Persisted in `Store` (`pinned`/`setPinned`, a string set of
+  **every room guid** the conversation spans — a forked group's primary guid can
+  shift as rooms go live/dead, so pin membership matches `guids.any { it in
+  pinned }` like socket routing does). `ChatViewModel.togglePin` flips it;
+  partitioning happens at display time in `ConversationsScreen`.
+  **Photo-picker freshness (done):** the system photo picker reads *MediaStore*,
+  not the filesystem, and nothing on the Light Phone keeps that index fresh (no
+  Play-services media jobs; the camera writes files without inserting rows) — so
+  the picker only ever showed images indexed long ago. `MediaRescan.rescan`
+  (`MediaRescan.kt`) walks DCIM + Pictures for image files newer than the last
+  sweep (lastModified watermark, 500-file cap, 4s await cap) and hands them to
+  `MediaScannerConnection` right before the picker launches — wired through
+  `rememberFreshImagePicker` (`ui/Components.kt`), used by both compose bars.
+  Needs `READ_MEDIA_IMAGES` (asked once on first "+"); denied, the rescan
+  no-ops and the picker still opens, just stale.
+
 Note: messaging yourself (note-to-self) legitimately shows each message twice —
 iMessage stores a sent *and* a received row (two GUIDs). Normal chats don't; the
 socket echo of your own sends dedupes by GUID.

@@ -18,6 +18,7 @@ object Store {
     private const val KEY_CONTACTS = "contacts"    // normalized key → name, JSON
     private const val KEY_BASE_URL = "base_url"    // the server URL, set at setup
     private const val KEY_PRIVATE_API = "private_api" // server's Private API live?
+    private const val KEY_PINNED = "pinned_chats"      // room guids of pinned conversations
 
     /** The configured BlueBubbles Server URL, or null if setup hasn't run yet. */
     fun baseUrl(context: Context): String? =
@@ -71,6 +72,19 @@ object Store {
 
     fun setPrivateApi(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_PRIVATE_API, value).apply()
+    }
+
+    /**
+     * Room guids of pinned (favorite) conversations — they sort to the top of the
+     * list. Stored as every room guid the conversation spanned when pinned, so a
+     * forked group whose primary guid shifts still matches by membership.
+     */
+    fun pinned(context: Context): Set<String> =
+        prefs(context).getStringSet(KEY_PINNED, null) ?: emptySet()
+
+    fun setPinned(context: Context, guids: Set<String>) {
+        // Copy: SharedPreferences must never be handed a set it returned.
+        prefs(context).edit().putStringSet(KEY_PINNED, HashSet(guids)).apply()
     }
 
     /** Sign out: wipe the stored password. */

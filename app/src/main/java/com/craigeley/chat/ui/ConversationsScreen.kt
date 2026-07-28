@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import com.craigeley.chat.ChatViewModel
 import com.craigeley.chat.Conversation
 import com.craigeley.chat.Status
+import com.craigeley.chat.UiState
 import com.craigeley.chat.ui.theme.ChatColors
 import com.craigeley.chat.ui.theme.ChatType
 import kotlin.math.roundToInt
@@ -103,26 +104,59 @@ fun ConversationsScreen(viewModel: ChatViewModel, onOpenSettings: () -> Unit, on
                     )
                 }
             }
-            else -> LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                items(state.conversations, key = { it.guid }) { convo ->
-                    // A tapback as the newest activity shows as "Liz loved an image";
-                    // otherwise the real message text, prefixed "You: " when it's ours.
-                    val subtitle = convo.lastReaction?.summary(state.contacts)
-                        ?: ((if (convo.lastFromMe) "You: " else "") + convo.lastText)
-                    ConversationRow(
-                        convo = convo,
-                        title = state.contacts.title(convo),
-                        subtitle = subtitle,
-                        // Deleting a chat needs the Private API (server gate); only then
-                        // do we let the row swipe to reveal Delete.
-                        canDelete = state.privateApi,
-                        onDelete = { viewModel.deleteConversation(convo) },
-                        onClick = { viewModel.open(convo) },
-                    )
+            else -> {
+                // Pinned chats float to the top (newest-first among themselves, like
+                // the rest); membership matches any room guid, so a forked group
+                // stays pinned when its primary guid shifts. Long-press toggles.
+                val (pinned, others) = remember(state.conversations, state.pinned) {
+                    state.conversations.partition { c -> c.guids.any { it in state.pinned } }
+                }
+                LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    if (pinned.isNotEmpty()) {
+                        item(key = "pinned-header") {
+                            Text(
+                                text = "Pinned",
+                                style = ChatType.hint,
+                                color = ChatColors.onSurfaceDisabled,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
+                    }
+                    items(pinned, key = { it.guid }) { convo ->
+                        ConversationItem(viewModel, state, convo)
+                    }
+                    if (pinned.isNotEmpty() && others.isNotEmpty()) {
+                        item(key = "pinned-divider") { Spacer(modifier = Modifier.height(10.dp)) }
+                    }
+                    items(others, key = { it.guid }) { convo ->
+                        ConversationItem(viewModel, state, convo)
+                    }
                 }
             }
         }
     }
+}
+
+/** One list row wired to the ViewModel: tap opens, long-press pins/unpins,
+ *  swipe reveals Delete (Private-API only). Shared by the pinned and unpinned
+ *  sections so both stay identical. */
+@Composable
+private fun ConversationItem(viewModel: ChatViewModel, state: UiState, convo: Conversation) {
+    // A tapback as the newest activity shows as "Liz loved an image";
+    // otherwise the real message text, prefixed "You: " when it's ours.
+    val subtitle = convo.lastReaction?.summary(state.contacts)
+        ?: ((if (convo.lastFromMe) "You: " else "") + convo.lastText)
+    ConversationRow(
+        convo = convo,
+        title = state.contacts.title(convo),
+        subtitle = subtitle,
+        // Deleting a chat needs the Private API (server gate); only then
+        // do we let the row swipe to reveal Delete.
+        canDelete = state.privateApi,
+        onDelete = { viewModel.deleteConversation(convo) },
+        onClick = { viewModel.open(convo) },
+        onLongClick = { viewModel.togglePin(convo) },
+    )
 }
 
 @Composable
@@ -133,6 +167,7 @@ private fun ConversationRow(
     canDelete: Boolean,
     onDelete: () -> Unit,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
 ) {
     val haptics = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
@@ -189,6 +224,12 @@ private fun ConversationRow(
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         // While open, a tap just closes the row rather than opening it.
                         if (offsetX.value < -1f) scope.launch { offsetX.animateTo(0f) } else onClick()
+                    },
+                    // Pin/unpin. Doubled haptic so the toggle is felt, since the only
+                    // visual is the row jumping sections.
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLongClick()
                     },
                 )
                 .padding(vertical = 14.dp),

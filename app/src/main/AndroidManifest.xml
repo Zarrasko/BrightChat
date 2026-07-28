@@ -10,6 +10,12 @@
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- For the pre-picker MediaStore rescan (see MediaRescan): nothing on this
+         phone indexes new camera photos, so the photo picker — which reads
+         MediaStore, not the disk — would only ever show long-ago-indexed images.
+         The picker itself needs no permission; this is only for walking
+         DCIM/Pictures to hand new files to the media scanner. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- remoteMessaging (not dataSync): it's the semantically correct type and,
          crucially, it's one of the FGS types allowed to start from BOOT_COMPLETED

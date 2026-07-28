@@ -1,8 +1,5 @@
 package com.craigeley.chat.ui
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -77,9 +74,9 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
     // Hoisted to the top level (not a conditional branch) so the launcher isn't
     // created conditionally; the lambda reads the current recipients and only
     // sends when it's a 1:1 (the group create path can't take a constructed guid).
-    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        val only = recipients.singleOrNull()
-        if (uri != null && only != null) viewModel.sendNewImage(only.address, uri)
+    // MediaStore-refreshed so new camera photos show up (see rememberFreshImagePicker).
+    val pickImage = rememberFreshImagePicker { uri ->
+        recipients.singleOrNull()?.let { viewModel.sendNewImage(it.address, uri) }
     }
 
     Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 20.dp)) {
@@ -159,11 +156,7 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
 
         val canSend = recipients.isNotEmpty() && blocked.isEmpty()
         val sendNew: (String) -> Unit = { viewModel.sendNewMessage(recipients.map { it.address }, it) }
-        val pickForCompose: (() -> Unit)? = if (recipients.size == 1) {
-            { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-        } else {
-            null
-        }
+        val pickForCompose: (() -> Unit)? = if (recipients.size == 1) pickImage else null
 
         val q = query.trim()
         if (q.isNotEmpty()) {

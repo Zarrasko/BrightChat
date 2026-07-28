@@ -5,9 +5,6 @@ package com.craigeley.chat.ui
 import android.content.Context
 import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -101,11 +98,9 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     // which is also what hides the delayed grayscale restore (see ColorMode).
     var viewingImage by remember(convo.guid) { mutableStateOf<Attachment?>(null) }
 
-    // System photo picker (no permission needed; falls back to the document picker
-    // where the dedicated picker isn't present). A pick sends straight away.
-    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) viewModel.sendImage(uri)
-    }
+    // System photo picker, MediaStore-refreshed so new camera photos actually
+    // show up (see rememberFreshImagePicker). A pick sends straight away.
+    val pickImage = rememberFreshImagePicker { uri -> viewModel.sendImage(uri) }
 
     // Which messages begin a same-speaker run (so only they get a name label).
     val labeled = remember(state.messages) {
@@ -236,9 +231,7 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                     viewModel.sendMessage(text, replyingTo?.guid)
                     replyingTo = null
                 },
-                onPickImage = {
-                    pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                },
+                onPickImage = pickImage,
                 onTextChange = viewModel::onComposeTextChanged,
             )
         }

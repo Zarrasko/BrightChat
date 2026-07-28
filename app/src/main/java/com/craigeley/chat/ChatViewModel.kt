@@ -44,6 +44,7 @@ data class UiState(
     val composingNew: Boolean = false,         // the "New message" compose screen is open
     val privateApi: Boolean = false,           // server's Private API live → tapbacks available
     val typingChatGuid: String? = null,        // chat whose other party is currently typing
+    val pinned: Set<String> = emptySet(),      // room guids of pinned chats (sort to top)
     val message: String? = null,               // transient status / error line
 )
 
@@ -69,7 +70,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private val _state = MutableStateFlow(
-        UiState(isConfigured = api != null, privateApi = Store.privateApi(application)),
+        UiState(
+            isConfigured = api != null,
+            privateApi = Store.privateApi(application),
+            pinned = Store.pinned(application),
+        ),
     )
     val state: StateFlow<UiState> = _state
 
@@ -294,6 +299,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         openRaw = emptyList()
         threadJob?.cancel()
         _state.update { it.copy(open = null, messages = emptyList(), threadLoading = false) }
+    }
+
+    /**
+     * Pins/unpins a conversation (long-press a list row). Pinned rows sort to the
+     * top of the list, newest-first among themselves. Persisted as the set of every
+     * room guid the conversation spans — a forked group's *primary* guid can shift
+     * as rooms go live/dead, so pin membership matches on any room guid
+     * (`guids.any { it in pinned }`), same as socket routing does.
+     */
+    fun togglePin(conversation: Conversation) {
+        val current = Store.pinned(app)
+        val pinned = if (conversation.guids.any { it in current }) {
+            current - conversation.guids.toSet()
+        } else {
+            current + conversation.guids
+        }
+        Store.setPinned(app, pinned)
+        _state.update { it.copy(pinned = pinned) }
     }
 
     /**
