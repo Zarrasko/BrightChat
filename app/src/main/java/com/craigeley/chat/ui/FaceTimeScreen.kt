@@ -29,8 +29,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import com.craigeley.chat.ColorMode
+import com.craigeley.chat.api.Store
 import com.craigeley.chat.ui.theme.ChatColors
 import com.craigeley.chat.ui.theme.ChatType
+import org.json.JSONObject
 
 /**
  * In-app FaceTime: a full-screen WebView on a `facetime.apple.com` call link —
@@ -96,8 +98,19 @@ fun FaceTimeScreen(url: String, onClose: () -> Unit) {
                     // Remote video should start without a tap.
                     settings.mediaPlaybackRequiresUserGesture = false
                     // Keep navigation inside the view (the join flow redirects
-                    // within apple.com; without this it would try a browser).
-                    webViewClient = WebViewClient()
+                    // within apple.com; without this it would try a browser) and
+                    // run the helper script once each page settles: auto-fill the
+                    // name + Continue, and auto-admit join requests.
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView, finishedUrl: String?) {
+                            if ((finishedUrl ?: "").contains("facetime.apple.com")) {
+                                view.evaluateJavascript(
+                                    faceTimeHelperScript(Store.faceTimeName(context)),
+                                    null,
+                                )
+                            }
+                        }
+                    }
                     webChromeClient = object : WebChromeClient() {
                         override fun onPermissionRequest(request: PermissionRequest) {
                             // Only Apple's call page, and only once Android's own
@@ -132,3 +145,75 @@ fun FaceTimeScreen(url: String, onClose: () -> Unit) {
 private fun hasAvPermissions(context: Context): Boolean =
     context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
         context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+/**
+ * Best-effort conveniences injected into Apple's call page — both are DOM
+ * automation against markup Apple can change, so everything here fails soft
+ * back to the manual flow:
+ *
+ * 1. **Name auto-fill.** The join page asks for a display name every time (its
+ *    own memory doesn't reliably survive our WebView teardown). If a name is set
+ *    in Settings, type it (React holds the input's state, so it's set through
+ *    the native value setter + an `input` event — assigning `.value` directly
+ *    wouldn't register) and click Continue. The final Join button is left to the
+ *    user on purpose: that's the camera-preview moment.
+ * 2. **Guest auto-admit.** The server auto-admits only the *first* joiner into a
+ *    minted call (BlueBubbles' admitAndLeave admits one, waits 15s, leaves) — so
+ *    everyone after that would wait on a manual admit from inside the call. A
+ *    MutationObserver (plus a slow sweep, for UI the observer misses) watches
+ *    for join-request prompts and clicks anything labelled admit/approve.
+ *
+ * Idempotent per page (`__ftAuto` guard) — onPageFinished can fire repeatedly.
+ */
+private fun faceTimeHelperScript(name: String): String {
+    // JSONObject.quote gives a fully escaped, quoted JS string literal.
+    val jsName = JSONObject.quote(name.trim())
+    return """
+        (function () {
+          if (window.__ftAuto) return; window.__ftAuto = true;
+          var name = $jsName;
+
+          function fillName(tries) {
+            if (!name) return;
+            var input = document.querySelector('input[type="text"]') ||
+                        document.querySelector('input:not([type="hidden"])');
+            if (!input) {
+              if (tries > 0) setTimeout(function () { fillName(tries - 1); }, 500);
+              return;
+            }
+            if (input.value === name) return;
+            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            setter.call(input, name);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            setTimeout(function () {
+              var btn = Array.prototype.slice.call(document.querySelectorAll('button')).find(function (b) {
+                return /continue/i.test(b.textContent || '');
+              });
+              if (btn && !btn.disabled) btn.click();
+            }, 400);
+          }
+
+          var admitRe = /(admit|approve|let in)/i;
+          function scanAdmit(root) {
+            if (!root.querySelectorAll) return;
+            var btns = root.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+              var b = btns[i];
+              var label = (b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '');
+              if (admitRe.test(label) && !b.disabled) b.click();
+            }
+          }
+          new MutationObserver(function (muts) {
+            for (var m = 0; m < muts.length; m++) {
+              var added = muts[m].addedNodes;
+              for (var n = 0; n < added.length; n++) {
+                if (added[n].nodeType === 1) scanAdmit(added[n]);
+              }
+            }
+          }).observe(document.documentElement, { childList: true, subtree: true });
+          setInterval(function () { scanAdmit(document); }, 2500);
+
+          fillName(20);
+        })();
+    """.trimIndent()
+}

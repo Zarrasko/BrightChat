@@ -196,7 +196,18 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   single-fires). Incoming: any `facetime.apple.com` link in a message body opens
   in-app instead of the (nonexistent) browser — `linkify` attaches a
   `LinkInteractionListener` to just those URLs (a listener *replaces* the
-  platform handler, so only FaceTime links get one). Known gaps: no
+  platform handler, so only FaceTime links get one).
+  **Call-page helper script (`faceTimeHelperScript`, injected onPageFinished on
+  facetime.apple.com, `__ftAuto`-guarded):** best-effort DOM automation, fails
+  soft to the manual flow if Apple changes markup. (a) *Name auto-fill* — the
+  join page asks for a display name every call; if "FaceTime name" is set in
+  Settings (`Store.faceTimeName`, tap-to-edit like Server), the script types it
+  via the native value setter + `input` event (React state) and clicks Continue;
+  the final Join stays manual (camera-preview moment). (b) *Guest auto-admit* —
+  the server's admitAndLeave only auto-admits the FIRST joiner (you) then leaves
+  ~15s later, so invited guests would wait on a manual admit from inside the
+  call; a MutationObserver + slow sweep clicks any admit/approve-labelled button
+  when a join request appears. Known gaps: no
   `ft-call-status-changed` socket handling yet (a native FaceTime *call* — not a
   link — only surfaces once the server answers it), and process death mid-call
   leaves the phone in color (same gap as the image viewer).

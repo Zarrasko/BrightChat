@@ -19,6 +19,7 @@ object Store {
     private const val KEY_BASE_URL = "base_url"    // the server URL, set at setup
     private const val KEY_PRIVATE_API = "private_api" // server's Private API live?
     private const val KEY_PINNED = "pinned_chats"      // room guids of pinned conversations
+    private const val KEY_FT_NAME = "facetime_name"    // auto-filled on web FaceTime's join page
 
     /** The configured BlueBubbles Server URL, or null if setup hasn't run yet. */
     fun baseUrl(context: Context): String? =
@@ -85,6 +86,15 @@ object Store {
     fun setPinned(context: Context, guids: Set<String>) {
         // Copy: SharedPreferences must never be handed a set it returned.
         prefs(context).edit().putStringSet(KEY_PINNED, HashSet(guids)).apply()
+    }
+
+    /** The name FaceTimeScreen auto-fills into web FaceTime's join page (set in
+     *  Settings). Blank → no auto-fill; Apple's page asks like normal. */
+    fun faceTimeName(context: Context): String =
+        prefs(context).getString(KEY_FT_NAME, null).orEmpty()
+
+    fun setFaceTimeName(context: Context, value: String) {
+        prefs(context).edit().putString(KEY_FT_NAME, value.trim()).apply()
     }
 
     /** Sign out: wipe the stored password. */

@@ -83,6 +83,47 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
 
         Spacer(modifier = Modifier.height(36.dp))
 
+        // The name FaceTimeScreen auto-fills into web FaceTime's join page —
+        // Apple's page asks every call otherwise (its own memory doesn't survive
+        // our WebView teardown reliably). Same tap-to-edit pattern as Server.
+        var editingName by remember { mutableStateOf(false) }
+        var draftName by remember { mutableStateOf(Store.faceTimeName(context)) }
+        Text(text = "FaceTime name", style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
+        Spacer(modifier = Modifier.height(16.dp))
+        if (editingName) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                BasicTextField(
+                    value = draftName,
+                    onValueChange = { draftName = it },
+                    singleLine = true,
+                    textStyle = ChatType.body.copy(color = ChatColors.onSurface, textAlign = TextAlign.Center),
+                    cursorBrush = SolidColor(ChatColors.onSurface),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = {
+                        Store.setFaceTimeName(context, draftName)
+                        editingName = false
+                    }),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
+            }
+        } else {
+            HapticText(
+                text = Store.faceTimeName(context).ifEmpty { "Tap to set" },
+                style = ChatType.body,
+                color = ChatColors.onSurface,
+                textAlign = TextAlign.Center,
+                onClick = {
+                    draftName = Store.faceTimeName(context)
+                    editingName = true
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        Spacer(modifier = Modifier.height(36.dp))
+
         HapticText(
             text = "Refresh conversations",
             style = ChatType.body,
