@@ -26,6 +26,12 @@
 >   and Pictures for new files and hands them to `MediaScannerConnection` before the
 >   picker opens.
 >
+> <p>
+> <img src="docs/screenshots/thread.png" width="260" alt="A thread in chat on a Light Phone III, with the Call control in the header">
+> </p>
+>
+> That dim **Call** in the header is the FaceTime control described above.
+>
 > The fork also publishes an APK to
 > [Releases](https://github.com/gi-os/chat/releases) on every push, signed with a stable
 > key so Obtainium can update in place. [CLAUDE.md](CLAUDE.md) documents all of it in
