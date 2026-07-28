@@ -1,3 +1,39 @@
+> ### About this fork
+>
+> This is [gi-os](https://github.com/gi-os)'s fork of
+> **[craigeley/chat](https://github.com/craigeley/chat)**. Craig Eley wrote the app.
+> The README below is his, kept as he wrote it.
+>
+> The fork adds three things, on the
+> [`pinned-chats-and-picker-fix`](https://github.com/gi-os/chat/tree/pinned-chats-and-picker-fix)
+> branch:
+>
+> - **Pinned chats.** Long-press a conversation row to pin or unpin it. Pinned rows
+>   float to the top under a dim "Pinned" header. The pin stores every room GUID the
+>   conversation spans, so a forked group stays pinned when its primary GUID moves.
+> - **FaceTime.** The thread header gains a **Call** control. It mints a link through
+>   `POST /facetime/session`, sends the link into the chat as the invite, and opens the
+>   call in a full-screen WebView on `facetime.apple.com`. Web FaceTime is WebRTC and
+>   the system WebView renders it, which matters because the phone has no browser. A
+>   FaceTime link inside any message body opens the same screen. Set a FaceTime name in
+>   Settings and an injected helper script fills the join form and clicks through, which
+>   gets your join request in before the server auto-admit window closes at two minutes.
+>   The same script admits guests who arrive after you. Camera and microphone reach only
+>   Apple's origin, and only after Android grants them. Closing takes two taps, so a
+>   stray tap cannot hang up. Needs the Private API and macOS Monterey or newer.
+> - **A fresher photo picker.** The system picker reads MediaStore, which nothing on the
+>   Light Phone keeps current, so new camera photos never showed up. A rescan walks DCIM
+>   and Pictures for new files and hands them to `MediaScannerConnection` before the
+>   picker opens.
+>
+> The fork also publishes an APK to
+> [Releases](https://github.com/gi-os/chat/releases) on every push, signed with a stable
+> key so Obtainium can update in place. [CLAUDE.md](CLAUDE.md) documents all of it in
+> detail, including the known gaps.
+>
+> Nothing here is upstream's responsibility. Send bugs in these features to this repo,
+> not to Craig.
+
 # Chat
 
 An **iMessage client** for the [Light Phone III](https://www.thelightphone.com/),
