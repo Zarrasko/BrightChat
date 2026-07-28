@@ -72,7 +72,17 @@ fun FaceTimeScreen(url: String, onClose: () -> Unit) {
         onDispose { ColorMode.release(context) }
     }
 
-    BackHandler { onClose() }
+    // Leaving is confirmed, not instant — a stray tap (or reflexive Back) mid-call
+    // shouldn't hang up. First ×/Back arms it ("End?" for 3s), second actually
+    // closes. Mirrors the thread header's Call control.
+    var closeArmed by remember { mutableStateOf(false) }
+    LaunchedEffect(closeArmed) {
+        if (closeArmed) {
+            kotlinx.coroutines.delay(3_000)
+            closeArmed = false
+        }
+    }
+    BackHandler { if (closeArmed) onClose() else closeArmed = true }
 
     var webView by remember { mutableStateOf<WebView?>(null) }
     DisposableEffect(Unit) {
@@ -131,12 +141,13 @@ fun FaceTimeScreen(url: String, onClose: () -> Unit) {
             },
         )
         // The page has its own leave button; this is the guaranteed exit (same ×
-        // as the reply-banner cancel — Public Sans has that glyph).
+        // as the reply-banner cancel — Public Sans has that glyph). Two-tap: the
+        // first arms it, the second (within 3s) actually ends.
         HapticText(
-            text = "×",
+            text = if (closeArmed) "End?" else "×",
             style = ChatType.title,
             color = ChatColors.onSurface,
-            onClick = onClose,
+            onClick = { if (closeArmed) onClose() else closeArmed = true },
             modifier = Modifier.align(Alignment.TopEnd).padding(horizontal = 16.dp, vertical = 10.dp),
         )
     }
@@ -155,8 +166,11 @@ private fun hasAvPermissions(context: Context): Boolean =
  *    own memory doesn't reliably survive our WebView teardown). If a name is set
  *    in Settings, type it (React holds the input's state, so it's set through
  *    the native value setter + an `input` event — assigning `.value` directly
- *    wouldn't register) and click Continue. The final Join button is left to the
- *    user on purpose: that's the camera-preview moment.
+ *    wouldn't register), click Continue, **and click the final Join** — fully
+ *    automatic entry. Speed matters beyond convenience: the server's window for
+ *    auto-admitting *you* starts when the link is minted and expires after 2
+ *    minutes, so the sooner the join request lands, the surer the admit. (No
+ *    name set → everything stays manual, camera preview included.)
  * 2. **Guest auto-admit.** The server auto-admits only the *first* joiner into a
  *    minted call (BlueBubbles' admitAndLeave admits one, waits 15s, leaves) — so
  *    everyone after that would wait on a manual admit from inside the call. A
@@ -203,6 +217,24 @@ private fun faceTimeHelperScript(name: String): String {
               if (admitRe.test(label) && !b.disabled) b.click();
             }
           }
+
+          // With a name set, also click the final Join (one-shot) — a bare
+          // "Join" button/label, careful not to match join-request prompts.
+          function scanJoin() {
+            if (!name || window.__ftJoined) return;
+            var btns = document.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+              var b = btns[i];
+              var t = (b.textContent || '').trim();
+              var a = (b.getAttribute('aria-label') || '').trim();
+              if ((/^join$/i.test(t) || /^join$/i.test(a)) && !b.disabled) {
+                window.__ftJoined = true;
+                b.click();
+                return;
+              }
+            }
+          }
+
           new MutationObserver(function (muts) {
             for (var m = 0; m < muts.length; m++) {
               var added = muts[m].addedNodes;
@@ -210,8 +242,9 @@ private fun faceTimeHelperScript(name: String): String {
                 if (added[n].nodeType === 1) scanAdmit(added[n]);
               }
             }
+            scanJoin();
           }).observe(document.documentElement, { childList: true, subtree: true });
-          setInterval(function () { scanAdmit(document); }, 2500);
+          setInterval(function () { scanAdmit(document); scanJoin(); }, 2000);
 
           fillName(20);
         })();

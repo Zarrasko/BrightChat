@@ -202,8 +202,12 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   soft to the manual flow if Apple changes markup. (a) *Name auto-fill* — the
   join page asks for a display name every call; if "FaceTime name" is set in
   Settings (`Store.faceTimeName`, tap-to-edit like Server), the script types it
-  via the native value setter + `input` event (React state) and clicks Continue;
-  the final Join stays manual (camera-preview moment). (b) *Guest auto-admit* —
+  via the native value setter + `input` event (React state), clicks Continue,
+  and one-shot-clicks the final bare "Join" — fully automatic entry. Speed is
+  the point: the server's auto-admit-you window starts at link mint and dies at
+  2 minutes, so the join request must land fast. No name set → all manual.
+  Closing the call is two-tap (× → "End?" within 3s, Back likewise) so a stray
+  tap can't hang up. (b) *Guest auto-admit* —
   the server's admitAndLeave only auto-admits the FIRST joiner (you) then leaves
   ~15s later, so invited guests would wait on a manual admit from inside the
   call; a MutationObserver + slow sweep clicks any admit/approve-labelled button
