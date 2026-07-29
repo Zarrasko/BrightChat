@@ -206,8 +206,32 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun refreshOnResume() {
         if (api == null) return
+        // The open thread first, and unconditionally. Leaving the app from inside a chat
+        // leaves `open` set, so coming back re-shows that thread from the cache — if the
+        // socket missed anything (process killed, tunnel down, Doze), the reply simply
+        // wasn't there and nothing was going to fetch it. This is the "it didn't check
+        // whether they texted back" case, and it isn't covered by refreshing the list.
+        _state.value.open?.let { reopenThread(it) }
         if (SystemClock.elapsedRealtime() - lastRefreshAt < RESUME_REFRESH_MIN_GAP_MS) return
         refresh()
+    }
+
+    /** Re-fetches [conversation]'s messages without the open-thread reset [open] does —
+     *  no "Loading…", no scroll change, the cached list stays on screen until the fresh
+     *  one lands. */
+    private fun reopenThread(conversation: Conversation) {
+        val client = api ?: return
+        threadJob?.cancel()
+        threadJob = viewModelScope.launch(Dispatchers.IO) {
+            val results = conversation.guids.map { g -> runCatching { client.messages(g) } }
+            val msgs = results.mapNotNull { it.getOrNull() }.flatten().distinctBy { it.guid }
+            if (msgs.isEmpty()) return@launch
+            messageCache[conversation.guid] = msgs
+            if (_state.value.open?.guid == conversation.guid) {
+                openRaw = msgs
+                _state.update { it.copy(messages = foldReactions(msgs), threadLoading = false) }
+            }
+        }
     }
 
     private suspend fun loadConversations() {

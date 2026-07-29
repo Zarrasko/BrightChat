@@ -12,6 +12,14 @@ import com.gios.lightchat.ReadStatusEvent
 import com.gios.lightchat.TypingEvent
 import com.gios.lightchat.api.BlueBubblesApi
 import com.gios.lightchat.api.Store
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import io.socket.client.IO
 import io.socket.client.Socket
 import io.socket.emitter.Emitter
@@ -31,6 +39,10 @@ import org.json.JSONObject
 class SocketService : Service() {
 
     private var socket: Socket? = null
+    private var api: BlueBubblesApi? = null
+
+    /** Cancelled in [onDestroy]; used for the read-verification round trip. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -43,9 +55,80 @@ class SocketService : Service() {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING,
         )
         connect()
+        startWatchdog()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+
+    /**
+     * The safety net under the live socket.
+     *
+     * With no Google push, instant delivery is a socket we hold open ourselves — and a
+     * socket is not a guarantee. It can be silently wedged (connected as far as we know,
+     * no events arriving), the Tailscale tunnel can drop while the screen is off, Doze can
+     * freeze us, and the process can be killed outright. Any of those and a message simply
+     * never arrives, with nothing to notice: this is the "sometimes it doesn't notify me"
+     * failure.
+     *
+     * So every [WATCHDOG_MS] we reconnect if the socket says it's down, and re-pull the
+     * list either way, alerting for anything past the watermark. Cheap — one REST call —
+     * and it bounds how long a missed message can stay missed. What it can't cover is the
+     * process being killed; `MainActivity.onStart` re-pulling is the backstop there.
+     */
+    private fun startWatchdog() {
+        scope.launch {
+            while (isActive) {
+                delay(WATCHDOG_MS)
+                val live = socket
+                if (live == null || !live.connected()) {
+                    Log.w(TAG, "socket down; reconnecting")
+                    runCatching { live?.connect() }
+                }
+                catchUp()
+            }
+        }
+    }
+
+    /**
+     * Pulls the conversation list and notifies for anything unread that arrived after
+     * [Store.lastAlertedAt]. Notification only — no box, no screen wake: by the time this
+     * finds a message it's minutes old, and lighting the panel for old news is the thing
+     * we spent so long stopping. One buzz if it found anything at all.
+     *
+     * First run seeds the watermark without alerting, or the backlog would all arrive at
+     * once the first time a build with this in it starts.
+     */
+    private suspend fun catchUp() {
+        val client = client() ?: return
+        val convos = runCatching { client.conversations(limit = 50) }.getOrNull() ?: return
+        val watermark = Store.lastAlertedAt(this)
+        val newest = convos.maxOfOrNull { it.lastDate } ?: return
+        if (watermark == 0L) {
+            Store.setLastAlertedAt(this, newest)
+            return
+        }
+        if (newest <= watermark) return
+        val missed = convos.filter { it.unread && !it.lastFromMe && it.lastDate > watermark }
+        // Foregrounded: the list on screen is being refreshed anyway, and an alert for
+        // something the user is looking at is noise. The watermark still moves.
+        if (missed.isEmpty() || AppForeground.active) {
+            Store.setLastAlertedAt(this, newest)
+            return
+        }
+        Log.d(TAG, "catch-up found ${missed.size} missed")
+        val contacts = contacts()
+        for (convo in missed) {
+            val title = convo.displayName.ifBlank {
+                convo.participants.firstOrNull()?.let { contacts.name(it) ?: it } ?: "Message"
+            }
+            Notifications.post(this, title, convo.lastText, convo.guid)
+        }
+        // Advanced *after* posting, not before: if this dies partway the next poll retries,
+        // and a retry is harmless — notification ids are per chat, so a repost replaces the
+        // same row. Losing an alert is the failure that matters.
+        Store.setLastAlertedAt(this, newest)
+        HeadsUp.buzz(this)
+    }
 
     private fun connect() {
         val password = Store.password(this) ?: run { stopSelf(); return }
@@ -57,7 +140,12 @@ class SocketService : Service() {
         }
         val s = runCatching { IO.socket(baseUrl, opts) }.getOrNull() ?: run { stopSelf(); return }
         socket = s
-        s.on(Socket.EVENT_CONNECT, Emitter.Listener { Log.d(TAG, "socket connected") })
+        s.on(Socket.EVENT_CONNECT, Emitter.Listener {
+            Log.d(TAG, "socket connected")
+            // A reconnect means we were off the air for some length of time; find out what
+            // arrived while we were.
+            scope.launch { catchUp() }
+        })
         s.on(Socket.EVENT_CONNECT_ERROR, Emitter.Listener { Log.w(TAG, "connect error: ${it.firstOrNull()}") })
         s.on("new-message", Emitter.Listener { onMessage(it, isNew = true) })
         s.on("updated-message", Emitter.Listener { onMessage(it, isNew = false) })
@@ -80,20 +168,57 @@ class SocketService : Service() {
         s.connect()
     }
 
-    /** A `chat-read-status-changed` event — `{ chatGuid, read }`. Bridged to the
-     *  ViewModel (unread marker) and, when read, dismisses the chat's notification
-     *  so an alert already read on another device doesn't linger here. */
+    /**
+     * A `chat-read-status-changed` event — `{ chatGuid, read }`. Bridged to the ViewModel
+     * for the unread marker, and when read, dismisses the chat's alert so something
+     * already read on another device doesn't linger here.
+     *
+     * The event carries no timestamp, and the server's chat.db poller will happily report
+     * `read: true` describing the state *before* a message that has just arrived — a chat
+     * you had open on this phone (so we marked it read) is the common way to get one. Left
+     * alone, that stale event dismisses the notification for the reply you were waiting
+     * for, seconds after it was posted. So a read is verified before it's acted on: ask
+     * the server for the chat's newest message and only dismiss if that message really
+     * does carry a `dateRead`.
+     */
     private fun onReadStatus(args: Array<out Any?>?) {
         val data = args?.firstOrNull() as? JSONObject ?: return
         val guid = data.optString("chatGuid").takeIf { it.isNotBlank() } ?: return
         val read = data.optBoolean("read", false)
         SocketBus.readStatus.tryEmit(ReadStatusEvent(guid, read))
-        if (read) {
-            Notifications.clearChat(this, listOf(guid))
-            // Read on the Mac or the phone: whatever box is waiting on its grace period
-            // for this chat, or already up for it, isn't wanted.
+        if (!read) return
+        // Off the socket thread: this makes a REST call.
+        scope.launch {
+            if (!newestIsRead(guid)) {
+                Log.d(TAG, "stale read for $guid — newest message still unread, keeping the alert")
+                return@launch
+            }
+            Notifications.clearChat(this@SocketService, listOf(guid))
             HeadsUp.cancel(guid)
         }
+    }
+
+    /**
+     * Whether [chatGuid]'s newest incoming message has actually been read. False on any
+     * failure: keeping an alert we can't justify dismissing is the safe direction.
+     */
+    private suspend fun newestIsRead(chatGuid: String): Boolean = withContext(Dispatchers.IO) {
+        val client = client() ?: return@withContext false
+        val newest = runCatching { client.messages(chatGuid, limit = 5) }
+            .getOrNull()
+            ?.filterNot { it.fromMe || it.isGroupEvent }
+            ?.maxByOrNull { it.date }
+            ?: return@withContext false
+        newest.dateRead != 0L
+    }
+
+    /** Built on demand from the stored setup, and only for [newestIsRead] — the socket
+     *  itself needs no client. */
+    private fun client(): BlueBubblesApi? {
+        api?.let { return it }
+        val url = Store.baseUrl(this) ?: return null
+        val password = Store.password(this) ?: return null
+        return BlueBubblesApi(url, password).also { api = it }
     }
 
     /** A `typing-indicator` event — `{ display, guid }` — bridged to the ViewModel.
@@ -137,6 +262,7 @@ class SocketService : Service() {
     private fun contacts(): Contacts = Store.contacts(this)
 
     override fun onDestroy() {
+        scope.cancel()
         socket?.disconnect()
         socket?.off()
         socket = null
@@ -145,5 +271,8 @@ class SocketService : Service() {
 
     companion object {
         private const val TAG = "SocketService"
+
+        /** How long a missed message can stay missed while the service is alive. */
+        private const val WATCHDOG_MS = 5 * 60 * 1000L
     }
 }

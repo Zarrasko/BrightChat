@@ -19,6 +19,7 @@ object Store {
     private const val KEY_BASE_URL = "base_url"    // the server URL, set at setup
     private const val KEY_PRIVATE_API = "private_api" // server's Private API live?
     private const val KEY_FAVORITES = "favorites"     // starred chat guids, newline-joined
+    private const val KEY_ALERTED_AT = "alerted_at"   // newest message we've alerted for
 
     /** The configured BlueBubbles Server URL, or null if setup hasn't run yet. */
     fun baseUrl(context: Context): String? =
@@ -89,6 +90,18 @@ object Store {
 
     fun setFavorites(context: Context, guids: Set<String>) {
         prefs(context).edit().putString(KEY_FAVORITES, guids.joinToString("\n")).apply()
+    }
+
+    /**
+     * The date of the newest message we've raised an alert for. The catch-up poll (see
+     * `SocketService`) uses it as a watermark so a missed message notifies exactly once,
+     * no matter how many times the poll runs or the process restarts. Persisted rather
+     * than in-memory precisely because the process restarting is the case it exists for.
+     */
+    fun lastAlertedAt(context: Context): Long = prefs(context).getLong(KEY_ALERTED_AT, 0L)
+
+    fun setLastAlertedAt(context: Context, value: Long) {
+        prefs(context).edit().putLong(KEY_ALERTED_AT, value).apply()
     }
 
     /** Sign out: wipe the stored password. */

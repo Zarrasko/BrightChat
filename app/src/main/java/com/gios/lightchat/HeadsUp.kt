@@ -139,7 +139,7 @@ object HeadsUp {
      * [Notifications.ensureChannels]) so this is the only buzz — one place to tune,
      * and it still fires when the box can't be shown.
      */
-    private fun buzz(context: Context) {
+    fun buzz(context: Context) {
         val now = SystemClock.elapsedRealtime()
         if (now - lastBuzz < BUZZ_RATE_LIMIT_MS) return
         lastBuzz = now
