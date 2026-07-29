@@ -88,7 +88,12 @@ class SocketService : Service() {
         val guid = data.optString("chatGuid").takeIf { it.isNotBlank() } ?: return
         val read = data.optBoolean("read", false)
         SocketBus.readStatus.tryEmit(ReadStatusEvent(guid, read))
-        if (read) Notifications.clearChat(this, listOf(guid))
+        if (read) {
+            Notifications.clearChat(this, listOf(guid))
+            // Read on the Mac or the phone: whatever box is waiting on its grace period
+            // for this chat, or already up for it, isn't wanted.
+            HeadsUp.cancel(guid)
+        }
     }
 
     /** A `typing-indicator` event — `{ display, guid }` — bridged to the ViewModel.
@@ -116,7 +121,14 @@ class SocketService : Service() {
             // The notification is the record — it stays in LightOS's list and feeds
             // LightGlance's dot. The box is the alert, and buzzes either way.
             Notifications.post(this, title, incoming.message.text, incoming.chatGuid)
-            HeadsUp.show(this, title, incoming.message.text, incoming.chatGuid)
+            HeadsUp.show(
+                this,
+                title,
+                incoming.message.text,
+                incoming.chatGuid,
+                // Stamped already: read on another device before the event even got here.
+                alreadyRead = incoming.message.dateRead != 0L,
+            )
         }
     }
 

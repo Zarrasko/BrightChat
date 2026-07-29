@@ -440,8 +440,8 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         val out = ArrayList<Pair<String, String>>()
         for (i in 0 until data.length()) {
             val c = data.getJSONObject(i)
-            val name = c.optString("displayName").ifBlank {
-                listOf(c.optString("firstName"), c.optString("lastName"))
+            val name = c.string("displayName").ifBlank {
+                listOf(c.string("firstName"), c.string("lastName"))
                     .filter { it.isNotBlank() }
                     .joinToString(" ")
             }
@@ -481,7 +481,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         }
         return Conversation(
             guid = guid,
-            displayName = chat.optString("displayName", ""),
+            displayName = chat.string("displayName"),
             participants = resolved,
             isGroup = chat.optInt("style") == 43, // 43 = group, 45 = one-on-one
             lastText = lastText,
@@ -631,8 +631,24 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                 chatGuid = guid,
                 message = parseMessage(data),
                 isNew = isNew,
-                chatDisplayName = chat.optString("displayName", ""),
+                chatDisplayName = chat.string("displayName"),
             )
         }
     }
+}
+
+/**
+ * `optString` for values that may be JSON null.
+ *
+ * `JSONObject.optString(key, "")` does **not** return the fallback for an explicit
+ * `null` — org.json stores it as the `JSONObject.NULL` sentinel, whose `toString()` is
+ * `"null"`, and that string is what comes back. BlueBubbles sends `"displayName": null`
+ * for a chat with no name, which is how the conversation list ended up with entries
+ * literally titled "null" that counted as Known because the name was non-blank. The
+ * literal string is treated as absent too: no real chat is called that.
+ */
+internal fun JSONObject.string(key: String): String {
+    if (isNull(key)) return ""
+    val value = optString(key, "")
+    return if (value == "null") "" else value
 }

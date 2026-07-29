@@ -209,6 +209,45 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   viewer's release is idempotent (`AtomicBoolean`) because it releases mid-close *and* on
   dispose. Known gap: no fade on the picker's exit, so the thread's inline thumbnails stay
   colour for the ~70ms the settings write takes and then desaturate.
+  **Heads-up presentation (done):** two ways of showing the box, chosen on
+  `PowerManager.isInteractive && !KeyguardManager.isKeyguardLocked`. Awake and unlocked →
+  `HeadsUpOverlay`, a real `TYPE_APPLICATION_OVERLAY` window, because **nothing else gets
+  interrupted**: an activity — floating, translucent, whatever — pauses the activity
+  underneath it, so a text used to stop whatever you were doing for 4.5s.
+  `FLAG_NOT_FOCUSABLE` implies `FLAG_NOT_TOUCH_MODAL` (still true on 34), so touches
+  outside the box reach the app below, and no IME focus is taken. Screen off or locked →
+  `HeadsUpActivity` still, since a window sits below the keyguard and can't wake the
+  panel; `HeadsUpActivity.dismissLive()` lets the overlay replace a box that's still up
+  from before the user unlocked. A `ComposeView` outside an Activity needs the ViewTree
+  lifecycle and saved-state owners set or it throws on first composition — and note
+  `ViewTreeLifecycleOwner.set` is a Java-only `@JvmName` alias, the Kotlin call is the
+  `setViewTreeLifecycleOwner` extension. `FLAG_HARDWARE_ACCELERATED` has to be set by hand
+  too; `Activity.attach` injects it and a hand-built `LayoutParams` doesn't get it.
+  **Don't alert for something already read (done):** reading a text on the Mac lit the
+  phone anyway — `new-message` arrives before the `chat-read-status-changed` that says
+  you've seen it, so by the time we knew, the panel was on. The box now waits
+  `READ_GRACE_MS` (2s) and `chat-read-status-changed` cancels it; a message that already
+  carries a `dateRead` never shows one. The buzz stays immediate — a late buzz feels like
+  a broken phone, and it isn't what lights the room up at 2am.
+  **"null" chats (done):** `JSONObject.optString(k, "")` does *not* return the fallback
+  for an explicit JSON null — org.json stores `JSONObject.NULL`, whose `toString()` is
+  `"null"`, and that string comes back. BlueBubbles sends `"displayName": null` for an
+  unnamed chat, so the list had rows literally titled "null" that counted as *Known*
+  because the name was non-blank. `JSONObject.string(key)` in `BlueBubblesApi` is the fix;
+  `Contacts.from`/`name` and `Conversation.title` guard the literal too, for an index
+  persisted by an older build.
+  **Mark all as read (done):** Settings action. Returns its outcome as a string rather
+  than setting `state.message`, which the list only renders when *empty* — it would have
+  been invisible there and then turned up floating in the next thread opened. Clears by a
+  captured guid set, not by `it.unread`, because `MutableStateFlow.update` re-runs on CAS
+  contention and a message arriving in that window would lose its dot without a
+  `clearedUnread` entry or a receipt. Without the Private API it says so.
+  **Tapback gestures (done):** long-press *or* double-tap opens the picker, on message
+  bodies and on images (children win hit-testing, so images need their own). Cost: every
+  single tap in a thread now waits out the double-tap timeout, which for images means
+  opening a photo is ~300ms slower — the trade every gallery with double-tap-to-zoom makes.
+  **Scroll on send (done):** your own newest message always scrolls the thread to the
+  bottom, wherever you were; someone else's only nudges you if you were already there.
   **Notification deep-links (done):** message notifications are per-chat (id
   hashed from the chat guid, so each thread keeps its own and a newer message
   replaces it) and tapping one opens that thread: the PendingIntent carries

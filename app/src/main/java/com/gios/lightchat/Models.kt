@@ -30,10 +30,13 @@ data class Conversation(
     // here, or by a `chat-read-status-changed` socket event when read elsewhere.
     val unread: Boolean = false,
 ) {
-    /** Human title: an explicit group name if set, otherwise the participants. */
+    /** Human title: an explicit group name if set, otherwise the participants. Prefer
+     *  `Contacts.title`, which resolves names; this is the nameless fallback. `"null"` is
+     *  guarded because BlueBubbles sends a JSON null for an unnamed chat and org.json
+     *  stringifies that (see `JSONObject.string`). */
     val title: String
         get() = when {
-            displayName.isNotBlank() -> displayName
+            displayName.isNotBlank() && displayName != "null" -> displayName
             participants.isNotEmpty() -> participants.joinToString(", ")
             else -> "Unknown"
         }

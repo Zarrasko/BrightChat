@@ -83,6 +83,29 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
 
         Spacer(modifier = Modifier.height(36.dp))
 
+        // Stays on this screen rather than going back, so the outcome can actually be
+        // read — including the case where the Private API is off and the Mac still shows
+        // everything unread.
+        var readResult by remember { mutableStateOf<String?>(null) }
+        HapticText(
+            text = "Mark all as read",
+            style = ChatType.body,
+            color = ChatColors.onSurfaceDim,
+            onClick = { readResult = viewModel.markAllRead() },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        readResult?.let {
+            Text(
+                text = it,
+                style = ChatType.hint,
+                color = ChatColors.onSurfaceDisabled,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
         HapticText(
             text = "Refresh conversations",
             style = ChatType.body,

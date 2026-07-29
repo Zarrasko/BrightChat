@@ -82,6 +82,9 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         AppForeground.active = true
         Notifications.clear(this)
+        // The user is here; a box telling them about a message they're about to read is
+        // just something in the way.
+        HeadsUpOverlay.hide()
         // Re-pull the conversation list on every return to the app, not just cold
         // start — the socket only runs while the service does. Rate-guarded in the
         // ViewModel so this doesn't duplicate the init refresh.

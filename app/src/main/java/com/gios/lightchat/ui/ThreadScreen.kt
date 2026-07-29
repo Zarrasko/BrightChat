@@ -74,9 +74,10 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     val convo = state.open ?: return
     val listState = rememberLazyListState()
 
-    // Which message's tapback picker is open (its guid), if any. Long-press opens
-    // it; picking a reaction or tapping elsewhere closes it. Only when the server's
-    // Private API is live — otherwise reacting can't be sent, so we don't offer it.
+    // Which message's tapback picker is open (its guid), if any. A long-press or a
+    // double-tap opens it; picking a reaction or tapping elsewhere closes it. Only when
+    // the server's Private API is live — otherwise reacting can't be sent, so we don't
+    // offer it.
     var reactingTo by remember { mutableStateOf<String?>(null) }
 
     // The message the next send replies to (chosen from the long-press menu),
@@ -126,12 +127,14 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     val byGuid = remember(state.messages) { state.messages.associateBy { it.guid } }
 
     // The list is reverse-laid-out (newest pinned to the bottom), so opening a
-    // thread shows the latest immediately — no scroll to watch. Only nudge to the
-    // bottom for a *new* newest message, and only if the user is already down there
-    // (don't yank them away while they're scrolled up reading history).
-    val newestGuid = state.messages.lastOrNull()?.guid
-    LaunchedEffect(newestGuid) {
-        if (newestGuid != null && listState.firstVisibleItemIndex <= 2) {
+    // thread shows the latest immediately — no scroll to watch.
+    val newest = state.messages.lastOrNull()
+    LaunchedEffect(newest?.guid) {
+        val message = newest ?: return@LaunchedEffect
+        // Your own send always scrolls, wherever you were: you pressed send, so you should
+        // see it land. Someone else's message only nudges you if you were already at the
+        // bottom — being yanked out of history you were reading is the other failure.
+        if (message.fromMe || listState.firstVisibleItemIndex <= 2) {
             listState.animateScrollToItem(0)
         }
     }
@@ -517,10 +520,13 @@ private fun MessageContent(
             enabled = canReact,
             onClick = { if (pickerOpen) onDismissPicker() },
             onLongClick = onLongPress,
+            // Same picker as long-press. Holding is fiddly on a small matte panel, and
+            // a double-tap on a message is a gesture nothing else here uses.
+            onDoubleClick = onLongPress,
         ),
         horizontalAlignment = align,
     ) {
-        // The long-press menu — the six tapbacks plus Reply — sits above the turn.
+        // The tapback menu — the six tapbacks plus Reply — sits above the turn.
         if (pickerOpen) {
             ReactionPicker(
                 selected = message.reactions.firstOrNull { it.fromMe }?.type,
@@ -651,6 +657,12 @@ private fun AttachmentImage(
                         onTap()
                     },
                     onLongClick = onLongPress,
+                    // A photo is a message, so double-tap reacts to it too. Children win
+                    // hit-testing, so without this the double-tap on an image would just
+                    // fire onTap twice and open the viewer. The cost is that opening a
+                    // photo now waits out the double-tap timeout — the same trade every
+                    // gallery with double-tap-to-zoom makes.
+                    onDoubleClick = onLongPress,
                 ),
         )
     } else {

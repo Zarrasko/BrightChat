@@ -1076,6 +1076,41 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Clears every unread dot at once (Settings → Mark all as read). Returns what to tell
+     * the user, because the two halves can disagree and `state.message` is the wrong place
+     * for it — the conversation list only renders that when the list is *empty*, so the
+     * text would be invisible here and then turn up floating in the next thread opened.
+     *
+     * The dots go immediately and are recorded in [clearedUnread] so the next refresh
+     * can't resurrect them while the server's `dateRead` catches up — that part always
+     * works. Sending the actual read receipts needs the Private API, and without it the
+     * Mac still thinks they're unread, so say so rather than implying more happened.
+     */
+    fun markAllRead(): String {
+        val unread = _state.value.conversations.filter { it.unread }
+        if (unread.isEmpty()) return "Nothing unread"
+        val cleared = unread.map { it.guid }.toSet()
+        unread.forEach { clearedUnread[it.guid] = maxOf(clearedUnread[it.guid] ?: 0L, it.lastDate) }
+        // Keyed on the captured set, not on `it.unread`: update's lambda re-runs on CAS
+        // contention, and a message arriving in that window would have its dot cleared
+        // here without a clearedUnread entry or a receipt — so the next refresh would
+        // bring it straight back.
+        _state.update { s ->
+            s.copy(conversations = s.conversations.map { if (it.guid in cleared) it.copy(unread = false) else it })
+        }
+        Notifications.clear(app)
+        // Every room, not just the primary guid: a forked group spans several.
+        unread.flatMap { it.guids }.forEach { markReadIfPrivate(it) }
+        val n = cleared.size
+        val what = if (n == 1) "1 conversation" else "$n conversations"
+        return if (_state.value.privateApi) {
+            "Marked $what read"
+        } else {
+            "Cleared $what here — the Private API is off, so the Mac still shows them unread"
+        }
+    }
+
     /** Marks [chatGuid] read on the server (best-effort, off-main), but only when
      *  the Private API is live — it's the only path that can send a read receipt. */
     private fun markReadIfPrivate(chatGuid: String) {

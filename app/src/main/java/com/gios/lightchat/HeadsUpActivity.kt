@@ -64,6 +64,10 @@ class HeadsUpActivity : ComponentActivity() {
                 WindowManager.LayoutParams.WRAP_CONTENT,
             )
         }
+        // Only one box at a time: if the screen went off while a window was up, the
+        // activity is now the one showing it.
+        HeadsUpOverlay.hide()
+        live = this
         read(intent)
         // read() finishes us when the extras are empty; no point composing.
         if (isFinishing) return
@@ -103,11 +107,6 @@ class HeadsUpActivity : ComponentActivity() {
         handler.postDelayed(dismiss, VISIBLE_MS)
     }
 
-    override fun onDestroy() {
-        handler.removeCallbacks(dismiss)
-        super.onDestroy()
-    }
-
     /** Tapping the box opens that thread, exactly like tapping the notification. */
     private fun openThread() {
         val guid = chatGuid
@@ -119,9 +118,29 @@ class HeadsUpActivity : ComponentActivity() {
         finish()
     }
 
-    private companion object {
+    override fun onDestroy() {
+        if (live === this) live = null
+        handler.removeCallbacks(dismiss)
+        super.onDestroy()
+    }
+
+    companion object {
         /** Long enough to read two lines, short enough not to sit in front of what
          *  you were doing. */
-        const val VISIBLE_MS = 4_500L
+        private const val VISIBLE_MS = 4_500L
+
+        /**
+         * The instance currently on screen, if any. Held so [HeadsUpOverlay] can replace
+         * it: the activity is only used when the screen was off, and once the user has
+         * unlocked, a second message should come as a window that doesn't pause anything
+         * rather than stack on top of this. Cleared in [onDestroy], so it isn't a leak.
+         */
+        @Volatile
+        private var live: HeadsUpActivity? = null
+
+        fun dismissLive() {
+            val current = live ?: return
+            current.runOnUiThread { current.finish() }
+        }
     }
 }
