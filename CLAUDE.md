@@ -77,7 +77,7 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   `onAppHidden` restores immediately, no fade (another app's colors are showing).
   `MainActivity.onStop/onStart` → `onAppHidden`/`onAppVisible` keep the rest of
   the phone B&W if the app is backgrounded mid-view and re-lift on return.
-  Requires a one-time `adb shell pm grant com.craigeley.chat
+  Requires a one-time `adb shell pm grant com.gios.lightchat
   android.permission.WRITE_SECURE_SETTINGS` (signature-level; declared with
   `tools:ignore="ProtectedPermissions"`); ungranted, every call no-ops and the
   viewer stays grayscale. Known gap (zero has it too): a process death mid-view
@@ -141,6 +141,41 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   ViewModel's session-lived `clearedUnread` (primary guid → lastDate at clear)
   stops a refresh from resurrecting a just-cleared dot while the server's
   `dateRead` stamp catches up with our `markRead`.
+  **Favorites / Known / Unknown tabs (done):** the list is three lists behind a
+  bottom icon bar (`ui/Navbar.kt`, the LightFog pattern — Material glyphs at 48dp,
+  active white / inactive `#6E6E6E`, no labels, hand-parsed paths rather than a
+  material-icons dependency, like `ui/Tapbacks.kt`). `tabOf(convo, contacts,
+  favorites)` decides membership in one place, so the three are exhaustive and
+  disjoint by construction: starred → Favorites, else `Contacts.knows` (an explicit
+  group name, or any participant in the address book) → Known, else Unknown. A tab
+  with unread carries a dot on its glyph. Favorites are local (`Store.favorites`,
+  newline-joined guids) because BlueBubbles has no favorites concept; long-press a
+  row to toggle, and the row moving tabs is the only confirmation.
+  **List scroll position (done):** the tab and one `LazyListState` per tab live in
+  `LightChatApp`, above the `when` that swaps screens. `ConversationsScreen` leaves
+  the composition entirely whenever a thread, settings or the composer is open, so
+  anything remembered inside it is discarded — which is why exiting a thread used
+  to land back at the top of the list. `rememberSaveable` on the tab carries it
+  through process death; `LazyListState` is saveable already. A `LaunchedEffect` on
+  the open chat's guid follows the tab to whatever list contains it, so a
+  notification tap on an unknown number doesn't close back onto a list the chat
+  isn't in.
+  **Heads-up box (done):** `HeadsUp.show` buzzes (a double tick — the message
+  channel has `enableVibration(false)` so there is exactly one buzz per message,
+  whether or not the box appears) and starts `HeadsUpActivity`: sender, two lines,
+  4.5s, tap to open the thread, swipe up to dismiss. It is an *activity*, not a
+  `TYPE_APPLICATION_OVERLAY` window, because an overlay sits below the keyguard and
+  cannot wake the panel — `showWhenLocked` + `turnScreenOn` can. Starting it from
+  the background needs the `SYSTEM_ALERT_WINDOW` appop, which on Android 14 is what
+  exempts an app from background-activity-start restrictions (LightGlance leans on
+  the same thing); `adb shell appops set com.gios.lightchat SYSTEM_ALERT_WINDOW
+  allow`, adb-only because LightOS has no Settings screen for it. Ungranted, the
+  buzz and the notification still happen. The window is floating and sized to its
+  content so touches outside it still reach the app underneath — that app is paused
+  while the box is up (anything on top does that) but stays visible. Known gap:
+  brightness is left at whatever the system had, so a 3am text lights up at full
+  brightness; LightGlance's 2% override wasn't reused because the box has to be
+  readable at arm's length.
   **Notification deep-links (done):** message notifications are per-chat (id
   hashed from the chat guid, so each thread keeps its own and a newer message
   replaces it) and tapping one opens that thread: the PendingIntent carries
@@ -428,11 +463,11 @@ These look odd out of context but are deliberate, and match a family of sibling
 LightOS apps that share the same conventions:
 
 - **UI is black-and-white, Public Sans, text-only** (vandamd's LightOS style).
-  Use `ChatColors`, `ChatType`, `ChatDimens` from `ui/theme/ChatTheme.kt` — not
+  Use `ChatColors`, `ChatType`, `ChatDimens` from `ui/theme/LightChatTheme.kt` — not
   Material defaults. "Buttons" are tappable text (`HapticText`). Messages have no
   bubbles — the user's turns right-aligned, others left, width-capped with
   run-collapsed name labels (see the Screens section).
-- **Font scale is pinned to 0.85** in `ChatTheme` (LightOS ships a large default).
+- **Font scale is pinned to 0.85** in `LightChatTheme` (LightOS ships a large default).
 - Portrait-only, single activity, `adjustResize`.
 - **Full-screen / immersive** — `MainActivity.enableImmersive()` hides the top
   status bar via `WindowInsetsControllerCompat.hide(Type.statusBars())`

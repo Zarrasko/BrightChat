@@ -10,6 +10,12 @@
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Not for drawing an overlay. On Android 14 this appop is what exempts us from
+         background-activity-start restrictions, which is the only way a sideloaded
+         app can put the heads-up box up while the screen is off. Granted over adb;
+         LightOS has no Settings UI for it. See HeadsUp. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- remoteMessaging (not dataSync): it's the semantically correct type and,
          crucially, it's one of the FGS types allowed to start from BOOT_COMPLETED
@@ -22,7 +28,7 @@
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Chat.SplashScreen">
+        android:theme="@style/Theme.LightChat.SplashScreen">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -35,6 +41,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- The incoming-message box. Floating and sized to its content (see
+             HeadsUpActivity), excluded from recents, and never left behind in the
+             back stack. singleTop so a burst of messages re-uses one instance. -->
+        <activity
+            android:name=".HeadsUpActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.LightChat.HeadsUp" />
 
         <!-- Holds the live Socket.IO connection so messages arrive (and notify)
              without Google Play push. remoteMessaging FGS so it can also start at

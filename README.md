@@ -1,46 +1,38 @@
 > ### About this fork
 >
-> This is [gi-os](https://github.com/gi-os)'s fork of
+> This is **LightChat**, [gi-os](https://github.com/gi-os)'s fork of
 > **[craigeley/chat](https://github.com/craigeley/chat)**. Craig Eley wrote the app.
 > The README below is his, kept as he wrote it.
 >
-> The fork adds three things, on the
-> [`pinned-chats-and-picker-fix`](https://github.com/gi-os/chat/tree/pinned-chats-and-picker-fix)
-> branch:
+> The fork renames the app to LightChat (`com.gios.lightchat`) to sit with the rest of
+> the [gi-os Light Phone tools](https://github.com/gi-os/awesome-light), and adds:
 >
-> - **Pinned chats.** Long-press a conversation row to pin or unpin it. Pinned rows
->   float to the top under a dim "Pinned" header. The pin stores every room GUID the
->   conversation spans, so a forked group stays pinned when its primary GUID moves.
-> - **FaceTime.** The thread header gains a **Call** control. It mints a link through
->   `POST /facetime/session`, sends the link into the chat as the invite, and opens the
->   call in a full-screen WebView on `facetime.apple.com`. Web FaceTime is WebRTC and
->   the system WebView renders it, which matters because the phone has no browser. A
->   FaceTime link inside any message body opens the same screen. Set a FaceTime name in
->   Settings and an injected helper script fills the join form and clicks through, which
->   gets your join request in before the server auto-admit window closes at two minutes.
->   The same script admits guests who arrive after you. Camera and microphone reach only
->   Apple's origin, and only after Android grants them. Closing takes two taps, so a
->   stray tap cannot hang up. Needs the Private API and macOS Monterey or newer.
-> - **A fresher photo picker.** The system picker reads MediaStore, which nothing on the
->   Light Phone keeps current, so new camera photos never showed up. A rescan walks DCIM
->   and Pictures for new files and hands them to `MediaScannerConnection` before the
->   picker opens.
+> - **Favorites / Known / Unknown tabs.** The conversation list is three lists behind an
+>   icon bar: starred chats, chats with a name in the Mac's address book, and everything
+>   else. Long-press a row to star it. Exiting a thread returns you to where you were in
+>   the list rather than the top of it.
+> - **Full-colour photos.** Tapping a photo lifts LightOS's grayscale for exactly as long
+>   as the viewer is open. Needs a one-time adb grant — see below.
+> - **Heads-up messages.** A minimal box over whatever you're doing when a text arrives,
+>   with the sender, the message, and a buzz. Needs a one-time adb grant — see below.
 >
 > <p>
-> <img src="docs/screenshots/thread.png" width="260" alt="A thread in chat on a Light Phone III, with the Call control in the header">
+> <img src="docs/screenshots/thread.png" width="260" alt="A thread in LightChat on a Light Phone III">
 > </p>
 >
-> That dim **Call** in the header is the FaceTime control described above.
+> **Coming from the old `com.craigeley.chat` build?** The package id changed, so this
+> installs alongside it rather than updating it. Uninstall the old one, re-run setup
+> (or push it over adb, below), re-run both `adb` grants, and re-add the app in
+> Obtainium — it sees a different package. Starred chats don't carry over either.
 >
-> The fork also publishes an APK to
-> [Releases](https://github.com/gi-os/chat/releases) on every push, signed with a stable
-> key so Obtainium can update in place. [CLAUDE.md](CLAUDE.md) documents all of it in
-> detail, including the known gaps.
+> APKs are published to [Releases](https://github.com/gi-os/LightChat/releases) when a
+> `v*` tag is pushed, signed with a stable key so Obtainium can update in place.
+> [CLAUDE.md](CLAUDE.md) documents the internals, including the known gaps.
 >
 > Nothing here is upstream's responsibility. Send bugs in these features to this repo,
 > not to Craig.
 
-# Chat
+# LightChat
 
 An **iMessage client** for the [Light Phone III](https://www.thelightphone.com/),
 inspired by and based on the apps created by [vandamd](https://github.com/vandamd). The app works by talking to an always-on, self-hosted [BlueBubbles Server](https://github.com/BlueBubblesApp/bluebubbles-server), reached privately over [Tailscale](https://tailscale.com/).
@@ -122,11 +114,28 @@ the viewer is open — the phone returns to grayscale the moment you dismiss it
 (the same trick as [zero](https://github.com/vandamd/zero)'s red-text mode):
 
 ```sh
-adb shell pm grant com.craigeley.chat android.permission.WRITE_SECURE_SETTINGS
+adb shell pm grant com.gios.lightchat android.permission.WRITE_SECURE_SETTINGS
 ```
 
 One-time; it survives app updates. Without it, photos simply open in grayscale
 like the rest of the phone.
+
+### Optional: heads-up messages
+
+A text arriving while you're somewhere else on the phone buzzes and drops a small
+box over whatever you're doing: sender, two lines of message, gone in four and a
+half seconds. Tap it to open the thread, swipe up to dismiss it early. It also
+wakes the panel, so a message arriving with the phone face-down still shows.
+
+Getting a window up from the background needs one appop, which on Android 14 is
+what exempts an app from background-activity-start restrictions:
+
+```sh
+adb shell appops set com.gios.lightchat SYSTEM_ALERT_WINDOW allow
+```
+
+One-time; survives reboots and app updates. Without it you still get the buzz and
+the notification, just not the box.
 
 For instant delivery after a reboot without opening the app, enable Tailscale's
 **Always-on VPN** on the phone (Android Settings → Network → VPN) and leave
