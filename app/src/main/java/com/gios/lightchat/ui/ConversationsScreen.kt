@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalFoundationApi::class)
 
-package com.craigeley.chat.ui
+package com.gios.lightchat.ui
 
 import android.content.Context
 import android.text.format.DateUtils
@@ -42,11 +42,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.craigeley.chat.ChatViewModel
-import com.craigeley.chat.Conversation
-import com.craigeley.chat.Status
-import com.craigeley.chat.ui.theme.ChatColors
-import com.craigeley.chat.ui.theme.ChatType
+import com.gios.lightchat.ChatViewModel
+import com.gios.lightchat.Conversation
+import com.gios.lightchat.Status
+import com.gios.lightchat.ui.theme.ChatColors
+import com.gios.lightchat.ui.theme.ChatType
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
@@ -55,7 +55,7 @@ import kotlinx.coroutines.launch
  * tap the title for settings. Split across three tabs (see [ConversationTab]) with
  * a LightFog-style icon bar at the bottom.
  *
- * [tab] and [listState] are hoisted into `ChatApp` rather than remembered here:
+ * [tab] and [listState] are hoisted into `LightChatApp` rather than remembered here:
  * this composable leaves the composition entirely while a thread is open, so a
  * local scroll position would be discarded and every exit would land back at the
  * top of the list.

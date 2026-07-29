@@ -1,9 +1,9 @@
-package com.craigeley.chat.api
+package com.gios.lightchat.api
 
-import com.craigeley.chat.Attachment
-import com.craigeley.chat.ChatMessage
-import com.craigeley.chat.Conversation
-import com.craigeley.chat.IncomingMessage
+import com.gios.lightchat.Attachment
+import com.gios.lightchat.ChatMessage
+import com.gios.lightchat.Conversation
+import com.gios.lightchat.IncomingMessage
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -432,7 +432,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
     /**
      * `GET /api/v1/contact` — the Mac's whole address book, flattened to
      * (address, name) pairs (every phone number and email maps to the contact's
-     * display name). [com.craigeley.chat.Contacts.from] turns this into a lookup.
+     * display name). [com.gios.lightchat.Contacts.from] turns this into a lookup.
      */
     fun contacts(): List<Pair<String, String>> {
         val text = requestChecked("GET", "/api/v1/contact", null, what = "contact")

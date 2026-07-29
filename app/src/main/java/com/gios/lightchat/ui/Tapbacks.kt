@@ -1,6 +1,6 @@
 @file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 
-package com.craigeley.chat.ui
+package com.gios.lightchat.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
@@ -24,10 +24,10 @@ import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.craigeley.chat.Reaction
-import com.craigeley.chat.ReactionType
-import com.craigeley.chat.ui.theme.ChatColors
-import com.craigeley.chat.ui.theme.PublicSans
+import com.gios.lightchat.Reaction
+import com.gios.lightchat.ReactionType
+import com.gios.lightchat.ui.theme.ChatColors
+import com.gios.lightchat.ui.theme.PublicSans
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign

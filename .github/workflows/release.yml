@@ -52,11 +52,11 @@ jobs:
           ./gradlew assembleRelease --no-daemon
 
       - name: Stage APK with versioned name
-        run: cp app/build/outputs/apk/release/app-release.apk "chat-${GITHUB_REF_NAME}.apk"
+        run: cp app/build/outputs/apk/release/app-release.apk "lightchat-${GITHUB_REF_NAME}.apk"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: chat-${{ github.ref_name }}.apk
+          files: lightchat-${{ github.ref_name }}.apk
           generate_release_notes: true
           fail_on_unmatched_files: true

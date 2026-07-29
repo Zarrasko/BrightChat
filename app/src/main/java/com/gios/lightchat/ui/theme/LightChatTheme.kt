@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalTextApi::class)
 
-package com.craigeley.chat.ui.theme
+package com.gios.lightchat.ui.theme
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -20,7 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.craigeley.chat.R
+import com.gios.lightchat.R
 
 object ChatColors {
     val background = Color.Black
@@ -88,7 +88,7 @@ object ChatDimens {
 }
 
 @Composable
-fun ChatTheme(content: @Composable () -> Unit) {
+fun LightChatTheme(content: @Composable () -> Unit) {
     val density = LocalDensity.current
     CompositionLocalProvider(
         LocalDensity provides Density(density.density, fontScale = 0.85f),

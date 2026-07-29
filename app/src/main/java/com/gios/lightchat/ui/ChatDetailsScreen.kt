@@ -1,4 +1,4 @@
-package com.craigeley.chat.ui
+package com.gios.lightchat.ui
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,9 +29,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.craigeley.chat.ChatViewModel
-import com.craigeley.chat.ui.theme.ChatColors
-import com.craigeley.chat.ui.theme.ChatType
+import com.gios.lightchat.ChatViewModel
+import com.gios.lightchat.ui.theme.ChatColors
+import com.gios.lightchat.ui.theme.ChatType
 
 /**
  * Details for the open group (tap the thread title): its name, its members, and —
@@ -217,7 +217,7 @@ private const val LEAVE = " leave"
 private fun AddMemberField(
     query: String,
     onQueryChange: (String) -> Unit,
-    state: com.craigeley.chat.UiState,
+    state: com.gios.lightchat.UiState,
     onPick: (String) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {

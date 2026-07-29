@@ -1,4 +1,4 @@
-package com.craigeley.chat
+package com.gios.lightchat
 
 import android.Manifest
 import android.content.Intent
@@ -9,7 +9,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import com.craigeley.chat.api.Store
+import com.gios.lightchat.api.Store
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,15 +22,15 @@ import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.craigeley.chat.socket.AppForeground
-import com.craigeley.chat.ui.ConversationTab
-import com.craigeley.chat.ui.ConversationsScreen
-import com.craigeley.chat.ui.tabOf
-import com.craigeley.chat.ui.NewMessageScreen
-import com.craigeley.chat.ui.SettingsScreen
-import com.craigeley.chat.ui.SetupScreen
-import com.craigeley.chat.ui.ThreadScreen
-import com.craigeley.chat.ui.theme.ChatTheme
+import com.gios.lightchat.socket.AppForeground
+import com.gios.lightchat.ui.ConversationTab
+import com.gios.lightchat.ui.ConversationsScreen
+import com.gios.lightchat.ui.tabOf
+import com.gios.lightchat.ui.NewMessageScreen
+import com.gios.lightchat.ui.SettingsScreen
+import com.gios.lightchat.ui.SetupScreen
+import com.gios.lightchat.ui.ThreadScreen
+import com.gios.lightchat.ui.theme.LightChatTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -50,8 +50,8 @@ class MainActivity : ComponentActivity() {
         }
         enableImmersive()
         setContent {
-            ChatTheme {
-                ChatApp(viewModel)
+            LightChatTheme {
+                LightChatApp(viewModel)
             }
         }
         handlePasswordExtra(intent)
@@ -113,7 +113,7 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Lets setup be pushed over adb instead of typed on the phone:
-     * `adb shell am start -n com.craigeley.chat/.MainActivity -e server YOUR_URL -e password YOUR_PASSWORD`
+     * `adb shell am start -n com.gios.lightchat/.MainActivity -e server YOUR_URL -e password YOUR_PASSWORD`
      * The `server` extra is optional once a URL is already stored.
      */
     private fun handlePasswordExtra(intent: Intent?) {
@@ -125,7 +125,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun ChatApp(viewModel: ChatViewModel) {
+fun LightChatApp(viewModel: ChatViewModel) {
     val state by viewModel.state.collectAsState()
     var showSettings by remember { mutableStateOf(false) }
 

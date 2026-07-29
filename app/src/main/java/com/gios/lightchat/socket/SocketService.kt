@@ -1,16 +1,16 @@
-package com.craigeley.chat.socket
+package com.gios.lightchat.socket
 
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.util.Log
-import com.craigeley.chat.Contacts
-import com.craigeley.chat.Notifications
-import com.craigeley.chat.ReadStatusEvent
-import com.craigeley.chat.TypingEvent
-import com.craigeley.chat.api.BlueBubblesApi
-import com.craigeley.chat.api.Store
+import com.gios.lightchat.Contacts
+import com.gios.lightchat.Notifications
+import com.gios.lightchat.ReadStatusEvent
+import com.gios.lightchat.TypingEvent
+import com.gios.lightchat.api.BlueBubblesApi
+import com.gios.lightchat.api.Store
 import io.socket.client.IO
 import io.socket.client.Socket
 import io.socket.emitter.Emitter

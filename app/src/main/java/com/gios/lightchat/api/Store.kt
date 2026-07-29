@@ -1,7 +1,7 @@
-package com.craigeley.chat.api
+package com.gios.lightchat.api
 
 import android.content.Context
-import com.craigeley.chat.Contacts
+import com.gios.lightchat.Contacts
 import org.json.JSONObject
 
 /**
@@ -44,7 +44,7 @@ object Store {
     fun hasPassword(context: Context): Boolean = !password(context).isNullOrBlank()
 
     /**
-     * Persists the contact index so the [com.craigeley.chat.socket.SocketService] —
+     * Persists the contact index so the [com.gios.lightchat.socket.SocketService] —
      * which can run with no activity/ViewModel alive (e.g. started at boot) — can
      * resolve sender addresses to names for notifications. Stored as the already-
      * normalized key → name map ([Contacts.asMap]), no re-normalization on read.

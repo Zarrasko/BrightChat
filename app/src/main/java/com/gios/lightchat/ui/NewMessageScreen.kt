@@ -1,4 +1,4 @@
-package com.craigeley.chat.ui
+package com.gios.lightchat.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -35,10 +35,10 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.craigeley.chat.ChatViewModel
-import com.craigeley.chat.Contact
-import com.craigeley.chat.ui.theme.ChatColors
-import com.craigeley.chat.ui.theme.ChatType
+import com.gios.lightchat.ChatViewModel
+import com.gios.lightchat.Contact
+import com.gios.lightchat.ui.theme.ChatColors
+import com.gios.lightchat.ui.theme.ChatType
 
 /**
  * Start a new conversation: type into "To" to search the address book (by name,

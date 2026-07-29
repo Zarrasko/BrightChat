@@ -1,9 +1,9 @@
-package com.craigeley.chat.socket
+package com.gios.lightchat.socket
 
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import com.craigeley.chat.api.Store
+import com.gios.lightchat.api.Store
 
 /**
  * Restarts the live-socket [SocketService] after a reboot so messages keep

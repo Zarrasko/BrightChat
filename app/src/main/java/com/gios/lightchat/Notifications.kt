@@ -1,4 +1,4 @@
-package com.craigeley.chat
+package com.gios.lightchat
 
 import android.app.Notification
 import android.app.NotificationChannel

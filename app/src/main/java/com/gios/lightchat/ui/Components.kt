@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalFoundationApi::class)
 
-package com.craigeley.chat.ui
+package com.gios.lightchat.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -22,8 +22,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.craigeley.chat.ui.theme.ChatColors
-import com.craigeley.chat.ui.theme.ChatType
+import com.gios.lightchat.ui.theme.ChatColors
+import com.gios.lightchat.ui.theme.ChatType
 
 /** Tappable text with a haptic tick on press — the vandamd "button". */
 @Composable

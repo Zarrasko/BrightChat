@@ -16,11 +16,11 @@ val keystoreProps = Properties().apply {
 }
 
 android {
-    namespace = "com.craigeley.chat"
+    namespace = "com.gios.lightchat"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.craigeley.chat"
+        applicationId = "com.gios.lightchat"
         minSdk = 34   // Light Phone III runs Android 14 — the only target device.
         targetSdk = 35
         versionCode = 9

@@ -1,4 +1,4 @@
-package com.craigeley.chat
+package com.gios.lightchat
 
 import android.app.Application
 import android.content.ActivityNotFoundException
@@ -9,12 +9,12 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.craigeley.chat.api.ApiException
-import com.craigeley.chat.api.BlueBubblesApi
-import com.craigeley.chat.api.Store
-import com.craigeley.chat.socket.AppForeground
-import com.craigeley.chat.socket.SocketBus
-import com.craigeley.chat.socket.SocketService
+import com.gios.lightchat.api.ApiException
+import com.gios.lightchat.api.BlueBubblesApi
+import com.gios.lightchat.api.Store
+import com.gios.lightchat.socket.AppForeground
+import com.gios.lightchat.socket.SocketBus
+import com.gios.lightchat.socket.SocketService
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job

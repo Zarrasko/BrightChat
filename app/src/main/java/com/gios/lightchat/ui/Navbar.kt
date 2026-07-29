@@ -1,4 +1,4 @@
-package com.craigeley.chat.ui
+package com.gios.lightchat.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -23,9 +23,9 @@ import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
-import com.craigeley.chat.Contacts
-import com.craigeley.chat.Conversation
-import com.craigeley.chat.ui.theme.ChatColors
+import com.gios.lightchat.Contacts
+import com.gios.lightchat.Conversation
+import com.gios.lightchat.ui.theme.ChatColors
 
 /**
  * The conversation list's three tabs. [title] is what the header shows; Known is

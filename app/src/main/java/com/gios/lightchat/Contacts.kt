@@ -1,4 +1,4 @@
-package com.craigeley.chat
+package com.gios.lightchat
 
 /**
  * Address → name lookup built from the BlueBubbles server's address book (the

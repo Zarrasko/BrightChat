@@ -1,4 +1,4 @@
-package com.craigeley.chat.ui
+package com.gios.lightchat.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
@@ -29,14 +29,14 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.material3.Text
-import com.craigeley.chat.Attachment
-import com.craigeley.chat.ColorMode
+import com.gios.lightchat.Attachment
+import com.gios.lightchat.ColorMode
 import kotlinx.coroutines.delay
-import com.craigeley.chat.ui.theme.ChatColors
-import com.craigeley.chat.ui.theme.ChatType
+import com.gios.lightchat.ui.theme.ChatColors
+import com.gios.lightchat.ui.theme.ChatType
 
 /** How far pinch/double-tap zoom may go. The decoded bitmap is capped at 1080px
- *  on its long edge (see [com.craigeley.chat.Attachments]), so past ~4× there's
+ *  on its long edge (see [com.gios.lightchat.Attachments]), so past ~4× there's
  *  no detail left to reveal on this screen anyway. */
 private const val MAX_SCALE = 4f
 

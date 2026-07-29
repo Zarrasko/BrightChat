@@ -1,4 +1,4 @@
-package com.craigeley.chat.socket
+package com.gios.lightchat.socket
 
 /**
  * Whether the app is currently in the foreground — set from MainActivity's

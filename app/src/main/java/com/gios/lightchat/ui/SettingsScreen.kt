@@ -1,4 +1,4 @@
-package com.craigeley.chat.ui
+package com.gios.lightchat.ui
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -24,11 +24,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.craigeley.chat.ChatViewModel
-import com.craigeley.chat.api.Store
-import com.craigeley.chat.ui.theme.ChatColors
-import com.craigeley.chat.ui.theme.ChatDimens
-import com.craigeley.chat.ui.theme.ChatType
+import com.gios.lightchat.ChatViewModel
+import com.gios.lightchat.api.Store
+import com.gios.lightchat.ui.theme.ChatColors
+import com.gios.lightchat.ui.theme.ChatDimens
+import com.gios.lightchat.ui.theme.ChatType
 
 @Composable
 fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {

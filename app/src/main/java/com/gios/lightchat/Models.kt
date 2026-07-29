@@ -1,4 +1,4 @@
-package com.craigeley.chat
+package com.gios.lightchat
 
 /**
  * A conversation — BlueBubbles calls it a "chat". The [guid] (e.g.
@@ -41,7 +41,7 @@ data class Conversation(
 
 /**
  * One file riding along with a message. [guid] keys the download endpoint; the
- * raw bytes are fetched + cached lazily (see [com.craigeley.chat.Attachments]).
+ * raw bytes are fetched + cached lazily (see [com.gios.lightchat.Attachments]).
  * Images render inline; other files render as a tappable [fileLabel] row that opens
  * them externally (see `ChatViewModel.openAttachment`).
  */
@@ -306,8 +306,8 @@ data class ChatMessage(
 data class Contact(val name: String, val address: String)
 
 /**
- * A message pushed over the live socket, carried from [com.craigeley.chat.socket.SocketService]
- * to the ViewModel via [com.craigeley.chat.socket.SocketBus]. [isNew] distinguishes
+ * A message pushed over the live socket, carried from [com.gios.lightchat.socket.SocketService]
+ * to the ViewModel via [com.gios.lightchat.socket.SocketBus]. [isNew] distinguishes
  * a brand-new message from an update (delivered/read/edited). [chatDisplayName] is
  * the embedded chat's group name, used for notifications (the service has no
  * contact index to resolve names).
@@ -320,7 +320,7 @@ data class IncomingMessage(
 )
 
 /**
- * A typing-indicator change from the live socket ([com.craigeley.chat.socket.SocketBus]):
+ * A typing-indicator change from the live socket ([com.gios.lightchat.socket.SocketBus]):
  * the other party in [chatGuid] started ([typing] true) or stopped typing. The
  * server only emits these for 1:1 chats, and re-emits roughly every 5s while typing
  * continues — so the ViewModel auto-expires a stale "typing" if no refresh arrives.

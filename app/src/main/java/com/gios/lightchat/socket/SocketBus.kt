@@ -1,8 +1,8 @@
-package com.craigeley.chat.socket
+package com.gios.lightchat.socket
 
-import com.craigeley.chat.IncomingMessage
-import com.craigeley.chat.ReadStatusEvent
-import com.craigeley.chat.TypingEvent
+import com.gios.lightchat.IncomingMessage
+import com.gios.lightchat.ReadStatusEvent
+import com.gios.lightchat.TypingEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
 
 /**

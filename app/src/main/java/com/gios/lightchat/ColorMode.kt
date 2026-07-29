@@ -1,4 +1,4 @@
-package com.craigeley.chat
+package com.gios.lightchat
 
 import android.content.Context
 import android.provider.Settings
@@ -13,7 +13,7 @@ import android.util.Log
  *
  * Writing it needs `WRITE_SECURE_SETTINGS`, grantable only over adb (one-time):
  *
- *     adb shell pm grant com.craigeley.chat android.permission.WRITE_SECURE_SETTINGS
+ *     adb shell pm grant com.gios.lightchat android.permission.WRITE_SECURE_SETTINGS
  *
  * Without the grant every call here no-ops (the SecurityException is swallowed)
  * and the viewer simply stays grayscale like the rest of the phone.

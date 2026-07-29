@@ -77,7 +77,7 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   `onAppHidden` restores immediately, no fade (another app's colors are showing).
   `MainActivity.onStop/onStart` → `onAppHidden`/`onAppVisible` keep the rest of
   the phone B&W if the app is backgrounded mid-view and re-lift on return.
-  Requires a one-time `adb shell pm grant com.craigeley.chat
+  Requires a one-time `adb shell pm grant com.gios.lightchat
   android.permission.WRITE_SECURE_SETTINGS` (signature-level; declared with
   `tools:ignore="ProtectedPermissions"`); ungranted, every call no-ops and the
   viewer stays grayscale. Known gap (zero has it too): a process death mid-view
@@ -428,11 +428,11 @@ These look odd out of context but are deliberate, and match a family of sibling
 LightOS apps that share the same conventions:
 
 - **UI is black-and-white, Public Sans, text-only** (vandamd's LightOS style).
-  Use `ChatColors`, `ChatType`, `ChatDimens` from `ui/theme/ChatTheme.kt` — not
+  Use `ChatColors`, `ChatType`, `ChatDimens` from `ui/theme/LightChatTheme.kt` — not
   Material defaults. "Buttons" are tappable text (`HapticText`). Messages have no
   bubbles — the user's turns right-aligned, others left, width-capped with
   run-collapsed name labels (see the Screens section).
-- **Font scale is pinned to 0.85** in `ChatTheme` (LightOS ships a large default).
+- **Font scale is pinned to 0.85** in `LightChatTheme` (LightOS ships a large default).
 - Portrait-only, single activity, `adjustResize`.
 - **Full-screen / immersive** — `MainActivity.enableImmersive()` hides the top
   status bar via `WindowInsetsControllerCompat.hide(Type.statusBars())`

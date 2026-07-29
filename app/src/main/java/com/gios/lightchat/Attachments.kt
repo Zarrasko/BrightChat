@@ -1,4 +1,4 @@
-package com.craigeley.chat
+package com.gios.lightchat
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -8,7 +8,7 @@ import android.media.ExifInterface
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import com.craigeley.chat.api.BlueBubblesApi
+import com.gios.lightchat.api.BlueBubblesApi
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

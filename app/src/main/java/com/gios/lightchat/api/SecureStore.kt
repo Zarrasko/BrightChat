@@ -1,4 +1,4 @@
-package com.craigeley.chat.api
+package com.gios.lightchat.api
 
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties

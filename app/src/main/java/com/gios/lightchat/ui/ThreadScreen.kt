@@ -1,6 +1,6 @@
 @file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 
-package com.craigeley.chat.ui
+package com.gios.lightchat.ui
 
 import android.content.Context
 import android.text.format.DateUtils
@@ -59,15 +59,15 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.craigeley.chat.Attachment
-import com.craigeley.chat.ChatMessage
-import com.craigeley.chat.ChatViewModel
-import com.craigeley.chat.Contacts
-import com.craigeley.chat.Conversation
-import com.craigeley.chat.Reaction
-import com.craigeley.chat.ReactionType
-import com.craigeley.chat.ui.theme.ChatColors
-import com.craigeley.chat.ui.theme.ChatType
+import com.gios.lightchat.Attachment
+import com.gios.lightchat.ChatMessage
+import com.gios.lightchat.ChatViewModel
+import com.gios.lightchat.Contacts
+import com.gios.lightchat.Conversation
+import com.gios.lightchat.Reaction
+import com.gios.lightchat.ReactionType
+import com.gios.lightchat.ui.theme.ChatColors
+import com.gios.lightchat.ui.theme.ChatType
 
 /** One open conversation: messages oldest→newest, user on the right, others left. */
 @Composable
