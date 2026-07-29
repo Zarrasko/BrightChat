@@ -18,6 +18,7 @@ object Store {
     private const val KEY_CONTACTS = "contacts"    // normalized key → name, JSON
     private const val KEY_BASE_URL = "base_url"    // the server URL, set at setup
     private const val KEY_PRIVATE_API = "private_api" // server's Private API live?
+    private const val KEY_FAVORITES = "favorites"     // starred chat guids, newline-joined
 
     /** The configured BlueBubbles Server URL, or null if setup hasn't run yet. */
     fun baseUrl(context: Context): String? =
@@ -71,6 +72,23 @@ object Store {
 
     fun setPrivateApi(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_PRIVATE_API, value).apply()
+    }
+
+    /**
+     * The starred conversations, by primary chat guid. Persisted (not derived from
+     * the server) because BlueBubbles exposes no favorites concept — this is a
+     * local, per-phone pin. Stored newline-joined rather than as a JSON array
+     * because guids never contain a newline and a StringSet would reorder.
+     */
+    fun favorites(context: Context): Set<String> =
+        prefs(context).getString(KEY_FAVORITES, null)
+            ?.split('\n')
+            ?.filter { it.isNotBlank() }
+            ?.toSet()
+            ?: emptySet()
+
+    fun setFavorites(context: Context, guids: Set<String>) {
+        prefs(context).edit().putString(KEY_FAVORITES, guids.joinToString("\n")).apply()
     }
 
     /** Sign out: wipe the stored password. */

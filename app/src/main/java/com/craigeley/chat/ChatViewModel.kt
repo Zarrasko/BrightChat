@@ -44,6 +44,7 @@ data class UiState(
     val composingNew: Boolean = false,         // the "New message" compose screen is open
     val privateApi: Boolean = false,           // server's Private API live → tapbacks available
     val typingChatGuid: String? = null,        // chat whose other party is currently typing
+    val favorites: Set<String> = emptySet(),   // starred chat guids (local, see Store.favorites)
     val message: String? = null,               // transient status / error line
 )
 
@@ -69,7 +70,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private val _state = MutableStateFlow(
-        UiState(isConfigured = api != null, privateApi = Store.privateApi(application)),
+        UiState(
+            isConfigured = api != null,
+            privateApi = Store.privateApi(application),
+            favorites = Store.favorites(application),
+        ),
     )
     val state: StateFlow<UiState> = _state
 
@@ -282,6 +287,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { if (it.open?.guid == conversation.guid) it.copy(threadLoading = false) else it }
                 handleError(t)
             }
+        }
+    }
+
+    /**
+     * Stars / unstars a conversation (long-press in the list), moving it between the
+     * Favorites and Known tabs. Local only — BlueBubbles has no favorites concept —
+     * so it's written straight through to [Store] and survives a reinstall of the
+     * server but not of the app. Keyed on the primary guid, like [messageCache]: a
+     * forked group's other rooms all resolve to the same conversation.
+     */
+    fun toggleFavorite(conversation: Conversation) {
+        _state.update { s ->
+            val next = if (conversation.guid in s.favorites) {
+                s.favorites - conversation.guid
+            } else {
+                s.favorites + conversation.guid
+            }
+            Store.setFavorites(app, next)
+            s.copy(favorites = next)
         }
     }
 

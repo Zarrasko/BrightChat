@@ -28,6 +28,11 @@ object ChatColors {
     val onSurfaceVariant = Color.White.copy(alpha = 0.7f)
     val onSurfaceDim = Color.White.copy(alpha = 0.5f)
     val onSurfaceDisabled = Color.White.copy(alpha = 0.3f)
+
+    /** An unselected navbar icon. LightFog's own inactive grey, not an alpha of
+     *  white: on a matte greyscale panel a solid mid-grey holds its silhouette at
+     *  48dp where 30%-alpha white goes muddy. */
+    val onSurfaceInactive = Color(0xFF6E6E6E)
 }
 
 val PublicSans = FontFamily(

@@ -22,6 +22,17 @@ class Contacts(private val byKey: Map<String, String> = emptyMap()) {
         else -> conversation.participants.joinToString(", ") { label(it, firstNameOnly = true) }
     }
 
+    /**
+     * Whether this conversation has a name behind it — the Known/Unknown split in
+     * the conversation list. True if the group carries an explicit name, or if any
+     * participant resolves in the address book. A group is Known as soon as one
+     * member is: "Liz, +1 315 212 2695" belongs with the people you know, not with
+     * the spam. An empty participant list is Unknown rather than crashing.
+     */
+    fun knows(conversation: Conversation): Boolean =
+        conversation.displayName.isNotBlank() ||
+            conversation.participants.any { name(it) != null }
+
     /** Sender label inside a thread (first name keeps group rows short). */
     fun sender(address: String): String = label(address, firstNameOnly = true)
 

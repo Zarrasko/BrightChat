@@ -10,17 +10,22 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import com.craigeley.chat.api.Store
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.craigeley.chat.socket.AppForeground
+import com.craigeley.chat.ui.ConversationTab
 import com.craigeley.chat.ui.ConversationsScreen
+import com.craigeley.chat.ui.tabOf
 import com.craigeley.chat.ui.NewMessageScreen
 import com.craigeley.chat.ui.SettingsScreen
 import com.craigeley.chat.ui.SetupScreen
@@ -124,6 +129,29 @@ fun ChatApp(viewModel: ChatViewModel) {
     val state by viewModel.state.collectAsState()
     var showSettings by remember { mutableStateOf(false) }
 
+    // Which conversation tab is showing, and where each one is scrolled to. Both
+    // live *here*, above the `when` — ConversationsScreen is removed from the
+    // composition whenever a thread, settings or the composer is open, so anything
+    // remembered inside it is thrown away and coming back would reset the list to
+    // the top. rememberSaveable carries them through process death too.
+    var tab by rememberSaveable { mutableStateOf(ConversationTab.Known) }
+    // One scroll position per tab, so switching tabs doesn't scramble the others.
+    // Spelled out rather than built in a loop: `remember` inside an iteration is
+    // positional, and three named values are easier to trust than that.
+    val favoritesScroll = rememberLazyListState()
+    val knownScroll = rememberLazyListState()
+    val unknownScroll = rememberLazyListState()
+
+    // A tapped notification can open a thread that isn't on the current tab (a
+    // message from an unknown number while Known is showing). Follow it, so closing
+    // the thread lands on the list that actually contains it instead of one where
+    // the chat you were just reading is nowhere to be seen.
+    val openGuid = state.open?.guid
+    LaunchedEffect(openGuid) {
+        val open = state.open ?: return@LaunchedEffect
+        tab = tabOf(open, state.contacts, state.favorites)
+    }
+
     when {
         !state.isConfigured -> {
             // A rejected password sends us back here; make sure settings is dismissed.
@@ -144,6 +172,13 @@ fun ChatApp(viewModel: ChatViewModel) {
         }
         else -> ConversationsScreen(
             viewModel,
+            tab = tab,
+            listState = when (tab) {
+                ConversationTab.Favorites -> favoritesScroll
+                ConversationTab.Known -> knownScroll
+                ConversationTab.Unknown -> unknownScroll
+            },
+            onSelectTab = { tab = it },
             onOpenSettings = { showSettings = true },
             onNewMessage = { viewModel.startNewMessage() },
         )

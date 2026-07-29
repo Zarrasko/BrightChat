@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,10 +50,36 @@ import com.craigeley.chat.ui.theme.ChatType
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
-/** The conversation list — newest activity first, tap to open, tap title for settings. */
+/**
+ * The conversation list — newest activity first, tap to open, long-press to star,
+ * tap the title for settings. Split across three tabs (see [ConversationTab]) with
+ * a LightFog-style icon bar at the bottom.
+ *
+ * [tab] and [listState] are hoisted into `ChatApp` rather than remembered here:
+ * this composable leaves the composition entirely while a thread is open, so a
+ * local scroll position would be discarded and every exit would land back at the
+ * top of the list.
+ */
 @Composable
-fun ConversationsScreen(viewModel: ChatViewModel, onOpenSettings: () -> Unit, onNewMessage: () -> Unit) {
+fun ConversationsScreen(
+    viewModel: ChatViewModel,
+    tab: ConversationTab,
+    listState: LazyListState,
+    onSelectTab: (ConversationTab) -> Unit,
+    onOpenSettings: () -> Unit,
+    onNewMessage: () -> Unit,
+) {
     val state by viewModel.state.collectAsState()
+
+    // Partitioned once per list/contacts/favorites change, not per row.
+    val visible = remember(state.conversations, state.contacts, state.favorites, tab) {
+        state.conversations.filter { tabOf(it, state.contacts, state.favorites) == tab }
+    }
+    val unreadTabs = remember(state.conversations, state.contacts, state.favorites) {
+        state.conversations
+            .filter { it.unread }
+            .mapTo(mutableSetOf()) { tabOf(it, state.contacts, state.favorites) }
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
         Row(
@@ -69,7 +96,7 @@ fun ConversationsScreen(viewModel: ChatViewModel, onOpenSettings: () -> Unit, on
             )
             Spacer(modifier = Modifier.weight(1f))
             HapticText(
-                text = "Messages",
+                text = tab.title,
                 style = ChatType.body,
                 color = ChatColors.onSurface,
                 onClick = onOpenSettings,
@@ -86,10 +113,15 @@ fun ConversationsScreen(viewModel: ChatViewModel, onOpenSettings: () -> Unit, on
         }
 
         when {
-            state.conversations.isEmpty() -> {
+            visible.isEmpty() -> {
                 val label = when {
-                    state.status == Status.Loading -> "Loading…"
-                    else -> state.message ?: "No conversations"
+                    // Only the first load is worth a spinner-ish line; once the list
+                    // has arrived an empty tab is a fact about the tab, not a state.
+                    state.conversations.isEmpty() && state.status == Status.Loading -> "Loading…"
+                    state.conversations.isEmpty() -> state.message ?: "No conversations"
+                    tab == ConversationTab.Favorites -> "No favorites yet.\nLong-press a chat to star it."
+                    tab == ConversationTab.Unknown -> "No unknown senders"
+                    else -> "No conversations"
                 }
                 Box(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -103,8 +135,11 @@ fun ConversationsScreen(viewModel: ChatViewModel, onOpenSettings: () -> Unit, on
                     )
                 }
             }
-            else -> LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                items(state.conversations, key = { it.guid }) { convo ->
+            else -> LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            ) {
+                items(visible, key = { it.guid }) { convo ->
                     // A tapback as the newest activity shows as "Liz loved an image";
                     // otherwise the real message text, prefixed "You: " when it's ours.
                     val subtitle = convo.lastReaction?.summary(state.contacts)
@@ -118,10 +153,17 @@ fun ConversationsScreen(viewModel: ChatViewModel, onOpenSettings: () -> Unit, on
                         canDelete = state.privateApi,
                         onDelete = { viewModel.deleteConversation(convo) },
                         onClick = { viewModel.open(convo) },
+                        onToggleFavorite = { viewModel.toggleFavorite(convo) },
                     )
                 }
             }
         }
+
+        ConversationNavbar(
+            current = tab,
+            unread = unreadTabs,
+            onSelect = onSelectTab,
+        )
     }
 }
 
@@ -133,6 +175,7 @@ private fun ConversationRow(
     canDelete: Boolean,
     onDelete: () -> Unit,
     onClick: () -> Unit,
+    onToggleFavorite: () -> Unit,
 ) {
     val haptics = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
@@ -189,6 +232,12 @@ private fun ConversationRow(
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         // While open, a tap just closes the row rather than opening it.
                         if (offsetX.value < -1f) scope.launch { offsetX.animateTo(0f) } else onClick()
+                    },
+                    // Star / unstar. The row moving to another tab *is* the
+                    // confirmation, so there's no marker to draw here.
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        if (offsetX.value < -1f) scope.launch { offsetX.animateTo(0f) } else onToggleFavorite()
                     },
                 )
                 .padding(vertical = 14.dp),
