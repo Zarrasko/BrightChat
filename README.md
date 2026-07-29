@@ -15,6 +15,10 @@
 >   as the viewer is open. Needs a one-time adb grant — see below.
 > - **Heads-up messages.** A minimal box over whatever you're doing when a text arrives,
 >   with the sender, the message, and a buzz. Needs a one-time adb grant — see below.
+> - **A photo picker that works.** The system one reads MediaStore, which nothing keeps
+>   current on LightOS, so photos you just took were never offered. This one reads DCIM
+>   and Pictures directly. Multi-select, an inline camera, and the whole thing runs in
+>   colour — with the grayscale grant above, picking and framing a photo aren't guesswork.
 >
 > <p>
 > <img src="docs/screenshots/thread.png" width="260" alt="A thread in LightChat on a Light Phone III">

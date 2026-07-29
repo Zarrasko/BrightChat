@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.material3.Text
 import com.gios.lightchat.Attachment
 import com.gios.lightchat.ColorMode
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.delay
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
@@ -69,11 +70,18 @@ fun ImageViewerScreen(
     // see ColorMode — a no-op without the one-time WRITE_SECURE_SETTINGS grant).
     // Backgrounding mid-view is handled by MainActivity's onStop/onStart.
     val context = LocalContext.current
+    // Exactly one release per acquire. ColorMode counts holders now (the picker holds it
+    // too), so the old belt-and-braces "release on close *and* on dispose" would
+    // over-release and drop the count to zero underneath the other holder.
+    val released = remember { AtomicBoolean(false) }
+    fun releaseColor() {
+        if (released.compareAndSet(false, true)) ColorMode.release(context)
+    }
     DisposableEffect(Unit) {
         ColorMode.acquire(context)
         // Normally already released mid-close (below); this catches the viewer
         // being disposed some other way (e.g. the whole thread closing).
-        onDispose { ColorMode.release(context) }
+        onDispose { releaseColor() }
     }
 
     // Closing plays a short exit so the grayscale flip can't be seen: fade the
@@ -86,7 +94,7 @@ fun ImageViewerScreen(
     LaunchedEffect(closing) {
         if (!closing) return@LaunchedEffect
         fade.animateTo(0f, tween(FADE_OUT_MS))
-        ColorMode.release(context)
+        releaseColor()
         delay(RESTORE_SETTLE_MS)
         onClose()
     }

@@ -18,10 +18,11 @@ import android.util.Log
  * Without the grant every call here no-ops (the SecurityException is swallowed)
  * and the viewer simply stays grayscale like the rest of the phone.
  *
- * [acquire]/[release] bracket the full-screen image viewer's lifetime; the
+ * [acquire]/[release] bracket the lifetime of any screen that wants colour — the
+ * full-screen image viewer, and the photo picker with its camera; the
  * [onAppHidden]/[onAppVisible] pair (MainActivity.onStop/onStart) restores
  * grayscale while the user is elsewhere on the phone and re-lifts it if they
- * come back with the viewer still open. `held` survives that stop/start;
+ * come back with the viewer still open. `holders` survives that stop/start;
  * nothing is persisted — a process death mid-view can leave the phone in color
  * until the app next runs (same gap zero accepts).
  */
@@ -34,13 +35,18 @@ object ColorMode {
      *  i.e. grayscale); non-null exactly while we're holding the phone in color. */
     private var savedMode: Int? = null
 
-    /** The viewer is open and wants color — kept across activity stop/start. */
-    private var held = false
+    /**
+     * How many screens currently want colour, not whether one does — there are two
+     * holders now (the image viewer and the photo picker), and with a boolean whichever
+     * released first would turn colour off underneath the other. Kept across activity
+     * stop/start.
+     */
+    private var holders = 0
 
-    /** The image viewer opened: show true color until [release]. */
+    /** A screen that wants true colour opened: hold it until [release]. */
     fun acquire(context: Context) {
-        held = true
-        lift(context)
+        holders++
+        if (holders == 1) lift(context)
     }
 
     /** Back to grayscale, immediately. Hiding the flip is the *viewer's* job: it
@@ -51,8 +57,8 @@ object ColorMode {
      *  landed on, either the full-screen photo or its inline thumbnail was
      *  visibly desaturated. */
     fun release(context: Context) {
-        held = false
-        restore(context)
+        if (holders > 0) holders--
+        if (holders == 0) restore(context)
     }
 
     /** App left the foreground — the rest of the phone should be B&W even if
@@ -61,9 +67,10 @@ object ColorMode {
         restore(context)
     }
 
-    /** App back in the foreground — re-lift if the viewer never closed. */
+    /** App back in the foreground — re-lift if anything still wants colour. Doesn't
+     *  touch [holders]: leaving the app isn't the same as closing the viewer. */
     fun onAppVisible(context: Context) {
-        if (held) lift(context)
+        if (holders > 0) lift(context)
     }
 
     private fun lift(context: Context) {

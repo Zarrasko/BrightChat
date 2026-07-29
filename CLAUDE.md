@@ -176,6 +176,39 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   brightness is left at whatever the system had, so a 3am text lights up at full
   brightness; LightGlance's 2% override wasn't reused because the box has to be
   readable at arm's length.
+  **Photo picker (done):** replaces `PickVisualMedia` everywhere. The system picker is
+  backed by MediaStore and nothing on LightOS keeps MediaStore current, so photos taken
+  minutes earlier weren't offered at all. `Gallery` walks DCIM + Pictures itself
+  (`maxDepth(3)`, hidden files and dirs skipped, newest first, capped at 600) — the
+  directory listing is the source of truth and can't be stale. Needs the **full**
+  `READ_MEDIA_IMAGES` grant: Android 14's "Select photos and videos" grants
+  `READ_MEDIA_VISUAL_USER_SELECTED` and leaves `READ_MEDIA_IMAGES` *denied*, which is why
+  the denial state names it and links to app settings. Thumbnails go through
+  `Attachments.decode(file, 256)` so the EXIF orientation handling isn't duplicated; the
+  cache is byte-sized (12MB) rather than entry-counted. 3-up grid, tap to select, each
+  cell showing its pick position, Send fires them as separate attachments in order on one
+  IO coroutine (sequential — iMessage has no batch, and racing them lands them out of
+  order). `ChatViewModel.sendImageFiles`; the old `sendImage(Uri)` path is gone.
+  **Inline camera (done):** `CameraScreen`, CameraX `LifecycleCameraController` +
+  `PreviewView`, capture grabbing `PreviewView.bitmap` rather than an `ImageCapture`
+  round-trip (LightTip's trick — instant on this hardware; the cost is that the photo is
+  the viewfinder's size and crop, not the sensor's). Three things that bit us and are
+  load-bearing: the shutter is gated on `previewStreamState == STREAMING`, because
+  PreviewView returns a bitmap as soon as its *surface* is valid and an all-zero bitmap
+  compresses to a perfectly valid black JPEG that would then be sent to somebody;
+  `ImplementationMode.COMPATIBLE`, because the default PERFORMANCE mode punches a
+  transparent hole in the window (fragile inside the opaque Surface the picker draws in)
+  and is also the mode whose `getBitmap()` blocks on a PixelCopy; and every way a CameraX
+  bind can fail is asynchronous and swallowed, so failure is detected as "no frames within
+  4s" rather than by catching `bindToLifecycle`. Captures go to `cacheDir/camera` to be
+  sent and are copied into `DCIM/LightChat` via a MediaStore insert so they're kept —
+  direct writes to shared storage aren't permitted on 29+, only reads by path are.
+  **Colour while picking (done):** the picker holds `ColorMode` for its whole lifetime,
+  camera included (the `DisposableEffect` sits above the early return). `ColorMode` counts
+  holders rather than a boolean now that the viewer and the picker both take it — and the
+  viewer's release is idempotent (`AtomicBoolean`) because it releases mid-close *and* on
+  dispose. Known gap: no fade on the picker's exit, so the thread's inline thumbnails stay
+  colour for the ~70ms the settings write takes and then desaturate.
   **Notification deep-links (done):** message notifications are per-chat (id
   hashed from the chat guid, so each thread keeps its own and a newer message
   replaces it) and tapping one opens that thread: the PendingIntent carries

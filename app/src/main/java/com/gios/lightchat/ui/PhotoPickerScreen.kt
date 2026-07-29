@@ -1,14 +1,12 @@
 package com.gios.lightchat.ui
 
-import android.app.Activity
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.net.Uri
-import android.provider.MediaStore
-import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,12 +31,14 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.mutableStateListOf
@@ -52,7 +52,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
+import com.gios.lightchat.ColorMode
 import com.gios.lightchat.Gallery
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
@@ -110,14 +110,39 @@ fun PhotoPickerScreen(
     val selected = remember { mutableStateListOf<String>() }
     val gridState = rememberLazyGridState()
 
-    var notice by remember { mutableStateOf<String?>(null) }
-    val takePhoto = rememberCameraLauncher(
-        onPhoto = { file -> onSend(listOf(file)) },
-        // A camera that ignored EXTRA_OUTPUT and saved to DCIM its own way will simply
-        // be at the top of the grid after a rescan.
-        onNothing = { reload++ },
-        onNoCamera = { notice = "No camera app on this phone" },
-    )
+    // The viewfinder is a state of this screen rather than another app, so the colour
+    // hold below covers it and nothing leaves LightChat.
+    var capturing by rememberSaveable { mutableStateOf(false) }
+
+    // True colour for as long as the picker or the camera is up. Choosing a photo in
+    // greyscale is guesswork, and framing one is worse. Held here rather than in
+    // CameraScreen so it spans both: this effect sits above the early return, so it
+    // stays alive while the viewfinder is up. A no-op without the one-time
+    // WRITE_SECURE_SETTINGS grant.
+    //
+    // No fade on the way out, unlike ImageViewerScreen. Known gap: the thread does draw
+    // inline photo thumbnails, and the secure-settings write takes ~70ms to reach
+    // SurfaceFlinger, so for about that long after the picker closes those thumbnails
+    // are still in colour and then visibly desaturate. Hiding it would mean the viewer's
+    // whole fade-to-black sequence; the thread's own text is white on black either way,
+    // so what's left is a couple of frames on the thumbnails.
+    DisposableEffect(Unit) {
+        ColorMode.acquire(context)
+        onDispose { ColorMode.release(context) }
+    }
+
+    if (capturing) {
+        BackHandler { capturing = false }
+        CameraScreen(
+            onCaptured = { file -> onSend(listOf(file)) },
+            onClose = {
+                capturing = false
+                // A capture that was kept in DCIM should be in the grid on the way back.
+                reload++
+            },
+        )
+        return
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
         Row(
@@ -145,7 +170,10 @@ fun PhotoPickerScreen(
                 color = ChatColors.onSurfaceVariant,
                 modifier = Modifier.width(56.dp),
                 textAlign = TextAlign.End,
-                onClick = takePhoto,
+                onClick = {
+                    pruneCameraCache(context)
+                    capturing = true
+                },
             )
         }
 
@@ -209,7 +237,7 @@ fun PhotoPickerScreen(
         ) {
             if (selected.isEmpty()) {
                 Text(
-                    text = notice ?: if (granted) "Tap to select" else "",
+                    text = if (granted) "Tap to select" else "",
                     style = ChatType.hint,
                     color = ChatColors.onSurfaceDisabled,
                 )
@@ -289,75 +317,21 @@ private fun Centered(label: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * Hands off to whatever camera LightOS ships and returns the photo.
- *
- * Two ways back, because a camera app's handling of `ACTION_IMAGE_CAPTURE` varies and
- * this one's is unknown: the file we asked it to write via EXTRA_OUTPUT, else the
- * low-resolution thumbnail some return in the result extras instead. If neither
- * produced anything, [onNothing] rescans — a camera that ignored EXTRA_OUTPUT and
- * saved to DCIM in its own way will then simply be in the grid, newest first.
- *
- * A camera photo sends straight away rather than joining the selection: you opened
- * the camera and pressed the shutter, so there's no ambiguity to confirm.
+ * Clears out old captures (see CameraScreen for where they're written). Nothing else
+ * removes them and they're full frames, but only ones older than [CAPTURE_KEEP_MS] go:
+ * a send reads the file on an IO coroutine, and deleting a capture from a moment ago
+ * would be deleting one that might still be on its way out.
  */
-@Composable
-private fun rememberCameraLauncher(
-    onPhoto: (File) -> Unit,
-    onNothing: () -> Unit,
-    onNoCamera: () -> Unit,
-): () -> Unit {
-    val context = LocalContext.current
-    var output by remember { mutableStateOf<File?>(null) }
-
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        // RESULT_OK only. Some cameras write the EXTRA_OUTPUT file before their own
-        // confirm/retake step, so a non-empty file after a cancel is not a photo the
-        // user chose to send — and this path sends immediately.
-        if (result.resultCode != Activity.RESULT_OK) { onNothing(); return@rememberLauncherForActivityResult }
-        val ours = output?.takeIf { it.exists() && it.length() > 0L }
-        if (ours != null) { onPhoto(ours); return@rememberLauncherForActivityResult }
-
-        val thumbnail = result.data?.extras?.let {
-            @Suppress("DEPRECATION")
-            it.get("data") as? Bitmap
-        }
-        if (thumbnail != null) {
-            val file = cameraFile(context)
-            runCatching {
-                file.outputStream().use { thumbnail.compress(Bitmap.CompressFormat.JPEG, 92, it) }
-            }.onSuccess { onPhoto(file); return@rememberLauncherForActivityResult }
-        }
-        onNothing()
-    }
-
-    return {
-        pruneCameraCache(context)
-        val file = cameraFile(context)
-        output = file
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-            .putExtra(MediaStore.EXTRA_OUTPUT, uri)
-        // Belt and braces: startActivityForResult migrates EXTRA_OUTPUT into ClipData
-        // and adds the read + write grants itself, but being explicit costs nothing.
-        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-        // Not swallowed: if LightOS ships no ACTION_IMAGE_CAPTURE handler, a Camera
-        // control that does nothing at all is worse than one that says so.
-        runCatching { launcher.launch(intent) }.onFailure { onNoCamera() }
-    }
-}
-
-private fun cameraFile(context: android.content.Context): File {
-    val dir = File(context.cacheDir, "camera").apply { mkdirs() }
-    return File(dir, "cam-" + System.currentTimeMillis() + ".jpg")
-}
-
-/** Full-res JPEGs left behind by earlier captures. Nothing else clears them, and the
- *  bytes are already in the sent message's own attachment cache. */
 private fun pruneCameraCache(context: android.content.Context) {
-    runCatching { File(context.cacheDir, "camera").listFiles()?.forEach { it.delete() } }
+    val cutoff = System.currentTimeMillis() - CAPTURE_KEEP_MS
+    runCatching {
+        File(context.cacheDir, "camera").listFiles()
+            ?.filter { it.lastModified() < cutoff }
+            ?.forEach { it.delete() }
+    }
 }
+
+private const val CAPTURE_KEEP_MS = 5 * 60 * 1000L
 
 private fun openAppSettings(context: android.content.Context) {
     runCatching {

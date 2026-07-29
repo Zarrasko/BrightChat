@@ -100,6 +100,16 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0")
+    // For LocalLifecycleOwner, which the camera controller binds to. The copy in
+    // androidx.compose.ui.platform is deprecated in favour of this one.
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.0")
+    // CameraX, for the in-app viewfinder. Same versions as LightTip, which is where
+    // the "grab PreviewView.bitmap instead of an ImageCapture round-trip" trick that
+    // CameraScreen uses was worked out on this hardware.
+    implementation("androidx.camera:camera-core:1.4.1")
+    implementation("androidx.camera:camera-camera2:1.4.1")
+    implementation("androidx.camera:camera-lifecycle:1.4.1")
+    implementation("androidx.camera:camera-view:1.4.1")
     implementation("androidx.core:core-splashscreen:1.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     // REST is plain HttpURLConnection + org.json (bundled in the platform), like
