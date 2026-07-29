@@ -298,15 +298,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * forked group's other rooms all resolve to the same conversation.
      */
     fun toggleFavorite(conversation: Conversation) {
+        // The write is deliberately *after* the update, not inside it: update's lambda
+        // re-runs on CAS contention (a socket event landing at the same moment), which
+        // would mean a duplicate SharedPreferences write and, worse, persisting a value
+        // that then lost the race.
+        var next = _state.value.favorites
         _state.update { s ->
-            val next = if (conversation.guid in s.favorites) {
+            next = if (conversation.guid in s.favorites) {
                 s.favorites - conversation.guid
             } else {
                 s.favorites + conversation.guid
             }
-            Store.setFavorites(app, next)
             s.copy(favorites = next)
         }
+        Store.setFavorites(app, next)
     }
 
     fun closeThread() {

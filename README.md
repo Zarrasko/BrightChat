@@ -20,6 +20,11 @@
 > <img src="docs/screenshots/thread.png" width="260" alt="A thread in LightChat on a Light Phone III">
 > </p>
 >
+> **Coming from the old `com.craigeley.chat` build?** The package id changed, so this
+> installs alongside it rather than updating it. Uninstall the old one, re-run setup
+> (or push it over adb, below), re-run both `adb` grants, and re-add the app in
+> Obtainium — it sees a different package. Starred chats don't carry over either.
+>
 > APKs are published to [Releases](https://github.com/gi-os/LightChat/releases) when a
 > `v*` tag is pushed, signed with a stable key so Obtainium can update in place.
 > [CLAUDE.md](CLAUDE.md) documents the internals, including the known gaps.
@@ -114,6 +119,23 @@ adb shell pm grant com.gios.lightchat android.permission.WRITE_SECURE_SETTINGS
 
 One-time; it survives app updates. Without it, photos simply open in grayscale
 like the rest of the phone.
+
+### Optional: heads-up messages
+
+A text arriving while you're somewhere else on the phone buzzes and drops a small
+box over whatever you're doing: sender, two lines of message, gone in four and a
+half seconds. Tap it to open the thread, swipe up to dismiss it early. It also
+wakes the panel, so a message arriving with the phone face-down still shows.
+
+Getting a window up from the background needs one appop, which on Android 14 is
+what exempts an app from background-activity-start restrictions:
+
+```sh
+adb shell appops set com.gios.lightchat SYSTEM_ALERT_WINDOW allow
+```
+
+One-time; survives reboots and app updates. Without it you still get the buzz and
+the notification, just not the box.
 
 For instant delivery after a reboot without opening the app, enable Tailscale's
 **Always-on VPN** on the phone (Android Settings → Network → VPN) and leave

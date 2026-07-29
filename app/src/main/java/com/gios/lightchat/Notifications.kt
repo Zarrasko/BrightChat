@@ -32,6 +32,11 @@ object Notifications {
             manager.createNotificationChannel(
                 NotificationChannel(MESSAGE_CHANNEL, "Messages", NotificationManager.IMPORTANCE_HIGH).apply {
                     description = "New iMessages"
+                    // HeadsUp does the buzzing, so that there is exactly one buzz per
+                    // message whether or not the box can be shown, and one place to
+                    // tune what it feels like. Channel settings are immutable after
+                    // creation, so changing this later needs a new channel id.
+                    enableVibration(false)
                 },
             )
         }
@@ -48,7 +53,7 @@ object Notifications {
     fun foregroundNotification(context: Context): Notification =
         Notification.Builder(context, SERVICE_CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_reply)
-            .setContentTitle("chat")
+            .setContentTitle("LightChat")
             .setContentText("Connected")
             .setOngoing(true)
             .setContentIntent(openApp(context))

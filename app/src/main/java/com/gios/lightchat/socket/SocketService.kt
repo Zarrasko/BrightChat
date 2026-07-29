@@ -6,6 +6,7 @@ import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.util.Log
 import com.gios.lightchat.Contacts
+import com.gios.lightchat.HeadsUp
 import com.gios.lightchat.Notifications
 import com.gios.lightchat.ReadStatusEvent
 import com.gios.lightchat.TypingEvent
@@ -112,7 +113,10 @@ class SocketService : Service() {
                 val sender = incoming.message.sender
                 sender?.let { contacts().name(it) ?: it } ?: "Message"
             }
+            // The notification is the record — it stays in LightOS's list and feeds
+            // LightGlance's dot. The box is the alert, and buzzes either way.
             Notifications.post(this, title, incoming.message.text, incoming.chatGuid)
+            HeadsUp.show(this, title, incoming.message.text, incoming.chatGuid)
         }
     }
 

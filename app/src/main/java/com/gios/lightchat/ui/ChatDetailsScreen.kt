@@ -209,7 +209,9 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
 
 /** Sentinel for [ChatDetailsScreen]'s two-tap confirm on Leave (it shares the
  *  `confirming` slot with the per-member Remove, which stores addresses). */
-private const val LEAVE = " leave"
+// Escaped rather than a literal NUL byte: an actual 0x00 in the source made
+// git and grep treat this whole file as binary, so it never showed in a diff.
+private const val LEAVE = "\u0000leave"
 
 /** Inline add-member picker: type a name/number/email, tap a contact match (or
  *  the raw address) to add them to the group. */

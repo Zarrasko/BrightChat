@@ -3,6 +3,7 @@
 package com.gios.lightchat.ui.theme
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
@@ -87,8 +88,14 @@ object ChatDimens {
     val screenPadding = 24.dp
 }
 
+/**
+ * [fillScreen] exists for the heads-up box. Its window is MATCH_PARENT x
+ * WRAP_CONTENT, so a `fillMaxSize` Surface would measure to the full screen height,
+ * paint it black, and — because Material3's Surface installs a pointerInput to
+ * consume touches — swallow every tap on the phone for as long as the box was up.
+ */
 @Composable
-fun LightChatTheme(content: @Composable () -> Unit) {
+fun LightChatTheme(fillScreen: Boolean = true, content: @Composable () -> Unit) {
     val density = LocalDensity.current
     CompositionLocalProvider(
         LocalDensity provides Density(density.density, fontScale = 0.85f),
@@ -103,7 +110,7 @@ fun LightChatTheme(content: @Composable () -> Unit) {
             ),
         ) {
             Surface(
-                modifier = Modifier.fillMaxSize(),
+                modifier = if (fillScreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth(),
                 color = ChatColors.background,
                 content = content,
             )
