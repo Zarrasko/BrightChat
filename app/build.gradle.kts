@@ -23,8 +23,9 @@ android {
         applicationId = "com.gios.lightchat"
         minSdk = 34   // Light Phone III runs Android 14 — the only target device.
         targetSdk = 35
+        // CI overwrites both from the workflow run number; see .github/workflows/build.yml
         versionCode = 9
-        versionName = "0.5.0"
+        versionName = "0.7.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -43,12 +44,31 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Sign debug with the release key too, when it's available, so a local
+            // `adb install -r` replaces the installed release instead of failing on a
+            // certificate mismatch.
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
         release {
-            // A stable release key when keystore.properties is present (required for
-            // Obtainium/Play-style seamless updates), else debug-signed to sideload.
+            // A stable release key is not optional. Android identifies an app by
+            // (packageName, signing certificate), so a build signed with the runner's
+            // throwaway debug keystore — regenerated per job — installs once and then
+            // fails every Obtainium update with an opaque "Failure: Invalid". Locally
+            // a debug-signed APK is fine and still sideloads; in CI it is a bug, so
+            // fail the build rather than publish one.
             signingConfig = if (keystorePropsFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
+                if (System.getenv("CI") != null) {
+                    throw GradleException(
+                        "keystore.properties is missing: the release keystore secret did " +
+                            "not decode. Refusing to publish an APK signed with a " +
+                            "throwaway key. See .github/workflows/build.yml.",
+                    )
+                }
                 signingConfigs.getByName("debug")
             }
             isMinifyEnabled = true
