@@ -11,6 +11,9 @@
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- The photo picker reads DCIM and Pictures directly, because MediaStore (which
+         the system picker uses) is never current on LightOS. See Gallery. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <!-- Not for drawing an overlay. On Android 14 this appop is what exempts us from
          background-activity-start restrictions, which is the only way a sideloaded
          app can put the heads-up box up while the screen is off. Granted over adb;

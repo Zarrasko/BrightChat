@@ -3,8 +3,7 @@ package com.gios.lightchat
 import android.app.Application
 import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.net.Uri
-import android.provider.OpenableColumns
+import android.os.SystemClock
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
@@ -31,6 +30,11 @@ enum class Status { Idle, Loading, Ready, Error }
 // "typing" after this long without a refresh (the server re-emits ~every 5s).
 private const val TYPING_PAUSE_MS = 4_000L
 private const val TYPING_EXPIRY_MS = 12_000L
+
+/** Coming back to the app inside this window doesn't re-pull the list — it can't
+ *  have gone stale, and a cold start's init refresh would otherwise be cancelled by
+ *  the onStart one landing a few hundred milliseconds later. */
+private const val RESUME_REFRESH_MIN_GAP_MS = 3_000L
 
 data class UiState(
     val isConfigured: Boolean,                 // a server URL and password are stored
@@ -79,6 +83,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val state: StateFlow<UiState> = _state
 
     private var loadJob: Job? = null
+
+    /** When [refresh] last started, for [refreshOnResume]'s guard. */
+    private var lastRefreshAt = 0L
     private var threadJob: Job? = null
 
     // The address book is small (hundreds of contacts) and changes rarely, so we
@@ -181,8 +188,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refresh() {
         if (api == null) return
+        lastRefreshAt = SystemClock.elapsedRealtime()
         loadJob?.cancel()
         loadJob = viewModelScope.launch(Dispatchers.IO) { loadConversations() }
+    }
+
+    /**
+     * Re-pull the list when the app comes back to the foreground
+     * (`MainActivity.onStart`). The live socket keeps the list current while the app
+     * is up, but it only runs as a foreground service — anything that happened while
+     * the process was dead, or while the tunnel was down, is missed, and the list
+     * would otherwise show whatever it showed when you left.
+     *
+     * Rate-guarded because `init` already refreshes on a cold start, and onStart
+     * fires immediately after it; without the guard every launch would fire two
+     * identical requests and the second would cancel the first.
+     */
+    fun refreshOnResume() {
+        if (api == null) return
+        if (SystemClock.elapsedRealtime() - lastRefreshAt < RESUME_REFRESH_MIN_GAP_MS) return
+        refresh()
     }
 
     private suspend fun loadConversations() {
@@ -724,54 +749,72 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Sends a picked image into the open thread. Mirrors [sendMessage]: it shows an
-     * optimistic bubble immediately — the picked bytes are seeded into the image
-     * cache under the temp guid so the normal loader renders them without a round
-     * trip — then swaps in the server's echo (real guid) so the socket dedupes.
+     * Sends photos chosen in [com.gios.lightchat.ui.PhotoPickerScreen], as separate
+     * attachments, in the order they were picked. One coroutine rather than one per
+     * photo: iMessage has no concept of a batch, so these are N sends, and letting
+     * them race would land them out of order in the thread.
      */
-    fun sendImage(uri: Uri) {
+    fun sendImageFiles(files: List<File>) {
         val convo = _state.value.open ?: return
+        if (files.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            val img = readPickedImage(uri) ?: return@launch
-            val tempGuid = newTempGuid()
-            // Seed the cache so the optimistic bubble renders the local image.
-            Attachments.cacheLocal(app, tempGuid, img.bytes)
-            val optimistic = ChatMessage(
-                guid = tempGuid,
-                text = ChatMessage.ATTACHMENT_PLACEHOLDER,
-                date = System.currentTimeMillis(),
-                fromMe = true,
-                sender = null,
-                attachments = listOf(Attachment(tempGuid, img.mime, img.name, width = 0, height = 0)),
-            )
-            updateOpenThread(convo.guid) { it + optimistic }
-            _state.update { it.copy(message = null) }
-            performSend(convo, tempGuid, "Couldn’t send image") { client, g, method ->
-                client.sendAttachment(g, img.bytes, img.name, img.mime, tempGuid, method)
+            for (file in files) {
+                sendPicked(convo, readPickedImage(file) ?: continue)
             }
+        }
+    }
+
+    /**
+     * Shared body of the image sends. Mirrors [sendMessage]: an optimistic bubble goes
+     * up immediately — the photo's bytes are seeded into the image cache under the temp
+     * guid, so the normal loader renders them with no round trip — then the server's
+     * echo swaps in under the real guid and the socket dedupes.
+     */
+    private fun sendPicked(convo: Conversation, img: PickedImage) {
+        val tempGuid = newTempGuid()
+        // Seed the cache so the optimistic bubble renders the local image.
+        Attachments.cacheLocal(app, tempGuid, img.bytes)
+        val optimistic = ChatMessage(
+            guid = tempGuid,
+            text = ChatMessage.ATTACHMENT_PLACEHOLDER,
+            date = System.currentTimeMillis(),
+            fromMe = true,
+            sender = null,
+            attachments = listOf(Attachment(tempGuid, img.mime, img.name, width = 0, height = 0)),
+        )
+        updateOpenThread(convo.guid) { it + optimistic }
+        _state.update { it.copy(message = null) }
+        // Blocking, deliberately: sendImageFiles loops over this on one IO coroutine
+        // so several photos land in the thread in the order they were picked.
+        performSend(convo, tempGuid, "Couldn’t send image") { client, g, method ->
+            client.sendAttachment(g, img.bytes, img.name, img.mime, tempGuid, method)
         }
     }
 
     /** A picked image's bytes plus the metadata a send needs. */
     private class PickedImage(val bytes: ByteArray, val mime: String, val name: String)
 
-    /** Reads the image behind a picker [uri] (bytes, mime, display name), or null —
-     *  with the error surfaced — when it can't be read. Call off-main. */
-    private fun readPickedImage(uri: Uri): PickedImage? {
-        val resolver = app.contentResolver
-        val bytes = runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+    /** Reads a photo straight off disk — the picker hands us [java.io.File]s from
+     *  [Gallery], not content URIs, so there is no provider to ask for the type or
+     *  the display name. */
+    private fun readPickedImage(file: File): PickedImage? {
+        val bytes = runCatching { file.readBytes() }.getOrNull()
         if (bytes == null || bytes.isEmpty()) {
-            _state.update { it.copy(message = "Couldn’t read that image") }
+            _state.update { it.copy(message = "Couldn’t read that photo") }
             return null
         }
-        return PickedImage(bytes, resolver.getType(uri) ?: "image/jpeg", queryDisplayName(uri) ?: "image.jpg")
+        return PickedImage(bytes, mimeForExtension(file.extension), file.name)
     }
 
-    private fun queryDisplayName(uri: Uri): String? =
-        runCatching {
-            app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-                ?.use { if (it.moveToFirst() && it.columnCount > 0) it.getString(0) else null }
-        }.getOrNull()
+    private fun mimeForExtension(extension: String): String = when (extension.lowercase()) {
+        "png" -> "image/png"
+        "gif" -> "image/gif"
+        "webp" -> "image/webp"
+        "heic" -> "image/heic"
+        "heif" -> "image/heif"
+        "bmp" -> "image/bmp"
+        else -> "image/jpeg"
+    }
 
     /**
      * Sends a picked image as the first message of a *new* 1:1. There's no chat
@@ -781,13 +824,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * normalized to the E.164 handle iMessage keys its guids by (`newChat`'s
      * AppleScript resolves loose addresses for text, but a constructed guid can't).
      */
-    fun sendNewImage(address: String, uri: Uri) {
+    fun sendNewImage(address: String, file: File) {
         val addr = address.trim()
         if (addr.isEmpty()) return
         _state.update { it.copy(composingNew = false, message = "Sending…") }
         viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
-            val img = readPickedImage(uri) ?: return@launch
+            val img = readPickedImage(file) ?: return@launch
             val handle = imessageHandle(addr)
             val guid = "iMessage;-;$handle"
             try {

@@ -3,4 +3,6 @@
      FileProvider so a content:// URI can be granted to an external viewer/share app. -->
 <paths>
     <cache-path name="shared" path="shared/" />
+    <!-- Where the camera app is asked to write a photo taken from the picker. -->
+    <cache-path name="camera" path="camera/" />
 </paths>
