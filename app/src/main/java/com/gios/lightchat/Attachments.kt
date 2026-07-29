@@ -61,15 +61,17 @@ object Attachments {
         runCatching { File(context.cacheDir, "att_" + safeName(guid)).writeBytes(bytes) }
     }
 
-    /** Decode the file with `inSampleSize` chosen to bring it under [MAX_DIM],
-     *  then apply the EXIF orientation — BitmapFactory ignores it, so a portrait
-     *  phone photo (commonly tagged "rotate 90°") would otherwise render sideways. */
-    private fun decode(file: File): Bitmap? {
+    /** Decode the file with `inSampleSize` chosen to bring it under [maxDim], then
+     *  apply the EXIF orientation — BitmapFactory ignores it, so a portrait phone
+     *  photo (commonly tagged "rotate 90°") would otherwise render sideways.
+     *  Internal because [Gallery] decodes local files through the same path rather
+     *  than keeping a second copy of the orientation handling. */
+    internal fun decode(file: File, maxDim: Int = MAX_DIM): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.path, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         var sample = 1
-        while (bounds.outWidth / sample > MAX_DIM || bounds.outHeight / sample > MAX_DIM) sample *= 2
+        while (bounds.outWidth / sample > maxDim || bounds.outHeight / sample > maxDim) sample *= 2
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
         val bitmap = runCatching { BitmapFactory.decodeFile(file.path, opts) }.getOrNull() ?: return null
         return applyOrientation(bitmap, file)

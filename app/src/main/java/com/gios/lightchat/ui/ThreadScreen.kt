@@ -5,9 +5,6 @@ package com.gios.lightchat.ui
 import android.content.Context
 import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -31,6 +28,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,7 +63,6 @@ import com.gios.lightchat.ChatMessage
 import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.Contacts
 import com.gios.lightchat.Conversation
-import com.gios.lightchat.Reaction
 import com.gios.lightchat.ReactionType
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
@@ -101,11 +99,13 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     // which is also what hides the delayed grayscale restore (see ColorMode).
     var viewingImage by remember(convo.guid) { mutableStateOf<Attachment?>(null) }
 
-    // System photo picker (no permission needed; falls back to the document picker
-    // where the dedicated picker isn't present). A pick sends straight away.
-    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) viewModel.sendImage(uri)
-    }
+    // Our own picker, not the system one: MediaStore is never current on LightOS, so
+    // the system picker doesn't offer photos you just took. Drawn as an overlay for
+    // the same reason as the image viewer — the thread stays composed underneath, so
+    // closing it lands exactly where you were.
+    // Saveable: handing off to a third-party camera is a realistic process-death
+    // window on this phone, and coming back to a closed picker would orphan the photo.
+    var picking by rememberSaveable(convo.guid) { mutableStateOf(false) }
 
     // Which messages begin a same-speaker run (so only they get a name label).
     val labeled = remember(state.messages) {
@@ -236,9 +236,7 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                     viewModel.sendMessage(text, replyingTo?.guid)
                     replyingTo = null
                 },
-                onPickImage = {
-                    pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                },
+                onPickImage = { picking = true },
                 onTextChange = viewModel::onComposeTextChanged,
             )
         }
@@ -247,6 +245,23 @@ fun ThreadScreen(viewModel: ChatViewModel) {
         // thread stays composed — and visible again the instant this leaves.
         viewingImage?.let { image ->
             ImageViewerScreen(image, viewModel::loadImage, onClose = { viewingImage = null })
+        }
+
+        if (picking) {
+            BackHandler { picking = false }
+            // Surface, not a Box with a background: background() only paints. Material3's
+            // Surface installs the pointerInput that stops taps falling through to the
+            // thread underneath — without it the picker's centred "Photos" label sits on
+            // top of the header's clickable title and opens the chat details behind it.
+            Surface(modifier = Modifier.fillMaxSize(), color = ChatColors.background) {
+                PhotoPickerScreen(
+                    onSend = { files ->
+                        picking = false
+                        viewModel.sendImageFiles(files)
+                    },
+                    onClose = { picking = false },
+                )
+            }
         }
     }
 }

@@ -82,6 +82,10 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         AppForeground.active = true
         Notifications.clear(this)
+        // Re-pull the conversation list on every return to the app, not just cold
+        // start — the socket only runs while the service does. Rate-guarded in the
+        // ViewModel so this doesn't duplicate the init refresh.
+        viewModel.refreshOnResume()
         // Re-lift grayscale if the user left with the image viewer open.
         ColorMode.onAppVisible(this)
     }

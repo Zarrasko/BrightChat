@@ -1,8 +1,6 @@
 package com.gios.lightchat.ui
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -26,6 +24,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,7 +60,17 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
     var unavailable by remember { mutableStateOf<Set<String>>(emptySet()) }
     val focus = remember { FocusRequester() }
 
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    // Our own picker (see PhotoPickerScreen), shown over this screen. Only a 1:1 can
+    // take one: the group create path can't send to a constructed guid. Just the first
+    // photo — the new-message flow makes one chat with one message, and the rest of a
+    // multi-pick would have nowhere to go until that chat exists. Saveable because
+    // handing off to the camera app can take the process with it.
+    var picking by rememberSaveable { mutableStateOf(false) }
+
+    // Keyed on picking, not Unit: the "To" field is disposed while the picker is up
+    // (it lives below the early return), so it comes back unfocused and the effect has
+    // to run again to put the keyboard back.
+    LaunchedEffect(picking) { if (!picking) runCatching { focus.requestFocus() } }
 
     fun addRecipient(contact: Contact) {
         if (recipients.none { it.address.equals(contact.address, ignoreCase = true) }) {
@@ -74,12 +83,22 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
         runCatching { focus.requestFocus() }
     }
 
-    // Hoisted to the top level (not a conditional branch) so the launcher isn't
-    // created conditionally; the lambda reads the current recipients and only
-    // sends when it's a 1:1 (the group create path can't take a constructed guid).
-    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        val only = recipients.singleOrNull()
-        if (uri != null && only != null) viewModel.sendNewImage(only.address, uri)
+
+    // Early return rather than an overlay: unlike the thread there's no scroll
+    // position to protect, and everything remembered above this line keeps its slot,
+    // so the recipients you'd already chosen are still there when it closes.
+    if (picking) {
+        BackHandler { picking = false }
+        PhotoPickerScreen(
+            onSend = { files ->
+                picking = false
+                val only = recipients.singleOrNull()
+                val first = files.firstOrNull()
+                if (only != null && first != null) viewModel.sendNewImage(only.address, first)
+            },
+            onClose = { picking = false },
+        )
+        return
     }
 
     Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 20.dp)) {
@@ -160,7 +179,7 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
         val canSend = recipients.isNotEmpty() && blocked.isEmpty()
         val sendNew: (String) -> Unit = { viewModel.sendNewMessage(recipients.map { it.address }, it) }
         val pickForCompose: (() -> Unit)? = if (recipients.size == 1) {
-            { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+            { picking = true }
         } else {
             null
         }
