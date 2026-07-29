@@ -6,8 +6,10 @@ import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.util.Log
 import com.gios.lightchat.Contacts
+import com.gios.lightchat.CatchUp
 import com.gios.lightchat.HeadsUp
 import com.gios.lightchat.Notifications
+import com.gios.lightchat.PollAlarm
 import com.gios.lightchat.ReadStatusEvent
 import com.gios.lightchat.TypingEvent
 import com.gios.lightchat.api.BlueBubblesApi
@@ -56,6 +58,9 @@ class SocketService : Service() {
         )
         connect()
         startWatchdog()
+        // Armed here as well as at boot and on launch: whichever runs first, the
+        // asleep-phone poll exists.
+        PollAlarm.schedule(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
@@ -71,9 +76,13 @@ class SocketService : Service() {
      * failure.
      *
      * So every [WATCHDOG_MS] we reconnect if the socket says it's down, and re-pull the
-     * list either way, alerting for anything past the watermark. Cheap — one REST call —
-     * and it bounds how long a missed message can stay missed. What it can't cover is the
-     * process being killed; `MainActivity.onStart` re-pulling is the backstop there.
+     * list either way, alerting for anything past the watermark. Cheap — one REST call.
+     *
+     * This loop only ticks while the phone is *awake*. It's a `delay`, i.e. a JVM timer,
+     * and once the screen is off and the device drops into Doze the CPU suspends and our
+     * network is cut — a foreground service keeps the process alive, not awake.
+     * [PollAlarm] is what covers the asleep case, and `MainActivity.onStart` covers the
+     * process being killed outright. Three layers, because none is sufficient alone.
      */
     private fun startWatchdog() {
         scope.launch {
@@ -84,51 +93,11 @@ class SocketService : Service() {
                     Log.w(TAG, "socket down; reconnecting")
                     runCatching { live?.connect() }
                 }
-                catchUp()
+                CatchUp.run(this@SocketService)
             }
         }
     }
 
-    /**
-     * Pulls the conversation list and notifies for anything unread that arrived after
-     * [Store.lastAlertedAt]. Notification only — no box, no screen wake: by the time this
-     * finds a message it's minutes old, and lighting the panel for old news is the thing
-     * we spent so long stopping. One buzz if it found anything at all.
-     *
-     * First run seeds the watermark without alerting, or the backlog would all arrive at
-     * once the first time a build with this in it starts.
-     */
-    private suspend fun catchUp() {
-        val client = client() ?: return
-        val convos = runCatching { client.conversations(limit = 50) }.getOrNull() ?: return
-        val watermark = Store.lastAlertedAt(this)
-        val newest = convos.maxOfOrNull { it.lastDate } ?: return
-        if (watermark == 0L) {
-            Store.setLastAlertedAt(this, newest)
-            return
-        }
-        if (newest <= watermark) return
-        val missed = convos.filter { it.unread && !it.lastFromMe && it.lastDate > watermark }
-        // Foregrounded: the list on screen is being refreshed anyway, and an alert for
-        // something the user is looking at is noise. The watermark still moves.
-        if (missed.isEmpty() || AppForeground.active) {
-            Store.setLastAlertedAt(this, newest)
-            return
-        }
-        Log.d(TAG, "catch-up found ${missed.size} missed")
-        val contacts = contacts()
-        for (convo in missed) {
-            val title = convo.displayName.ifBlank {
-                convo.participants.firstOrNull()?.let { contacts.name(it) ?: it } ?: "Message"
-            }
-            Notifications.post(this, title, convo.lastText, convo.guid)
-        }
-        // Advanced *after* posting, not before: if this dies partway the next poll retries,
-        // and a retry is harmless — notification ids are per chat, so a repost replaces the
-        // same row. Losing an alert is the failure that matters.
-        Store.setLastAlertedAt(this, newest)
-        HeadsUp.buzz(this)
-    }
 
     private fun connect() {
         val password = Store.password(this) ?: run { stopSelf(); return }
@@ -144,7 +113,7 @@ class SocketService : Service() {
             Log.d(TAG, "socket connected")
             // A reconnect means we were off the air for some length of time; find out what
             // arrived while we were.
-            scope.launch { catchUp() }
+            scope.launch { CatchUp.run(this@SocketService) }
         })
         s.on(Socket.EVENT_CONNECT_ERROR, Emitter.Listener { Log.w(TAG, "connect error: ${it.firstOrNull()}") })
         s.on("new-message", Emitter.Listener { onMessage(it, isNew = true) })

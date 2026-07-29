@@ -3,6 +3,7 @@ package com.gios.lightchat.socket
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.gios.lightchat.PollAlarm
 import com.gios.lightchat.api.Store
 
 /**
@@ -18,5 +19,8 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
         if (!Store.hasPassword(context) || Store.baseUrl(context) == null) return
         context.startForegroundService(Intent(context, SocketService::class.java))
+        // The service may not survive; the alarm chain has to be re-armed either way,
+        // since alarms don't survive a reboot.
+        PollAlarm.schedule(context)
     }
 }

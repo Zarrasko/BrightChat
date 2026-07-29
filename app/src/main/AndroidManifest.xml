@@ -71,6 +71,14 @@
             android:exported="false"
             android:foregroundServiceType="remoteMessaging" />
 
+        <!-- The only thing that runs while the phone is asleep. setAndAllowWhileIdle is
+             the one alarm that fires during Doze, and firing it grants a short window of
+             network access — which is what makes the catch-up request possible at all.
+             See PollAlarm. -->
+        <receiver
+            android:name=".PollAlarm"
+            android:exported="false" />
+
         <!-- Reconnects the socket service after a reboot, no app launch needed. -->
         <receiver
             android:name=".socket.BootReceiver"

@@ -248,6 +248,24 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   opening a photo is ~300ms slower — the trade every gallery with double-tap-to-zoom makes.
   **Scroll on send (done):** your own newest message always scrolls the thread to the
   bottom, wherever you were; someone else's only nudges you if you were already there.
+  **Background delivery — three layers (done):** the live socket is the fast path, and it
+  is not sufficient. (1) `SocketService`'s watchdog re-pulls every 5min and reconnects a
+  socket reporting itself down — but it's a `delay`, a JVM timer, so it only ticks while
+  the phone is *awake*: Doze suspends the CPU and cuts the app's network, and a foreground
+  service keeps the process alive, not awake. (2) `PollAlarm` +
+  `AlarmManager.setAndAllowWhileIdle` is the only thing that runs asleep — it's the one
+  alarm that fires in Doze, and firing it grants a short network window, which is what
+  makes the REST call possible at all. Inexact, so no `SCHEDULE_EXACT_ALARM`; throttled to
+  ~9min while idle, so the interval is 15min rather than fighting it; no repeating form
+  exists, so each firing schedules the next, and it's re-armed from the service, from
+  `BOOT_COMPLETED` (alarms don't survive reboot) and from `MainActivity.onStart` (a
+  force-stop cancels every alarm an app has). `goAsync()` + a thread, because the
+  broadcast's wakelock is released on return from `onReceive` and the request needs longer.
+  (3) `MainActivity.onStart` re-pulls, covering the process being killed outright.
+  `CatchUp` is shared by (1) and (2); `Store.lastAlertedAt` is the single watermark so a
+  message alerts exactly once however many layers see it, seeded without alerting on first
+  run. Notification only — no box, no screen wake — since anything it finds is minutes old.
+  `dumpsys deviceidle whitelist +com.gios.lightchat` removes the Doze throttling.
   **Notification deep-links (done):** message notifications are per-chat (id
   hashed from the chat guid, so each thread keeps its own and a newer message
   replaces it) and tapping one opens that thread: the PendingIntent carries

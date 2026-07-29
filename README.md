@@ -141,6 +141,22 @@ adb shell appops set com.gios.lightchat SYSTEM_ALERT_WINDOW allow
 One-time; survives reboots and app updates. Without it you still get the buzz and
 the notification, just not the box.
 
+### Optional: don't miss messages while the phone sleeps
+
+Delivery is a socket LightChat holds open itself — there's no Google push on this phone
+— and a socket doesn't survive the phone sleeping. LightChat backs it with an
+`setAndAllowWhileIdle` alarm, the one kind that fires during Doze, which re-pulls the
+list every ~15 minutes and notifies for anything missed.
+
+Doze still throttles that, and battery optimisation can defer it further. To take the
+throttling off entirely:
+
+```sh
+adb shell dumpsys deviceidle whitelist +com.gios.lightchat
+```
+
+Survives reboots. Without it you'll still get missed messages, just later.
+
 For instant delivery after a reboot without opening the app, enable Tailscale's
 **Always-on VPN** on the phone (Android Settings → Network → VPN) and leave
 "Block connections without VPN" **off** — the live socket reconnects the moment

@@ -89,6 +89,9 @@ class MainActivity : ComponentActivity() {
         // start — the socket only runs while the service does. Rate-guarded in the
         // ViewModel so this doesn't duplicate the init refresh.
         viewModel.refreshOnResume()
+        // Re-arm the asleep-phone poll. Idempotent, and it repairs the chain if a firing
+        // was ever lost (force-stop cancels every alarm an app has).
+        PollAlarm.schedule(this)
         // Re-lift grayscale if the user left with the image viewer open.
         ColorMode.onAppVisible(this)
     }
