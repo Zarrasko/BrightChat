@@ -21,10 +21,14 @@ jobs:
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
 
-      # assembleDebug rather than assembleRelease: the release build fails by design when
-      # the keystore secret is absent (see app/build.gradle.kts), and this job deliberately
-      # has no secrets. Debug compiles the same sources.
+      # `env -u CI` is load-bearing, and the reason needs writing down: build.gradle.kts
+      # refuses to configure a release build with no keystore *while CI is set*, so that a
+      # broken secret can never publish an APK signed with a throwaway key. That check runs
+      # at configuration time, which means it fires for `assembleDebug` too — the release
+      # block is evaluated either way. This job has no secrets on purpose and publishes
+      # nothing, so it runs with CI unset and the guard correctly falls through to debug
+      # signing. Setting `CI: ""` does not work: the guard tests for null, not for empty.
       - name: Compile
         run: |
           chmod +x ./gradlew
-          ./gradlew :app:assembleDebug --stacktrace
+          env -u CI ./gradlew :app:assembleDebug --stacktrace
