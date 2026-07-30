@@ -25,7 +25,7 @@ android {
         targetSdk = 35
         // CI overwrites both from the workflow run number; see .github/workflows/build.yml
         versionCode = 9
-        versionName = "0.7.0"
+        versionName = "1.0.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -112,6 +112,12 @@ dependencies {
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("androidx.core:core-splashscreen:1.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // WorkManager, only for DeliveryWorker: a catch-up path that lives in JobScheduler
+    // instead of AlarmManager, so it survives the things that break the alarm chain
+    // (force-stop, app update with the process dead) and is restored after a reboot with
+    // no receiver of ours involved. AndroidX, not Play Services — it has no Google
+    // dependency and doesn't drag one in.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
     // REST is plain HttpURLConnection + org.json (bundled in the platform), like
     // hive/pod. The live event feed is Socket.IO — a plain JVM client (pulls
     // okhttp + engine.io), NOT a Google dependency. org.json is excluded because

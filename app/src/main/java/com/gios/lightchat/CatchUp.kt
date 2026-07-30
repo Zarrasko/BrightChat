@@ -5,65 +5,176 @@ import android.util.Log
 import com.gios.lightchat.api.BlueBubblesApi
 import com.gios.lightchat.api.Store
 import com.gios.lightchat.socket.AppForeground
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Pulls the conversation list and notifies for anything unread that arrived since the
- * last time we alerted. The backstop under the live socket, and the *only* thing that
- * runs while the phone is asleep — see [PollAlarm] for why a timer inside the service
- * isn't enough.
+ * Pulls anything unread that arrived since the last time we alerted, and notifies for it.
+ * The backstop under the live socket, and the only thing that runs while the phone is
+ * asleep — see [PollAlarm] for why a timer inside the service isn't enough.
  *
  * Notification only: no box, no buzz per message, no screen wake. By the time this finds
  * something it is minutes old, and lighting the panel for old news is the behaviour we
  * spent a while removing. One buzz if it found anything at all.
  *
- * Shared by the service's watchdog and the alarm, so both can only ever produce one alert
- * per message: the watermark in [Store.lastAlertedAt] is the single arbiter, and it's
- * persisted precisely because the process dying is the case this exists for.
+ * Shared by the service's watchdog, the alarm and the backup worker, so all three can only
+ * ever produce one alert per message: the watermark in [Store.lastAlertedAt] is the single
+ * arbiter, and it's persisted precisely because the process dying is the case this exists
+ * for.
+ *
+ * **The watermark is the dangerous part.** Advancing it is how a message stops being
+ * "missed", so advancing it past something never examined loses that message permanently —
+ * no later poll will look before the line again. Two ways that used to happen, both fixed
+ * here and both worst exactly when the phone has been off a while:
+ *
+ * 1. A page of the sweep is a fixed number of *messages*, not chats. Come back to a
+ *    backlog and one busy group fills the page on its own, hiding every other chat behind
+ *    it — and the watermark then jumped to the newest date in the page, over all of them.
+ *    Now the sweep pages back until it actually reaches the watermark ([PAGES] deep).
+ * 2. When the app was foregrounded the alert was skipped *and* the watermark advanced, so
+ *    a message that arrived while you were in the app and never read was gone. Now the
+ *    watermark is held below it and it's queued in [PendingAlerts] for the screen going off.
  */
 object CatchUp {
     private const val TAG = "CatchUp"
 
-    /** How many conversations to look at. Anything older than the 50th most recent chat
-     *  is not a missed notification, it's history. */
-    private const val LIMIT = 50
+    /** Messages per page of the sweep. */
+    private const val PAGE = 50
 
-    fun run(context: Context) {
+    /** How deep to page when there's a backlog. Past that we give up and accept the
+     *  watermark jump — a message this far behind isn't a missed notification, it's
+     *  history, and paging forever would be its own bug. */
+    private const val PAGES = 4
+
+    /** Wall clock the sweep may spend paging. A Doze alarm's network window is about ten
+     *  seconds and the broadcast's own budget is the same order, so the sweep has to stop
+     *  itself rather than be cut off mid-response — a cut connection is recorded as a
+     *  failure and retried identically, which on a slow link never converges. */
+    private const val SWEEP_BUDGET_MS = 6_000L
+
+    /** Per-page timeout, well inside [SWEEP_BUDGET_MS] so a stalled page fails rather
+     *  than eating the whole budget. */
+    private const val SWEEP_PAGE_TIMEOUT_MS = 6_000
+
+    /** Only one catch-up at a time. Six things can trigger one — the alarm, the service
+     *  watchdog, a socket reconnect, screen-on, the network coming back, and the worker —
+     *  and they overlap in exactly the situations that produce several at once (a phone
+     *  waking up with the tunnel reconnecting). Two concurrent runs read the same
+     *  watermark and both write, so the later write can move it *backwards* and re-alert a
+     *  message that was already delivered. The loser reports success: something is checking
+     *  right now, which is all the caller wanted to know. */
+    private val running = AtomicBoolean(false)
+
+    /**
+     * Runs one catch-up.
+     *
+     * @return whether we reached the server. Not whether anything was found — the caller
+     *   uses it to decide how soon to try again, and "nothing new" is a success.
+     */
+    fun run(context: Context): Boolean {
+        if (!running.compareAndSet(false, true)) return true
+        return try {
+            runLocked(context)
+        } finally {
+            running.set(false)
+        }
+    }
+
+    private fun runLocked(context: Context): Boolean {
         val app = context.applicationContext
-        val client = client(app) ?: return
-        val convos = runCatching { client.conversations(limit = LIMIT) }
-            .onFailure { Log.d(TAG, "list failed: $it") }
-            .getOrNull() ?: return
+        // Not set up yet: nothing to check, and recording a failure would back the poll off
+        // for a reason that has nothing to do with delivery.
+        val client = client(app) ?: return true
+
+        // Phase 1: the cheap question. One small response that fits inside the network
+        // window a Doze alarm grants; the expensive sweep is only paid for when this says
+        // something arrived, by which point the radio is warm. See
+        // BlueBubblesApi.newestMessageDate.
+        val newest = runCatching { client.newestMessageDate() }
+            .onFailure { Log.d(TAG, "probe failed: $it") }
+            .getOrNull() ?: run { Store.recordPoll(app, ok = false); return false }
+
         val watermark = Store.lastAlertedAt(app)
-        val newest = convos.maxOfOrNull { it.lastDate } ?: return
 
         // First run seeds the watermark without alerting; otherwise every unread chat on
         // the account would arrive at once the first time a build with this in it starts.
         if (watermark == 0L) {
             Store.setLastAlertedAt(app, newest)
-            return
+            Store.recordPoll(app, ok = true)
+            return true
         }
-        if (newest <= watermark) return
+        if (newest <= watermark) {
+            Store.recordPoll(app, ok = true)
+            return true
+        }
 
-        val missed = convos.filter { it.unread && !it.lastFromMe && it.lastDate > watermark }
-        // Foregrounded: the list on screen is being refreshed anyway, and an alert for
-        // something the user is looking at is noise. The watermark still moves.
-        if (missed.isEmpty() || AppForeground.active) {
-            Store.setLastAlertedAt(app, newest)
-            return
+        // Phase 2: something is new, so find out what. Pages back until the sweep covers
+        // the watermark, so the list below can't be a window onto only part of the backlog.
+        val sweep = runCatching {
+            client.sweep(
+                pageSize = PAGE,
+                coverBackTo = watermark,
+                maxPages = PAGES,
+                budgetMs = SWEEP_BUDGET_MS,
+                pageTimeoutMs = SWEEP_PAGE_TIMEOUT_MS,
+            )
         }
-        Log.d(TAG, "found ${missed.size} missed")
+            .onFailure { Log.d(TAG, "sweep failed: $it") }
+            .getOrNull() ?: run { Store.recordPoll(app, ok = false); return false }
+        Store.recordPoll(app, ok = true)
+
+        if (!sweep.complete) {
+            // Either a backlog deeper than PAGE * PAGES, or paging ran out of time. Either
+            // way everything the sweep did reach still gets alerted, and what's older is
+            // written off — on purpose, because the alternative is a poll that can never
+            // finish and so never advances at all.
+            Log.w(TAG, "sweep incomplete; nothing older than ${sweep.oldestDate} was examined")
+        }
+
+        val convos = sweep.conversations
+        // `newest` as the floor as well as `seen`: a row the collapse skipped (no embedded
+        // chat) would otherwise leave `seen` permanently below the probe's answer, so the
+        // cheap short-circuit above could never fire again and every poll would pay for a
+        // full sweep. Safe — the sweep was issued after the probe, so it covers it.
+        val seen = maxOf(convos.maxOfOrNull { it.lastDate } ?: 0L, newest)
+        // Incoming, unread account-wide (a dateRead stamp means it was read on some device),
+        // newer than the line. Anything newer that fails this is either our own message or
+        // one already read, and the watermark may safely pass it.
+        val missed = convos.filter { it.unread && !it.lastFromMe && it.lastDate > watermark }
+        if (missed.isEmpty()) {
+            Store.setLastAlertedAt(app, maxOf(watermark, seen))
+            return true
+        }
+
         val contacts = Store.contacts(app)
-        for (convo in missed) {
+        val titled = missed.map { convo ->
             val title = convo.displayName.ifBlank {
                 convo.participants.firstOrNull()?.let { contacts.name(it) ?: it } ?: "Message"
             }
-            Notifications.post(app, title, convo.lastText, convo.guid)
+            convo to title
         }
+
+        if (AppForeground.active) {
+            // The user is in the app; the list on screen is being refreshed anyway and an
+            // alert for something they're looking at is noise. But it isn't dropped:
+            // queued for the screen going off, and — because the process can die before
+            // that — the watermark is held just below the oldest of them, so the next poll
+            // finds them again. Once read, they stop matching `unread` and the watermark
+            // moves on by itself.
+            titled.forEach { (convo, title) -> PendingAlerts.add(convo.guid, title, convo.lastText, convo.lastDate) }
+            val hold = missed.minOf { it.lastDate } - 1
+            Store.setLastAlertedAt(app, maxOf(watermark, minOf(seen, hold)))
+            Log.d(TAG, "found ${missed.size} missed while foreground; deferred")
+            return true
+        }
+
+        Log.d(TAG, "found ${missed.size} missed")
+        titled.forEach { (convo, title) -> Notifications.post(app, title, convo.lastText, convo.guid) }
         // Advanced *after* posting, not before: if this dies partway the next run retries,
         // and a retry is harmless — notification ids are per chat, so a repost replaces the
         // same row. Losing an alert is the failure that matters.
-        Store.setLastAlertedAt(app, newest)
+        Store.setLastAlertedAt(app, maxOf(watermark, seen))
         HeadsUp.buzz(app)
+        return true
     }
 
     private fun client(context: Context): BlueBubblesApi? {

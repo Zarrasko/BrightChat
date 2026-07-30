@@ -26,6 +26,20 @@ class ApiException(val code: Int, message: String) : IOException(message) {
 data class ServerInfo(val reachable: Boolean, val privateApiReady: Boolean)
 
 /**
+ * The result of a message sweep: the collapsed conversation list, the oldest message date
+ * the sweep actually saw, and whether it reached back past the date it was asked to cover.
+ *
+ * [complete] is the part that matters to the catch-up poll. False means there is a gap
+ * between the watermark and the oldest thing looked at — messages that exist, are unread,
+ * and were not examined — so the watermark must not be advanced as if they'd been handled.
+ */
+data class Sweep(
+    val conversations: List<Conversation>,
+    val oldestDate: Long,
+    val complete: Boolean,
+)
+
+/**
  * Minimal BlueBubbles Server REST client — plain [HttpURLConnection] + `org.json`,
  * no networking dependency. Auth is the server password passed as
  * the `password` query param on every call. The base URL is the user-configured
@@ -73,17 +87,142 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
      * conversation spanning all those guids, so it shows as a single row and its
      * thread merges messages from every room (see [groupIdentity] + ChatViewModel.open).
      */
-    fun conversations(limit: Int = 1000): List<Conversation> {
+    fun conversations(limit: Int = 1000): List<Conversation> = sweep(limit).conversations
+
+    /**
+     * `POST /api/v1/message/query` — one page of the DESC message sweep, raw.
+     */
+    private fun messagePage(limit: Int, offset: Int, timeoutMs: Int = READ_TIMEOUT_MS): JSONArray {
         val body = JSONObject()
             .put("limit", limit)
-            .put("offset", 0)
+            .put("offset", offset)
             // `attachment` so an attachment-only message gets a real list preview
             // ("Photo" etc.) rather than a blank line; without it the sweep can't
             // tell text-less messages apart from genuinely empty ones.
             .put("with", JSONArray().put("chats").put("chats.participants").put("attachment"))
             .put("sort", "DESC")
-        val respText = requestChecked("POST", "/api/v1/message/query", body, what = "message/query")
+        val respText = requestChecked(
+            "POST",
+            "/api/v1/message/query",
+            body,
+            what = "message/query",
+            connectTimeoutMs = minOf(CONNECT_TIMEOUT_MS, timeoutMs),
+            readTimeoutMs = timeoutMs,
+        )
+        return JSONObject(respText).optJSONArray("data") ?: JSONArray()
+    }
+
+    /**
+     * The newest message date on the account, and nothing else.
+     *
+     * This exists because [sweep] is too expensive to be the *question* "is there anything
+     * new". A Doze alarm grants roughly ten seconds of network (see [com.gios.lightchat.PollAlarm]),
+     * and a full sweep — dozens of messages, every chat's participants, attachment metadata
+     * — over a Tailscale tunnel whose radio just woke up can spend all of that on the
+     * handshake alone. When it does, the connection is cut mid-response, the failure is
+     * indistinguishable from "nothing new", and the missed message stays missed for another
+     * interval. So the catch-up asks this first: three messages, no embedded objects, one
+     * small response that fits the window, and it only pays for the sweep when the answer
+     * says something actually arrived — by which point the radio is warm.
+     *
+     * Three rather than one because the newest row can be a tapback or a group event, and
+     * the max date across a few is the same answer for less than a packet more.
+     */
+    fun newestMessageDate(): Long {
+        val body = JSONObject()
+            .put("limit", 3)
+            .put("offset", 0)
+            .put("with", JSONArray())
+            .put("sort", "DESC")
+        val respText = requestChecked(
+            "POST",
+            "/api/v1/message/query",
+            body,
+            what = "message/query probe",
+            connectTimeoutMs = PROBE_CONNECT_TIMEOUT_MS,
+            readTimeoutMs = PROBE_READ_TIMEOUT_MS,
+        )
         val data = JSONObject(respText).optJSONArray("data") ?: JSONArray()
+        var newest = 0L
+        for (i in 0 until data.length()) {
+            val m = data.optJSONObject(i) ?: continue
+            newest = maxOf(newest, messageDate(m))
+        }
+        return newest
+    }
+
+    /**
+     * The conversation list, plus how far back the sweep that built it actually reached.
+     *
+     * [coverBackTo] is the caller's watermark. A single page is a fixed number of
+     * *messages*, not chats, so one busy group can fill it entirely and hide every other
+     * chat's activity behind it — and a catch-up that then advances its watermark to the
+     * newest date it saw has silently written off the messages it never looked at. That is
+     * the failure mode of a phone left off for a few hours: the backlog overflows the page
+     * and the older half of it is skipped rather than delivered. So when a watermark is
+     * given, keep paging until the sweep reaches past it (or [maxPages] runs out), and
+     * report in [Sweep.complete] whether it got there.
+     *
+     * The default single page is the UI's behaviour, unchanged: the list only ever needs
+     * the recent end of history.
+     */
+    fun sweep(
+        pageSize: Int,
+        coverBackTo: Long = 0L,
+        maxPages: Int = 1,
+        budgetMs: Long = Long.MAX_VALUE,
+        pageTimeoutMs: Int = READ_TIMEOUT_MS,
+    ): Sweep {
+        val started = System.currentTimeMillis()
+        val data = JSONArray()
+        var oldest = Long.MAX_VALUE
+        var pages = 0
+        var complete = coverBackTo <= 0L
+        while (pages < maxPages) {
+            val page = if (pages == 0) {
+                // The first page is the whole result when there's no backlog, so its
+                // failure is the caller's failure and must propagate.
+                messagePage(pageSize, offset = 0, timeoutMs = pageTimeoutMs)
+            } else {
+                // Later pages are best-effort. Throwing here would discard every page
+                // already fetched and, on a slow link, would do so on every single poll —
+                // a permanent retry loop that never delivers anything. Stopping early
+                // leaves a gap the caller is told about instead.
+                runCatching { messagePage(pageSize, offset = pageOffset(pages, pageSize), timeoutMs = pageTimeoutMs) }
+                    .getOrNull() ?: break
+            }
+            pages++
+            for (i in 0 until page.length()) {
+                val m = page.optJSONObject(i) ?: continue
+                data.put(m)
+                oldest = minOf(oldest, messageDate(m))
+            }
+            // Short page means we reached the start of history: there is nothing older to
+            // miss, so the sweep is complete by definition however deep the watermark is.
+            if (page.length() < pageSize) { complete = true; break }
+            if (coverBackTo <= 0L) break
+            if (oldest <= coverBackTo) { complete = true; break }
+            // A Doze alarm's network window is finite and paging is the thing most likely
+            // to overrun it. Better a known-partial sweep now than a cut connection and a
+            // recorded failure.
+            if (System.currentTimeMillis() - started > budgetMs) break
+        }
+        return Sweep(collapse(data), if (oldest == Long.MAX_VALUE) 0L else oldest, complete)
+    }
+
+    /**
+     * Page offsets, overlapping by [PAGE_OVERLAP] rows.
+     *
+     * A plain `page * pageSize` offset is a moving window over a list that grows at the
+     * newest end: a message arriving mid-sweep shifts everything down by one, and the row
+     * on the page boundary is never returned by either page. The caller then advances its
+     * watermark past a message it never saw. The overlap re-reads the last few rows of the
+     * previous page, which costs nothing (the collapse is keyed by chat, so duplicates
+     * fold) and absorbs up to [PAGE_OVERLAP] arrivals per page.
+     */
+    private fun pageOffset(page: Int, pageSize: Int): Int = page * (pageSize - PAGE_OVERLAP)
+
+    private fun collapse(data: JSONArray): List<Conversation> {
         // Parse every swept message once, indexed by guid, so a tapback can describe
         // its target ("an image" vs a quote) for the list. The target is an *older*
         // message (later in this DESC sweep), so we need the full index up front.
@@ -502,8 +641,10 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         body: JSONObject?,
         what: String,
         extraQuery: String? = null,
+        connectTimeoutMs: Int = CONNECT_TIMEOUT_MS,
+        readTimeoutMs: Int = READ_TIMEOUT_MS,
     ): String {
-        val (code, text) = request(method, path, body, extraQuery)
+        val (code, text) = request(method, path, body, extraQuery, connectTimeoutMs, readTimeoutMs)
         if (code !in 200..299) throw ApiException(code, "$what failed ($code)")
         return text
     }
@@ -517,6 +658,8 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         path: String,
         body: JSONObject?,
         extraQuery: String? = null,
+        connectTimeoutMs: Int = CONNECT_TIMEOUT_MS,
+        readTimeoutMs: Int = READ_TIMEOUT_MS,
     ): Pair<Int, String> {
         val url = buildString {
             append(baseUrl).append(path)
@@ -525,8 +668,8 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         }
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = method
-            connectTimeout = 15_000
-            readTimeout = 20_000
+            connectTimeout = connectTimeoutMs
+            readTimeout = readTimeoutMs
             setRequestProperty("Accept", "application/json")
             if (body != null) {
                 doOutput = true
@@ -552,6 +695,26 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
      * calls use — the socket emits the same message-object shape.
      */
     companion object {
+        /** Interactive defaults: the user is looking at a spinner, so waiting is fine. */
+        private const val CONNECT_TIMEOUT_MS = 15_000
+        private const val READ_TIMEOUT_MS = 20_000
+
+        /**
+         * The probe's budget. A Doze alarm's network window is about ten seconds in total,
+         * so the interactive timeouts (up to 35s combined) would guarantee the connection
+         * is cut before they ever expire — the request would sit there being killed rather
+         * than failing fast enough to retry inside the same window.
+         */
+        private const val PROBE_CONNECT_TIMEOUT_MS = 4_000
+        private const val PROBE_READ_TIMEOUT_MS = 4_000
+
+        /** Rows each page of a multi-page sweep re-reads from the one before it. */
+        private const val PAGE_OVERLAP = 5
+
+        /** A raw message row's creation date. Used by the sweep and the probe, which both
+         *  need only the date and shouldn't pay to parse a whole [ChatMessage] for it. */
+        fun messageDate(o: JSONObject): Long = o.optLong("dateCreated", 0L)
+
         /** Body text, falling back to an attachment placeholder when null/blank. */
         fun messageText(o: JSONObject): String {
             // org.json's optString returns the literal "null" (not the fallback) for

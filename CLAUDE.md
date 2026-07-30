@@ -248,24 +248,67 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   opening a photo is ~300ms slower — the trade every gallery with double-tap-to-zoom makes.
   **Scroll on send (done):** your own newest message always scrolls the thread to the
   bottom, wherever you were; someone else's only nudges you if you were already there.
-  **Background delivery — three layers (done):** the live socket is the fast path, and it
+  **Background delivery — six layers (done):** the live socket is the fast path, and it
   is not sufficient. (1) `SocketService`'s watchdog re-pulls every 5min and reconnects a
   socket reporting itself down — but it's a `delay`, a JVM timer, so it only ticks while
   the phone is *awake*: Doze suspends the CPU and cuts the app's network, and a foreground
   service keeps the process alive, not awake. (2) `PollAlarm` +
   `AlarmManager.setAndAllowWhileIdle` is the only thing that runs asleep — it's the one
   alarm that fires in Doze, and firing it grants a short network window, which is what
-  makes the REST call possible at all. Inexact, so no `SCHEDULE_EXACT_ALARM`; throttled to
-  ~9min while idle, so the interval is 15min rather than fighting it; no repeating form
-  exists, so each firing schedules the next, and it's re-armed from the service, from
-  `BOOT_COMPLETED` (alarms don't survive reboot) and from `MainActivity.onStart` (a
-  force-stop cancels every alarm an app has). `goAsync()` + a thread, because the
-  broadcast's wakelock is released on return from `onReceive` and the request needs longer.
-  (3) `MainActivity.onStart` re-pulls, covering the process being killed outright.
-  `CatchUp` is shared by (1) and (2); `Store.lastAlertedAt` is the single watermark so a
+  makes the REST call possible at all. Inexact, so no `SCHEDULE_EXACT_ALARM`; no repeating
+  form exists, so each firing schedules the next, and it's re-armed from the service, from
+  `BOOT_COMPLETED` (alarms don't survive reboot), from `MY_PACKAGE_REPLACED`
+  (`PackageReplacedReceiver` — an Obtainium update landing while the app isn't running
+  otherwise leaves no alarm and no socket until it's opened by hand) and from
+  `MainActivity.onStart` (a force-stop cancels every alarm an app has). `goAsync()` + a
+  thread, because the broadcast's wakelock is released on return from `onReceive` and the
+  request needs longer. (3) `MainActivity.onStart` re-pulls, covering the process being
+  killed outright. (4) `DeliveryWorker`, a 15min WorkManager periodic, exists **because it
+  fails differently**: periodic work lives in JobScheduler, in the system's own store, so
+  it survives process death and is restored after a reboot with no receiver of ours
+  involved — it's useless as *the* delivery path (15min minimum, deferred to a maintenance
+  window) and good as the thing that notices the alarm chain is gone and re-arms it. It
+  also restarts the socket service and runs a catch-up, and returns `Result.retry()` rather
+  than `failure()` on error, since a failed periodic work item is dropped. (5) A runtime
+  `ACTION_SCREEN_ON`/`ACTION_USER_PRESENT` receiver in the service catches up on pickup,
+  gated on `PollAlarm.looksStalled` so normal use doesn't re-pull on every unlock. (6) A
+  `registerDefaultNetworkCallback` catches up when the Tailscale tunnel comes back — the
+  socket has no idea it missed anything, so reconnecting alone isn't enough.
+  `CatchUp` is shared by all of them; `Store.lastAlertedAt` is the single watermark so a
   message alerts exactly once however many layers see it, seeded without alerting on first
   run. Notification only — no box, no screen wake — since anything it finds is minutes old.
-  `dumpsys deviceidle whitelist +com.gios.lightchat` removes the Doze throttling.
+  **What actually throttles this is App Standby, not Doze** (`Delivery.kt`): an app the
+  user hasn't opened is demoted active → working set → frequent → rare → restricted, and by
+  `rare` an allow-while-idle alarm asking for 5min is deferred **two hours** (`restricted`,
+  a day) — i.e. the phone-off-overnight case the poll exists for is the case Android
+  throttles it out of. `dumpsys deviceidle whitelist +com.gios.lightchat` puts the app in
+  the *exempt* bucket, which removes the deferral entirely and keeps network during Doze;
+  `Delivery.isExempt` reads it back, `PollAlarm.intervalMs` polls 5min when exempt / 10min
+  when not (just above Doze's ~9min floor — asking for less only gets deferred to about
+  there anyway) / 30min after 3 consecutive failures, with a 1min retry after the first
+  failure. Settings shows the bucket and `Store.lastPollOkAt`, because "the app looks
+  connected but hasn't heard from the server in six hours" has no other symptom.
+  **Two ways the watermark used to lose messages, both worst after the phone is off a
+  while:** (a) a sweep page is a fixed number of *messages*, not chats, so a backlog with
+  one busy group in it filled the page and the watermark then jumped over every chat hidden
+  behind it — `BlueBubblesApi.sweep(pageSize, coverBackTo, maxPages)` now pages back until
+  the sweep actually reaches the watermark (10 pages / 500 messages, then it gives up and
+  says so via `Sweep.complete`); (b) when the app was foregrounded the alert was skipped
+  *and* the watermark advanced, so a message that arrived while you were in the app and
+  never read was gone — `CatchUp` now holds the watermark just below the oldest suppressed
+  message, so a later poll re-finds it, and the hold clears itself once the message is read
+  (it stops matching `unread`). **The catch-up is two-phase** for the same reason it exists:
+  a Doze alarm grants ~10s of network, and a full sweep (50 messages, participants,
+  attachment metadata) over a tunnel whose radio just woke up can spend all of it on the
+  handshake, getting cut mid-response — a failure indistinguishable from "nothing new". So
+  `newestMessageDate()` asks the cheap question first (3 messages, `with:[]`, 4s timeouts)
+  and the sweep is only paid for when something actually arrived.
+  **Messages arriving while the app is open** are no longer dropped: `AppForeground.active`
+  can mean "reading that thread" or "on the list about to lock the phone", and the second
+  used to leave no record anywhere. They're held in `PendingAlerts` (in-memory; the
+  watermark is the durable backstop), cleared when the thread is opened, and posted as
+  plain notifications — no buzz, no box — from `MainActivity.onStop`, which on this phone
+  means the screen went off.
   **Notification deep-links (done):** message notifications are per-chat (id
   hashed from the chat guid, so each thread keeps its own and a newer message
   replaces it) and tapping one opens that thread: the PendingIntent carries
@@ -463,7 +506,19 @@ clears the password and returns to setup.
     even when the activity is dead) to the ViewModel: `incoming` (messages) and
     `typing` (`TypingEvent`, from the socket's `typing-indicator` event).
   - **`AppForeground`** — a volatile flag set by `MainActivity.onStart/onStop` so
-    the service only notifies for messages the user isn't already looking at.
+    the service only notifies for messages the user isn't already looking at. What it
+    can't distinguish is "reading that thread" from "on the list, about to lock the
+    phone", so a foreground message isn't dropped, it's deferred — see `PendingAlerts`.
+  - **`PackageReplacedReceiver`** — `MY_PACKAGE_REPLACED`, needs no permission: re-arms
+    the alarm, re-enqueues the worker and restarts the socket after the app updates
+    itself, which otherwise goes quiet until it's next opened by hand.
+- **Delivery** (`Delivery.kt`, `PollAlarm.kt`, `CatchUp.kt`, `DeliveryWorker.kt`,
+  `PendingAlerts.kt`) — see "Background delivery" above. `Delivery` is the one place that
+  knows whether the phone is currently letting background work happen (battery-optimisation
+  allowlist → exempt standby bucket) and turns that into the poll interval and the two
+  Settings lines. `Store.recordPoll/lastPollAt/lastPollOkAt/pollFailures` is the
+  bookkeeping that makes a broken alarm chain *detectable* — a chain with no redundancy
+  otherwise fails invisibly.
 - **Models** (`Models.kt`) — `Conversation` (carries `guids: List<String>` — every
   chat-room guid it spans, usually just `[guid]`, more for a forked group; `guid` is
   the primary/send target); `ChatMessage` (guid, text, date,

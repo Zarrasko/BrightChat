@@ -29,6 +29,12 @@
          on Android 14+ (dataSync is blocked at boot). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Only to be able to *ask* for the battery-optimisation allowlist (the dialog
+         rejects the request without it). The allowlist is what puts the app in the exempt
+         standby bucket, which is the difference between the Doze poll running every few
+         minutes and being deferred for hours once the phone has been left alone. LightOS
+         has no dialog for it, so in practice it's granted over adb — see Delivery. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:allowBackup="true"
@@ -78,6 +84,17 @@
         <receiver
             android:name=".PollAlarm"
             android:exported="false" />
+
+        <!-- Re-arms everything after the app updates itself. Without this, an Obtainium
+             update that lands while the app isn't running leaves no alarm and no socket
+             until it's next opened by hand. -->
+        <receiver
+            android:name=".socket.PackageReplacedReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Reconnects the socket service after a reboot, no app launch needed. -->
         <receiver

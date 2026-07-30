@@ -1,14 +1,22 @@
 package com.gios.lightchat.socket
 
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 import com.gios.lightchat.Contacts
 import com.gios.lightchat.CatchUp
+import com.gios.lightchat.DeliveryWorker
 import com.gios.lightchat.HeadsUp
 import com.gios.lightchat.Notifications
+import com.gios.lightchat.PendingAlerts
 import com.gios.lightchat.PollAlarm
 import com.gios.lightchat.ReadStatusEvent
 import com.gios.lightchat.TypingEvent
@@ -42,6 +50,9 @@ class SocketService : Service() {
 
     private var socket: Socket? = null
     private var api: BlueBubblesApi? = null
+    private var wakeReceiver: BroadcastReceiver? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var lastNetworkCatchUp = 0L
 
     /** Cancelled in [onDestroy]; used for the read-verification round trip. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -58,9 +69,71 @@ class SocketService : Service() {
         )
         connect()
         startWatchdog()
+        watchForWake()
+        watchForNetwork()
         // Armed here as well as at boot and on launch: whichever runs first, the
         // asleep-phone poll exists.
         PollAlarm.schedule(this)
+        // The chain-of-last-resort, on a different system service to the alarm so it
+        // doesn't share its failure modes. Cheap to ask for repeatedly (KEEP).
+        DeliveryWorker.ensure(this)
+    }
+
+    /**
+     * Catch up the moment the phone is picked up, if the poll looks like it stopped.
+     *
+     * Every layer above this can fail silently and leave the app quiet for hours; what the
+     * user then does is turn the screen on. That's the cheapest possible moment to repair
+     * things — the CPU is running, the radio is up, and any delay is invisible because they
+     * haven't got to the app yet. `ACTION_SCREEN_ON` can only be registered at runtime (it
+     * has been manifest-exempt since Android 3), which is fine: this is the layer for a
+     * live process whose scheduling broke, not for a dead one.
+     *
+     * Gated on [PollAlarm.looksStalled] so a phone being used normally doesn't re-pull the
+     * list on every unlock — the socket is already doing that job when it's healthy.
+     */
+    private fun watchForWake() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (!PollAlarm.looksStalled(context)) return
+                Log.w(TAG, "poll looks stalled; catching up on wake")
+                PollAlarm.schedule(context)
+                scope.launch { CatchUp.run(context) }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            // Both, because the interesting one depends on whether a lock is set: with a
+            // PIN the useful signal is the unlock, without one the screen coming on is all
+            // there is. Duplicates are harmless — the stall gate rejects the second.
+            addAction(Intent.ACTION_USER_PRESENT)
+        }
+        runCatching { registerReceiver(receiver, filter) }
+            .onSuccess { wakeReceiver = receiver }
+            .onFailure { Log.w(TAG, "couldn't watch for wake: $it") }
+    }
+
+    /**
+     * Catch up when a usable network appears.
+     *
+     * The server is only reachable through the Tailscale tunnel, and the tunnel comes and
+     * goes independently of everything else here — it drops with the screen, reconnects on
+     * its own schedule, and a socket "reconnect" attempted without it just fails. Anything
+     * that arrived while the tunnel was down is invisible to the socket, which has no idea
+     * it missed anything, so the reconnect alone isn't enough: re-pull as well.
+     */
+    private fun watchForNetwork() {
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val live = socket
+                if (live == null || !live.connected()) runCatching { live?.connect() }
+                catchUpOpportunistically()
+            }
+        }
+        runCatching { manager.registerDefaultNetworkCallback(callback) }
+            .onSuccess { networkCallback = callback }
+            .onFailure { Log.w(TAG, "couldn't watch the network: $it") }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
@@ -99,6 +172,21 @@ class SocketService : Service() {
     }
 
 
+    /**
+     * A catch-up triggered by something that can happen repeatedly for one underlying event
+     * — the tunnel coming back announces itself as both a new default network and a socket
+     * reconnect, several times over, while it settles. Rate-limited so that's one round
+     * trip rather than a dozen.
+     */
+    private fun catchUpOpportunistically() {
+        val now = SystemClock.elapsedRealtime()
+        synchronized(this) {
+            if (now - lastNetworkCatchUp < NETWORK_CATCHUP_MIN_GAP_MS) return
+            lastNetworkCatchUp = now
+        }
+        scope.launch { CatchUp.run(this@SocketService) }
+    }
+
     private fun connect() {
         val password = Store.password(this) ?: run { stopSelf(); return }
         val baseUrl = Store.baseUrl(this) ?: run { stopSelf(); return }
@@ -112,8 +200,9 @@ class SocketService : Service() {
         s.on(Socket.EVENT_CONNECT, Emitter.Listener {
             Log.d(TAG, "socket connected")
             // A reconnect means we were off the air for some length of time; find out what
-            // arrived while we were.
-            scope.launch { CatchUp.run(this@SocketService) }
+            // arrived while we were. Throttled with the network callback, since a flapping
+            // tunnel fires both, repeatedly, for the same outage.
+            catchUpOpportunistically()
         })
         s.on(Socket.EVENT_CONNECT_ERROR, Emitter.Listener { Log.w(TAG, "connect error: ${it.firstOrNull()}") })
         s.on("new-message", Emitter.Listener { onMessage(it, isNew = true) })
@@ -202,9 +291,20 @@ class SocketService : Service() {
         val data = args?.firstOrNull() as? JSONObject ?: return
         val incoming = BlueBubblesApi.messageEvent(data, isNew) ?: return
         SocketBus.incoming.tryEmit(incoming)
+        val alertable = isNew && !incoming.message.fromMe && !incoming.message.isGroupEvent
+        // Arrived while the app was open. Not necessarily *seen*: the user can be on the
+        // list, or in another thread, and pressing the power button from there used to mean
+        // the message was never recorded anywhere. Hold it for the screen going off
+        // instead — see PendingAlerts.
+        if (alertable && AppForeground.active) {
+            val title = incoming.chatDisplayName.ifBlank {
+                incoming.message.sender?.let { contacts().name(it) ?: it } ?: "Message"
+            }
+            PendingAlerts.add(incoming.chatGuid, title, incoming.message.text, incoming.message.date)
+        }
         // Notify only for genuinely new incoming messages the user can't see —
         // not group events (renames etc.), whose `text` is empty.
-        if (isNew && !incoming.message.fromMe && !incoming.message.isGroupEvent && !AppForeground.active) {
+        if (alertable && !AppForeground.active) {
             // Prefer an explicit (group) chat name; otherwise resolve the sender's
             // address to a contact name from the persisted index, falling back to
             // the raw address. Read fresh so it reflects the latest address book.
@@ -231,6 +331,12 @@ class SocketService : Service() {
     private fun contacts(): Contacts = Store.contacts(this)
 
     override fun onDestroy() {
+        wakeReceiver?.let { runCatching { unregisterReceiver(it) } }
+        wakeReceiver = null
+        networkCallback?.let { cb ->
+            runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) }
+        }
+        networkCallback = null
         scope.cancel()
         socket?.disconnect()
         socket?.off()
@@ -243,5 +349,8 @@ class SocketService : Service() {
 
         /** How long a missed message can stay missed while the service is alive. */
         private const val WATCHDOG_MS = 5 * 60 * 1000L
+
+        /** Floor between catch-ups triggered by the network or a socket reconnect. */
+        private const val NETWORK_CATCHUP_MIN_GAP_MS = 60 * 1000L
     }
 }

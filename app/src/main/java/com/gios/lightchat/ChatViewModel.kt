@@ -315,6 +315,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         conversation.guids.forEach { markReadIfPrivate(it) }
         clearUnread(conversation.guid)
         Notifications.clearChat(app, conversation.guids)
+        // Opening the thread is what "you've seen it" means, so drop any alert being held
+        // for it — otherwise leaving the app would post a notification for the message
+        // just read. See PendingAlerts.
+        PendingAlerts.clear(conversation.guids)
         threadJob?.cancel()
         threadJob = viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch

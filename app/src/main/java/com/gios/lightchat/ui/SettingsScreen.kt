@@ -25,6 +25,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.gios.lightchat.ChatViewModel
+import com.gios.lightchat.Delivery
 import com.gios.lightchat.api.Store
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatDimens
@@ -116,6 +117,53 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
             },
             modifier = Modifier.fillMaxWidth(),
         )
+
+        Spacer(modifier = Modifier.height(36.dp))
+
+        // Whether the phone is currently letting background delivery happen at all, and
+        // when it last did. Both are otherwise unanswerable from the phone: the app can
+        // look connected while its poll is being deferred for hours by the standby bucket,
+        // and an alarm chain that stopped firing overnight leaves no other trace. Read on
+        // each visit rather than remembered — the whole value is that it's current.
+        val health = Delivery.healthLines(context)
+        Text(
+            text = health.first,
+            style = ChatType.hint,
+            color = ChatColors.onSurfaceDisabled,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = health.second,
+            style = ChatType.hint,
+            color = ChatColors.onSurfaceDisabled,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        )
+        if (!Delivery.isExempt(context)) {
+            // LightOS ships almost no Settings UI, so this dialog usually doesn't exist —
+            // the tap is offered when it resolves and the adb command named otherwise,
+            // rather than showing a control that silently does nothing.
+            val intent = Delivery.exemptionIntent(context)
+            if (intent != null) {
+                HapticText(
+                    text = "Allow background delivery",
+                    style = ChatType.body,
+                    color = ChatColors.onSurfaceDim,
+                    textAlign = TextAlign.Center,
+                    onClick = { runCatching { context.startActivity(intent) } },
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                )
+            } else {
+                Text(
+                    text = "Fix over adb: dumpsys deviceidle whitelist +" + context.packageName,
+                    style = ChatType.hint,
+                    color = ChatColors.onSurfaceDisabled,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.weight(1f))
 

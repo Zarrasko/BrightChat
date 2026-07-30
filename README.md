@@ -141,21 +141,35 @@ adb shell appops set com.gios.lightchat SYSTEM_ALERT_WINDOW allow
 One-time; survives reboots and app updates. Without it you still get the buzz and
 the notification, just not the box.
 
-### Optional: don't miss messages while the phone sleeps
+### Strongly recommended: don't miss messages while the phone sleeps
 
 Delivery is a socket LightChat holds open itself — there's no Google push on this phone
 — and a socket doesn't survive the phone sleeping. LightChat backs it with an
 `setAndAllowWhileIdle` alarm, the one kind that fires during Doze, which re-pulls the
-list every ~15 minutes and notifies for anything missed.
+list and notifies for anything missed.
 
-Doze still throttles that, and battery optimisation can defer it further. To take the
-throttling off entirely:
+What throttles that isn't really Doze, it's **App Standby buckets**. The longer the phone
+goes unused without LightChat being opened, the further Android demotes it — active →
+working set → frequent → rare → restricted — and each step defers its alarms harder. By
+`rare`, an alarm asking for five minutes is held for **two hours**; `restricted` holds it
+for a day. Which means the exact situation the poll exists for (phone face-down overnight,
+app not opened) is the situation Android throttles it out of, and the symptom is a phone
+that quietly stops telling you about texts until you pick it up.
+
+One command turns that off rather than negotiating with it:
 
 ```sh
 adb shell dumpsys deviceidle whitelist +com.gios.lightchat
 ```
 
-Survives reboots. Without it you'll still get missed messages, just later.
+This puts the app in the **exempt** bucket: no alarm deferral at all, and network access
+during Doze instead of a ~10 second window per alarm. LightChat notices and polls every
+5 minutes instead of 10. Survives reboots and app updates.
+
+**Settings tells you whether it took.** The bottom of the Settings screen reads either
+`Background delivery: unrestricted` or `Background delivery: throttled (rare)`, plus when
+the app last actually heard from the server — which is the only way to tell from the phone
+that background delivery stopped hours ago rather than nobody having texted you.
 
 For instant delivery after a reboot without opening the app, enable Tailscale's
 **Always-on VPN** on the phone (Android Settings → Network → VPN) and leave

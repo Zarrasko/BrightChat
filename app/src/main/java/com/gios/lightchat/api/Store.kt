@@ -20,6 +20,9 @@ object Store {
     private const val KEY_PRIVATE_API = "private_api" // server's Private API live?
     private const val KEY_FAVORITES = "favorites"     // starred chat guids, newline-joined
     private const val KEY_ALERTED_AT = "alerted_at"   // newest message we've alerted for
+    private const val KEY_POLL_AT = "poll_at"         // last catch-up attempt, wall clock
+    private const val KEY_POLL_OK_AT = "poll_ok_at"   // last catch-up that reached the server
+    private const val KEY_POLL_FAILS = "poll_fails"   // consecutive failures
 
     /** The configured BlueBubbles Server URL, or null if setup hasn't run yet. */
     fun baseUrl(context: Context): String? =
@@ -102,6 +105,38 @@ object Store {
 
     fun setLastAlertedAt(context: Context, value: Long) {
         prefs(context).edit().putLong(KEY_ALERTED_AT, value).apply()
+    }
+
+    /**
+     * Delivery bookkeeping, written by every catch-up attempt.
+     *
+     * [lastPollAt] is what makes a *broken* alarm chain detectable. Each
+     * `setAndAllowWhileIdle` firing arms the next one, so the chain is a single thread
+     * that a force-stop, a lost firing, or an app update cuts for good — and nothing
+     * about the app's state says so. Comparing this against the expected interval does
+     * (`PollAlarm.looksStalled`), which is what lets a screen-on, a network coming back,
+     * or the backup worker repair it.
+     *
+     * [lastPollOkAt] is separate because "the alarm fired" and "we heard from the server"
+     * are different failures with the same symptom. [pollFailures] backs off the interval
+     * so an unreachable server doesn't poll the battery flat, and is reset by any success.
+     */
+    fun lastPollAt(context: Context): Long = prefs(context).getLong(KEY_POLL_AT, 0L)
+
+    fun lastPollOkAt(context: Context): Long = prefs(context).getLong(KEY_POLL_OK_AT, 0L)
+
+    fun pollFailures(context: Context): Int = prefs(context).getInt(KEY_POLL_FAILS, 0)
+
+    /** Records an attempt and its outcome in one write. */
+    fun recordPoll(context: Context, ok: Boolean) {
+        val now = System.currentTimeMillis()
+        val edit = prefs(context).edit().putLong(KEY_POLL_AT, now)
+        if (ok) {
+            edit.putLong(KEY_POLL_OK_AT, now).putInt(KEY_POLL_FAILS, 0)
+        } else {
+            edit.putInt(KEY_POLL_FAILS, pollFailures(context) + 1)
+        }
+        edit.apply()
     }
 
     /** Sign out: wipe the stored password. */

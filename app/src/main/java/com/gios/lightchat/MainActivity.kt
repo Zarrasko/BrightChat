@@ -92,6 +92,11 @@ class MainActivity : ComponentActivity() {
         // Re-arm the asleep-phone poll. Idempotent, and it repairs the chain if a firing
         // was ever lost (force-stop cancels every alarm an app has).
         PollAlarm.schedule(this)
+        // And the backstop that notices when that chain has gone missing entirely.
+        DeliveryWorker.ensure(this)
+        // Anything held from a previous visit is stale now — the user is here and the list
+        // shows it, so a notification for it would be a row about a message they can see.
+        PendingAlerts.clearAll()
         // Re-lift grayscale if the user left with the image viewer open.
         ColorMode.onAppVisible(this)
     }
@@ -99,8 +104,28 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         AppForeground.active = false
+        // On this phone, leaving the app almost always means the screen went off. Messages
+        // that arrived while it was open were deliberately not alerted for, on the
+        // assumption the user was looking at them — an assumption that expires right here.
+        // Post them now, plainly: no buzz and no box, since they arrived while the phone was
+        // in hand and the point is only that they end up in the notification list (and so on
+        // LightGlance's dot) rather than nowhere. See PendingAlerts.
+        flushPendingAlerts()
         // The rest of the phone must stay B&W even if the viewer is still open.
         ColorMode.onAppHidden(this)
+    }
+
+    private fun flushPendingAlerts() {
+        val held = PendingAlerts.drain()
+        if (held.isEmpty()) return
+        held.forEach { Notifications.post(this, it.title, it.text, it.chatGuid) }
+        // These have now been alerted for, so the catch-up's watermark may pass them. It is
+        // deliberately held below anything suppressed while the app was open (see CatchUp),
+        // and without moving it here the next background poll would find the same messages
+        // still unread — on a server with no Private API nothing ever marks them read — and
+        // post and buzz for them a second time.
+        val newest = held.maxOf { it.date }
+        Store.setLastAlertedAt(this, maxOf(Store.lastAlertedAt(this), newest))
     }
 
     // singleTask, so a re-launch with a fresh extra comes through here.
