@@ -182,9 +182,11 @@ the tunnel comes up.
 
 Turning the brightness wheel scrolls whatever is up: a thread, the conversation list,
 contact search on the new-message screen, a group's member list, the photo grid, and the
-setup form. Only the turns — the wheel click and the camera button belong to LightControl,
-which owns them phone-wide and passes bare notches through to `com.gios.*` for exactly
-this.
+setup form. Only the turns — the wheel click and the camera button are left to the phone.
+
+Nothing else has to be installed for that, and nothing has to be granted. There is no
+service and no permission behind it: the wheel is a key event, LightChat has focus, so
+LightChat handles it.
 
 It works because the wheel arrives as an ordinary key event. Light patched
 `/system/usr/keylayout/Generic.kl` to label scancodes 19 and 20 `WHEEL_CCW`/`WHEEL_CW`,
@@ -205,6 +207,34 @@ frame, and acting on each one gives a stack of jumps with nothing for the eye to
 The first notch after a pause is also held until a second confirms it, since the wheel sits
 under a thumb and a stray brush shouldn't move the message you were reading. `hw/Wheel.kt`
 has the numbers.
+
+[LightControl](https://github.com/gi-os/LightControl) is optional, and it fills in the parts
+of the wheel LightChat deliberately leaves alone: hold the wheel in and turn for brightness,
+tap it for the flashlight, the camera button to open the camera — each of those rebindable,
+tap and hold separately, to any installed app. It also gives brightness or a synthetic-swipe
+scroll to apps that carry no wheel code of their own, which is most of them.
+
+Installing it doesn't take scrolling away. Bare turns are passed straight through to
+`com.gios.*`, `com.lightfastread` and `com.lightrss.reader` on purpose — LightChat is on that
+list, and the reason the list exists is that an app which already knows what a notch means
+scrolls better than a synthetic finger ever will.
+
+```bash
+# Optional: LightControl, for brightness, the flashlight and the camera button
+adb install -r LightControl-v1.0.x.apk
+
+# The key service. NOTE: this setting is a list, and this command REPLACES it —
+# if you also run LightVoice's push-to-talk, colon-join both components instead.
+adb shell settings put secure enabled_accessibility_services \
+  com.gios.lightcontrol/com.gios.lightcontrol.keys.ControlService
+adb shell settings put secure accessibility_enabled 1
+
+# Brightness, and the level readout + opening apps from the service
+adb shell appops set com.gios.lightcontrol WRITE_SETTINGS allow
+adb shell appops set com.gios.lightcontrol SYSTEM_ALERT_WINDOW allow
+```
+
+The latest build is at <https://github.com/gi-os/LightControl/releases/latest>.
 
 ## Install
 
