@@ -1,96 +1,104 @@
-> ### About this fork
->
-> This is **LightChat**, [gi-os](https://github.com/gi-os)'s fork of
-> **[craigeley/chat](https://github.com/craigeley/chat)**. Craig Eley wrote the app.
-> The README below is his, kept as he wrote it.
->
-> The fork renames the app to LightChat (`com.gios.lightchat`) to sit with the rest of
-> the [gi-os Light Phone tools](https://github.com/gi-os/awesome-light), and adds:
->
-> - **Favorites / Known / Unknown tabs.** The conversation list is three lists behind an
->   icon bar: starred chats, chats with a name in the Mac's address book, and everything
->   else. Long-press a row to star it. Exiting a thread returns you to where you were in
->   the list rather than the top of it.
-> - **Full-colour photos.** Tapping a photo lifts LightOS's grayscale for exactly as long
->   as the viewer is open. Needs a one-time adb grant — see below.
-> - **Heads-up messages.** A minimal box over whatever you're doing when a text arrives,
->   with the sender, the message, and a buzz. Needs a one-time adb grant — see below.
-> - **A photo picker that works.** The system one reads MediaStore, which nothing keeps
->   current on LightOS, so photos you just took were never offered. This one reads DCIM
->   and Pictures directly. Multi-select, an inline camera, and the whole thing runs in
->   colour — with the grayscale grant above, picking and framing a photo aren't guesswork.
-> - **The brightness wheel scrolls.** Threads, the conversation list, contact search, the
->   photo grid — see below.
->
-> <p>
-> <img src="docs/screenshots/thread.png" width="260" alt="A thread in LightChat on a Light Phone III">
-> </p>
->
-> **Coming from the old `com.craigeley.chat` build?** The package id changed, so this
-> installs alongside it rather than updating it. Uninstall the old one, re-run setup
-> (or push it over adb, below), re-run both `adb` grants, and re-add the app in
-> Obtainium — it sees a different package. Starred chats don't carry over either.
->
-> APKs are published to [Releases](https://github.com/gi-os/LightChat/releases) when a
-> `v*` tag is pushed, signed with a stable key so Obtainium can update in place.
-> [CLAUDE.md](CLAUDE.md) documents the internals, including the known gaps.
->
-> Nothing here is upstream's responsibility. Send bugs in these features to this repo,
-> not to Craig.
-
 # LightChat
 
 An **iMessage client** for the [Light Phone III](https://www.thelightphone.com/),
-inspired by and based on the apps created by [vandamd](https://github.com/vandamd). The app works by talking to an always-on, self-hosted [BlueBubbles Server](https://github.com/BlueBubblesApp/bluebubbles-server), reached privately over [Tailscale](https://tailscale.com/).
+talking to an always-on, self-hosted [BlueBubbles Server](https://github.com/BlueBubblesApp/bluebubbles-server)
+reached privately over [Tailscale](https://tailscale.com/). Package
+`com.gios.lightchat`.
 
-I built this to replace OpenBubbles on my LPIII, which I found to be both a battery hog and very flaky in terms of displaying and ordering messages correctly.
+**Current version: v1.0.9.** See [Version history](#version-history).
+
+> ### About this fork
+>
+> This is [gi-os](https://github.com/gi-os)'s fork of
+> **[craigeley/chat](https://github.com/craigeley/chat)**. Craig Eley wrote the app;
+> this fork renames it to LightChat (`com.gios.lightchat`) to sit with the rest of the
+> [gi-os Light Phone tools](https://github.com/gi-os/awesome-light) and adds everything
+> from [Favorites / Known / Unknown tabs](#favorites-known-unknown-tabs) onward, below.
+> Nothing here is upstream's responsibility — send bugs in these features to this repo,
+> not to Craig. Craig's original README is preserved at the bottom of this file, as he
+> wrote it, for attribution and history.
+>
+> **Coming from the old `com.craigeley.chat` build?** The package id changed, so this
+> installs alongside it rather than updating it. Uninstall the old one, re-run setup,
+> re-run both `adb` grants, and re-add the app in Obtainium — it sees a different
+> package. Starred chats don't carry over either.
 
 Open the app to a list of conversations (newest activity first); tap one to read the
-thread, or tap **New** to start one (searches your contacts by name/number/email).
-Tap **Messages** at the top for settings, **Refresh** to re-pull.
+thread, or tap **New** to start one (searches your contacts by name/number/email). Tap
+**Messages** at the top for settings, **Refresh** to re-pull.
 
-## Prequisites
+## What this is and why
 
-There are several things you have to have up and running in order for this to work.
+Craig Eley built the original `chat` to talk to a BlueBubbles server over Tailscale, no
+Google push involved — the app holds its own socket open. This fork exists to replace
+OpenBubbles on Gio's LPIII, which was found to be both a battery hog and flaky about
+ordering messages correctly, and it adds:
 
-1. A LightPhoneIII modified to reveal the full Android layer. For full instructions on this, I highly recommend fully reading [this guide](https://acrobat.adobe.com/id/urn:aaid:sc:US:0c80fa32-de30-406f-85ca-93ccd92c3c4b).
-2. A BlueBubbles server up and running on an always-on Mac, which is signed into your iMessage account.
-3. Tailscale installed on your Mac *and* and your modified LPIII.
+- **Favorites / Known / Unknown tabs.** The conversation list is three lists behind an
+  icon bar: starred chats, chats with a name in the Mac's address book, and everything
+  else. Long-press a row to star it. Exiting a thread returns you to where you were in
+  the list rather than the top of it.
+- **Full-colour photos.** Tapping a photo lifts LightOS's greyscale for exactly as long
+  as the viewer is open. Needs a one-time adb grant — see [Optional features](#optional-features).
+- **Heads-up messages.** A minimal box over whatever you're doing when a text arrives,
+  with the sender, the message, and a buzz. Needs a one-time adb grant.
+- **A photo picker that works.** The system one reads MediaStore, which nothing keeps
+  current on LightOS, so photos you just took were never offered. This one reads DCIM
+  and Pictures directly. Multi-select, an inline camera, and the whole thing runs in
+  colour — with the grayscale grant, picking and framing a photo aren't guesswork.
+- **The brightness wheel scrolls.** Threads, the conversation list, contact search, the
+  photo grid — see [The wheel](#the-wheel).
+- **Background delivery that survives sleep.** See
+  [Don't miss messages while the phone sleeps](#dont-miss-messages-while-the-phone-sleeps).
 
-## Setup
+<p>
+<img src="docs/screenshots/thread.png" width="260" alt="A thread in LightChat on a Light Phone III">
+</p>
 
-1. **Install BlueBubbles Server**. Install it from
-   [bluebubbles.app](https://bluebubbles.app/install/) on a Mac that is signed
-   into your iMessage account and stays awake. During setup
-   it asks you to set a server password — remember it; the app uses it to
-   authenticate.
-   
-   In the setup steps, you should **skip / ignore** the Google Firebase section entirely, as well as the Proxy Service. You can set that to LAN only. Tailscale (in the next step) will handle it from here.
+## Quick start
 
-2. **Put the Mac and the phone on the same tailnet.** Install
-   [Tailscale](https://tailscale.com/download) on both and sign them into the
-   same account. On the Mac, expose the BlueBubbles port (default `1234`) over
-   HTTPS with Tailscale Serve:
+You need three things running before the app is any use:
 
-   `tailscale serve --bg 1234`
+1. A LightPhoneIII with the full Android layer exposed (see
+   [this guide](https://acrobat.adobe.com/id/urn:aaid:sc:US:0c80fa32-de30-406f-85ca-93ccd92c3c4b)).
+2. A BlueBubbles server on an always-on Mac, signed into your iMessage account.
+3. Tailscale installed on that Mac *and* on the modified LPIII.
 
-   This gives the Mac a stable `https://<machine>.<tailnet>.ts.net` URL with TLS,
-   reachable only from your own devices — no public exposure, no certificates to
-   manage. (Any other HTTPS reverse proxy works too; Tailscale Serve is just the
-   easiest.) Run `tailscale serve status` to see the URL.
+**1. Install BlueBubbles Server** from [bluebubbles.app](https://bluebubbles.app/install/)
+on the Mac. During setup it asks for a server password — remember it, the app uses it to
+authenticate. Skip the Google Firebase section entirely, and set the Proxy Service to
+LAN only; Tailscale handles the rest.
 
-3. Install this app. The best way to do it is to put this url into Obtainium.
+**2. Put the Mac and the phone on the same tailnet.** Install
+[Tailscale](https://tailscale.com/download) on both, same account. On the Mac, expose
+the BlueBubbles port (default `1234`) over HTTPS:
 
-4. **Configure the app.** On first launch, enter that `https://…ts.net` URL and
-   the BlueBubbles server password. The app validates them against the server and
-   stores them on the device.
+```sh
+tailscale serve --bg 1234
+```
+
+This gives the Mac a stable `https://<machine>.<tailnet>.ts.net` URL with TLS, reachable
+only from your own devices. `tailscale serve status` shows the URL.
+
+**3. Install the app.** Grab the newest signed APK from
+[Releases](https://github.com/gi-os/LightChat/releases) or track this repo in
+**Obtainium**.
+
+**4. Configure it.** On first launch, enter the `https://…ts.net` URL and the
+BlueBubbles server password. The app validates them against the server and stores them
+on the device.
+
+That's the whole path to a working thread list — the parts that take real time are
+setting up BlueBubbles and Tailscale on the Mac, not the app itself.
+
+## Configuration and usage
 
 ### Optional: enable the Private API (tapbacks, read receipts, typing)
 
-By default BlueBubbles can only send via AppleScript, which can't send tapbacks,
-mark chats read, or send typing indicators. For a full list of features enabled by the private API, see this page. Those need BlueBubbles' **Private
-API**, which injects a helper into Messages — and that requires turning off two
-macOS protections. It's optional; skip this and everything else still works.
+By default BlueBubbles can only send via AppleScript, which can't send tapbacks, mark
+chats read, or send typing indicators. Those need BlueBubbles' **Private API**, which
+injects a helper into Messages — and that requires turning off two macOS protections.
+Skip this and everything else still works.
 
 1. **Disable Library Validation** (lets the helper load into Messages):
 
@@ -98,67 +106,61 @@ macOS protections. It's optional; skip this and everything else still works.
    sudo defaults write /Library/Preferences/com.apple.security.libraryvalidation.plist DisableLibraryValidation -bool true
    ```
 
-2. **Disable System Integrity Protection (SIP).** Boot into Recovery
-   (Apple Silicon: hold the power button → *Options*; Intel: hold ⌘R at boot),
-   open Terminal, run `csrutil disable`, then reboot. Verify with `csrutil status`
-   — it should read `disabled`. (On Apple Silicon this also disables running iOS
-   apps on the Mac.) Do this at your own risk; a VM snapshot first is wise.
+2. **Disable System Integrity Protection (SIP).** Boot into Recovery (Apple Silicon:
+   hold the power button → *Options*; Intel: hold ⌘R at boot), open Terminal, run
+   `csrutil disable`, reboot, verify with `csrutil status` (should read `disabled`).
+   On Apple Silicon this also disables running iOS apps on the Mac. A VM snapshot first
+   is wise.
 
 3. **Flip it on in the server.** BlueBubbles Server → *Settings* → **Private API**
-   toggle on. There's no bundle to install by hand — the server injects the helper
-   itself. Hit refresh on the **Private API Status** box; it should report the
-   helper connected. (`GET /api/v1/server/info` then shows `"private_api": true`
-   and `"helper_connected": true` — the app reads this to decide whether to offer
-   tapbacks etc.)
+   toggle on — the server injects the helper itself, no separate bundle. Hit refresh on
+   the **Private API Status** box; it should report the helper connected.
+   (`GET /api/v1/server/info` shows `"private_api": true` and `"helper_connected": true`
+   — the app reads this to decide whether to offer tapbacks etc.)
 
-### Optional: full-color photo viewing
+### Optional features
 
-The Light Phone's grayscale is Android's accessibility color-correction filter,
-which apps can lift with a permission only grantable over adb. With it granted,
-tapping a photo in a thread shows it in **full color** for exactly as long as
-the viewer is open — the phone returns to grayscale the moment you dismiss it
-(the same trick as [zero](https://github.com/vandamd/zero)'s red-text mode):
+**Full-colour photo viewing.** The Light Phone's grayscale is Android's accessibility
+color-correction filter, which apps can lift with a permission grantable only over adb.
+Tapping a photo in a thread then shows it in full colour for exactly as long as the
+viewer is open — the phone returns to grayscale the moment you dismiss it (the same
+trick as [zero](https://github.com/vandamd/zero)'s red-text mode):
 
 ```sh
 adb shell pm grant com.gios.lightchat android.permission.WRITE_SECURE_SETTINGS
 ```
 
-One-time; it survives app updates. Without it, photos simply open in grayscale
-like the rest of the phone.
+One-time; survives app updates. Without it, photos open in grayscale like the rest of
+the phone.
 
-### Optional: heads-up messages
-
-A text arriving while you're somewhere else on the phone buzzes and drops a small
-box over whatever you're doing: sender, two lines of message, gone in four and a
-half seconds. Tap it to open the thread, swipe up to dismiss it early. It also
-wakes the panel, so a message arriving with the phone face-down still shows.
-
-Getting a window up from the background needs one appop, which on Android 14 is
-what exempts an app from background-activity-start restrictions:
+**Heads-up messages.** A text arriving while you're elsewhere buzzes and drops a small
+box over whatever you're doing: sender, two lines of message, gone in four and a half
+seconds. Tap it to open the thread, swipe up to dismiss it early. It also wakes the
+panel, so a message arriving with the phone face-down still shows. Getting a window up
+from the background needs one appop — on Android 14 this is what exempts an app from
+background-activity-start restrictions:
 
 ```sh
 adb shell appops set com.gios.lightchat SYSTEM_ALERT_WINDOW allow
 ```
 
-One-time; survives reboots and app updates. Without it you still get the buzz and
-the notification, just not the box.
+One-time; survives reboots and app updates. Without it you still get the buzz and the
+notification, just not the box.
 
-### Strongly recommended: don't miss messages while the phone sleeps
+### Don't miss messages while the phone sleeps
 
 Delivery is a socket LightChat holds open itself — there's no Google push on this phone
 — and a socket doesn't survive the phone sleeping. LightChat backs it with an
 `setAndAllowWhileIdle` alarm, the one kind that fires during Doze, which re-pulls the
 list and notifies for anything missed.
 
-What throttles that isn't really Doze, it's **App Standby buckets**. The longer the phone
-goes unused without LightChat being opened, the further Android demotes it — active →
-working set → frequent → rare → restricted — and each step defers its alarms harder. By
-`rare`, an alarm asking for five minutes is held for **two hours**; `restricted` holds it
-for a day. Which means the exact situation the poll exists for (phone face-down overnight,
-app not opened) is the situation Android throttles it out of, and the symptom is a phone
-that quietly stops telling you about texts until you pick it up.
-
-One command turns that off rather than negotiating with it:
+What actually throttles that isn't Doze, it's **App Standby buckets**. The longer the
+phone goes unused without LightChat being opened, the further Android demotes it —
+active → working set → frequent → rare → restricted — and each step defers its alarms
+harder. By `rare`, an alarm asking for five minutes is held for **two hours**;
+`restricted` holds it for a day — which means the exact situation the poll exists for
+(phone face-down overnight, app not opened) is the situation Android throttles it out
+of. One command turns that off rather than negotiating with it:
 
 ```sh
 adb shell dumpsys deviceidle whitelist +com.gios.lightchat
@@ -169,77 +171,107 @@ during Doze instead of a ~10 second window per alarm. LightChat notices and poll
 5 minutes instead of 10. Survives reboots and app updates.
 
 **Settings tells you whether it took.** The bottom of the Settings screen reads either
-`Background delivery: unrestricted` or `Background delivery: throttled (rare)`, plus when
-the app last actually heard from the server — which is the only way to tell from the phone
+`Background delivery: unrestricted` or `Background delivery: throttled (rare)`, plus
+when the app last actually heard from the server — the only way to tell from the phone
 that background delivery stopped hours ago rather than nobody having texted you.
 
 For instant delivery after a reboot without opening the app, enable Tailscale's
-**Always-on VPN** on the phone (Android Settings → Network → VPN) and leave
-"Block connections without VPN" **off** — the live socket reconnects the moment
-the tunnel comes up.
+**Always-on VPN** (Android Settings → Network → VPN) and leave "Block connections
+without VPN" **off** — the live socket reconnects the moment the tunnel comes up.
 
-## The wheel
+### The wheel
 
 Turning the brightness wheel scrolls whatever is up: a thread, the conversation list,
-contact search on the new-message screen, a group's member list, the photo grid, and the
-setup form. Only the turns — the wheel click and the camera button are left to the phone.
-
-Nothing else has to be installed for that, and nothing has to be granted. There is no
-service and no permission behind it: the wheel is a key event, LightChat has focus, so
-LightChat handles it.
+contact search on the new-message screen, a group's member list, the photo grid, and
+the setup form. Only the turns — the wheel click and the camera button belong to
+[LightControl](https://github.com/gi-os/LightControl), which owns them phone-wide and
+passes bare notches through to `com.gios.*` for exactly this.
 
 It works because the wheel arrives as an ordinary key event. Light patched
 `/system/usr/keylayout/Generic.kl` to label scancodes 19 and 20 `WHEEL_CCW`/`WHEEL_CW`,
-and nothing in `PhoneWindowManager` intercepts them, so they reach the focused window like
-any other key — which is also why an app that ignores the keycode appears to have a dead
-wheel. `hw/LightKeys.kt` resolves the labels at runtime and falls back to the raw scancode,
-gated on the sensor's device name so a paired keyboard's `r` can't scroll a thread.
+and nothing in `PhoneWindowManager` intercepts them, so they reach the focused window
+like any other key — which is also why an app that ignores the keycode appears to have
+a dead wheel. `hw/LightKeys.kt` resolves the labels at runtime and falls back to the raw
+scancode, gated on the sensor's device name so a paired keyboard's `r` can't scroll a
+thread.
 
-Reading a text is the case that makes the handling fussy, and most of the detail falls out
-of it. The keys are claimed in `dispatchKeyEvent`, above the view hierarchy, so a notch reaches
-the thread rather than the compose bar that has focus — and both halves of each DOWN+UP
-pair are swallowed, because a wheel that types into a half-written message is worse than
-one that does nothing. The thread's list is `reverseLayout`, which reverses its scroll axis
-too, so the sign is flipped for that one list; otherwise a notch upwards would head off
-towards last month while the page appeared to fall the other way. And notches are
-frame-timed rather than applied as they land: the sensor fires every ~35 ms, faster than a
-frame, and acting on each one gives a stack of jumps with nothing for the eye to follow.
-The first notch after a pause is also held until a second confirms it, since the wheel sits
-under a thumb and a stray brush shouldn't move the message you were reading. `hw/Wheel.kt`
-has the numbers.
+Reading a text is the case that makes the handling fussy. The keys are claimed in
+`dispatchKeyEvent`, above the view hierarchy, so a notch reaches the thread rather than
+the compose bar that has focus — and both halves of each DOWN+UP pair are swallowed,
+because a wheel that types into a half-written message is worse than one that does
+nothing. The thread's list is `reverseLayout`, which reverses its scroll axis too, so
+the sign is flipped for that one list. Notches are frame-timed rather than applied as
+they land — the sensor fires every ~35 ms, faster than a frame — and the first notch
+after a pause is held until a second confirms it, since the wheel sits under a thumb and
+a stray brush shouldn't move the message you were reading. `hw/Wheel.kt` has the
+numbers.
 
-[LightControl](https://github.com/gi-os/LightControl) is optional, and it fills in the parts
-of the wheel LightChat deliberately leaves alone: hold the wheel in and turn for brightness,
-tap it for the flashlight, the camera button to open the camera — each of those rebindable,
-tap and hold separately, to any installed app. It also gives brightness or a synthetic-swipe
-scroll to apps that carry no wheel code of their own, which is most of them.
+## Building
 
-Installing it doesn't take scrolling away. Bare turns are passed straight through to
-`com.gios.*`, `com.lightfastread` and `com.lightrss.reader` on purpose — LightChat is on that
-list, and the reason the list exists is that an app which already knows what a notch means
-scrolls better than a synthetic finger ever will.
-
-```bash
-# Optional: LightControl, for brightness, the flashlight and the camera button
-adb install -r LightControl-v1.0.x.apk
-
-# The key service. NOTE: this setting is a list, and this command REPLACES it —
-# if you also run LightVoice's push-to-talk, colon-join both components instead.
-adb shell settings put secure enabled_accessibility_services \
-  com.gios.lightcontrol/com.gios.lightcontrol.keys.ControlService
-adb shell settings put secure accessibility_enabled 1
-
-# Brightness, and the level readout + opening apps from the service
-adb shell appops set com.gios.lightcontrol WRITE_SETTINGS allow
-adb shell appops set com.gios.lightcontrol SYSTEM_ALERT_WINDOW allow
+```sh
+./gradlew :app:assembleDebug
 ```
 
-The latest build is at <https://github.com/gi-os/LightControl/releases/latest>.
+## Contributing
 
-## Install
+Solo repo, no PR workflow for the `gi-os` additions: commits go straight to `develop`,
+which is this repo's **default branch** — not `main`. Every push to `develop` triggers
+CI (the house `build.yml`, adopted in v1.0.7), which builds, signs, and publishes a
+GitHub Release. **A push is a release, not a cosmetic action** — verify before pushing,
+not after.
 
-Install the app via Obtainium.
+Signing is mandatory and the keystore is **not** committed (unlike the other `gi-os`
+repos) — it lives in repo secrets `KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` /
+`KEY_ALIAS` / `KEY_PASSWORD`, with the certificate pinned in `signing-fingerprint.txt`.
+`versionCode` is the workflow run number; `versionName` in the committed
+`build.gradle.kts` (currently `1.0.0`) is only the `major.minor` base — CI stamps
+`major.minor.RUN` at build time and tags it `vX.Y.Z`.
 
-## License
+## Version history
+
+Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
+`vX.Y.Z` CI convention and was tagged directly off build-script version bumps):
+
+| Version | What changed |
+| --- | --- |
+| v0.1.0 | First release: BlueBubbles client over AppleScript send |
+| v0.1.1 – v0.1.2 | App icon, capitalized name |
+| v0.1.3 – v0.1.4 | Group-chat send fixes, including forked-group sends via AppleScript |
+| v0.1.5 | Replies, group management, failed-send surfacing, absolute list times |
+| v0.1.6 | Unread markers, notification deep-links, full-screen image viewer |
+| v0.5.0 | Full-colour photo viewing (lifts LightOS's grayscale while the viewer is open) |
+| v0.6.x–ci / v0.7.1–v0.7.2 | Renamed to **LightChat** (`com.gios.lightchat`, repo `gi-os/LightChat`); Favorites/Known/Unknown tabs; own photo picker with inline camera; heads-up box + buzz for incoming messages |
+| v0.7.3 | Inline camera, photo picker runs in colour |
+| v0.7.4 | Heads-up overlay, mark-all-read, double-tap tapbacks, no `null` chats |
+| v0.7.5 | Fix: don't miss messages that arrive while the app is away |
+| v0.7.6 | Fix: actually check for messages while the phone is asleep |
+| v1.0.7 | Fix: always notify, even after the phone has been off for hours; adopts the house CI workflow |
+| v1.0.8 | Hardware wheel scrolls threads, the conversation list, contact search, and the photo grid |
+| v1.0.9 | README: documents what the wheel needs |
+
+## Licence
 
 [MIT](LICENSE).
+
+---
+
+## Upstream README (craigeley/chat)
+
+The following is Craig Eley's original README for `craigeley/chat`, kept as he wrote
+it, for attribution and history. It describes the base app this fork builds on; some
+details (package id, install instructions) are superseded by the sections above.
+
+> # chat
+>
+> An **iMessage client** for the [Light Phone III](https://www.thelightphone.com/),
+> inspired by and based on the apps created by [vandamd](https://github.com/vandamd).
+> The app works by talking to an always-on, self-hosted
+> [BlueBubbles Server](https://github.com/BlueBubblesApp/bluebubbles-server), reached
+> privately over [Tailscale](https://tailscale.com/).
+>
+> I built this to replace OpenBubbles on my LPIII, which I found to be both a battery
+> hog and very flaky in terms of displaying and ordering messages correctly.
+>
+> Open the app to a list of conversations (newest activity first); tap one to read the
+> thread, or tap **New** to start one (searches your contacts by name/number/email).
+> Tap **Messages** at the top for settings, **Refresh** to re-pull.
