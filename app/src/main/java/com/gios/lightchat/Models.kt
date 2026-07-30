@@ -320,6 +320,14 @@ data class IncomingMessage(
     val message: ChatMessage,
     val isNew: Boolean,
     val chatDisplayName: String,
+    /**
+     * The message's own JSON, as it arrived, with the embedded `chats` array stripped.
+     *
+     * Carried so a live message can be written to the local store in the same form the
+     * sync writes — the store keeps original JSON and re-parses it on the way out, so a
+     * re-serialised [ChatMessage] would be a second, lossier encoding of the same thing.
+     */
+    val raw: String = "",
 )
 
 /**
@@ -338,3 +346,37 @@ data class TypingEvent(val chatGuid: String, val typing: Boolean)
  * notification) when the user reads the thread on another device.
  */
 data class ReadStatusEvent(val chatGuid: String, val read: Boolean)
+
+/**
+ * Moves a conversation's list row forward for a newly arrived message.
+ *
+ * The rules are the sweep's rules, restated for one message at a time, and they have to
+ * stay in step with it because between them they decide what the list says:
+ *
+ * - Anything bumps **recency**, a tapback included — that is how iMessage behaves.
+ * - Only real speech becomes the **preview**. A group event has no text of its own and
+ *   would blank the row; a tapback gets surfaced as "Liz loved an image" instead, with the
+ *   older real message left underneath as the fallback.
+ * - **Unread** is decided by the newest non-group-event message: incoming with no
+ *   `dateRead` means unread account-wide, since chat.db stamps that when the chat is read
+ *   on any device. Group events never get a stamp and would pin the mark on forever.
+ *
+ * An out-of-order message — the delta pages ASC, but a room can still hand back something
+ * older than the row already shows — leaves the display fields alone.
+ */
+fun Conversation.advancedBy(
+    message: ChatMessage,
+    findTarget: (String) -> ChatMessage?,
+): Conversation {
+    if (message.date < lastDate) return this
+    val speech = !message.isReaction && !message.isGroupEvent
+    return copy(
+        lastDate = message.date,
+        lastText = if (speech) message.previewText else lastText,
+        lastFromMe = if (speech) message.fromMe else lastFromMe,
+        // Set only when the newest thing is a real tapback; a removal clears it and just
+        // bumps recency.
+        lastReaction = if (message.isReaction) message.reactionPreview(findTarget) else null,
+        unread = if (message.isGroupEvent) unread else !message.fromMe && message.dateRead == 0L,
+    )
+}

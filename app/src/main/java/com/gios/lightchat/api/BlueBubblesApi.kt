@@ -315,6 +315,65 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         return "g|${c.displayName}|${c.participants.sorted().joinToString(",")}"
     }
 
+    /**
+     * A page of raw message JSON, filtered by date — the primitive the local store syncs
+     * against.
+     *
+     * `after` and `before` are epoch millis and both are **inclusive** on the server
+     * (`message.date >= after`, `<= before`). Inclusive is the right side to err on: an
+     * exclusive `after` built by adding a millisecond would silently drop a message that
+     * shared its timestamp with the last one synced, and re-receiving the boundary message
+     * costs nothing because the store writes by (chat, guid).
+     *
+     * Returned raw rather than as [ChatMessage] because the store keeps the original JSON
+     * and the caller needs the embedded `chats` array to know which room each message
+     * belongs to.
+     */
+    fun messagePageJson(
+        after: Long? = null,
+        before: Long? = null,
+        chatGuid: String? = null,
+        limit: Int = 100,
+        offset: Int = 0,
+        sort: String = "DESC",
+        withChats: Boolean = true,
+    ): JSONArray {
+        val with = JSONArray().put("attachment")
+        if (withChats) with.put("chats").put("chats.participants")
+        val body = JSONObject()
+            .put("limit", limit.coerceAtMost(MAX_QUERY_LIMIT))
+            .put("offset", offset)
+            .put("with", with)
+            .put("sort", sort)
+        if (after != null && after > 0) body.put("after", after)
+        if (before != null && before > 0) body.put("before", before)
+        if (chatGuid != null) body.put("chatGuid", chatGuid)
+        val respText = requestChecked("POST", "/api/v1/message/query", body, what = "message/query")
+        return JSONObject(respText).optJSONArray("data") ?: JSONArray()
+    }
+
+    /**
+     * How many messages have had their *status* change since [after] — a delivery or read
+     * stamp, or an edit.
+     *
+     * The reason this is a count and not a fetch is that the server exposes no route for
+     * the messages themselves: `getUpdatedMessages` exists in its database layer but only
+     * `count/updated` is routed. So this is a probe. Non-zero means "something you already
+     * hold is now wrong", which is worth a cheap re-read of the recent window; the live
+     * socket is what normally carries those updates, and this covers the stretches when
+     * the socket wasn't there to hear them.
+     */
+    fun updatedCount(after: Long): Int {
+        val text = requestChecked(
+            "GET",
+            "/api/v1/message/count/updated",
+            null,
+            what = "message/count/updated",
+            extraQuery = "after=" + after,
+        )
+        return dataObject(text)?.optInt("total", 0) ?: 0
+    }
+
     /** `GET /api/v1/chat/:guid/message` — messages in one conversation, newest first. */
     fun messages(chatGuid: String, limit: Int = 100, offset: Int = 0): List<ChatMessage> {
         val path = "/api/v1/chat/${enc(chatGuid)}/message"
@@ -604,30 +663,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         lastText: String,
         lastDate: Long,
         lastFromMe: Boolean,
-    ): Conversation {
-        val participants = chat.optJSONArray("participants")?.let { arr ->
-            (0 until arr.length()).mapNotNull {
-                arr.getJSONObject(it).optString("address").takeIf { a -> a.isNotBlank() }
-            }
-        } ?: emptyList()
-        // 1:1 chats (style 45) come back with an empty participants list, but the
-        // chatIdentifier is the other party's address — use it so names resolve.
-        val resolved = participants.ifEmpty {
-            chat.optString("chatIdentifier")
-                .takeIf { it.isNotBlank() && !it.startsWith("chat") }
-                ?.let { listOf(it) }
-                ?: emptyList()
-        }
-        return Conversation(
-            guid = guid,
-            displayName = chat.string("displayName"),
-            participants = resolved,
-            isGroup = chat.optInt("style") == 43, // 43 = group, 45 = one-on-one
-            lastText = lastText,
-            lastDate = lastDate,
-            lastFromMe = lastFromMe,
-        )
-    }
+    ): Conversation = Companion.chatToConversation(chat, guid, lastText, lastDate, lastFromMe)
 
     // ---- transport --------------------------------------------------------
 
@@ -695,6 +731,9 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
      * calls use — the socket emits the same message-object shape.
      */
     companion object {
+        /** The server rejects anything larger (`limit: "numeric|min:1|max:1000"`). */
+        const val MAX_QUERY_LIMIT = 1000
+
         /** Interactive defaults: the user is looking at a spinner, so waiting is fine. */
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val READ_TIMEOUT_MS = 20_000
@@ -714,6 +753,59 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         /** A raw message row's creation date. Used by the sweep and the probe, which both
          *  need only the date and shouldn't pay to parse a whole [ChatMessage] for it. */
         fun messageDate(o: JSONObject): Long = o.optLong("dateCreated", 0L)
+
+
+        /**
+         * A chat object plus the message that is currently its newest, as a list row.
+         *
+         * In the companion because two callers build one: the full sweep, and the delta
+         * sync meeting a chat for the first time. Two implementations of "what does this
+         * row say" is how the list ends up disagreeing with itself.
+         */
+        fun chatToConversation(
+            chat: JSONObject,
+            guid: String,
+            lastText: String,
+            lastDate: Long,
+            lastFromMe: Boolean,
+        ): Conversation {
+            val participants = chat.optJSONArray("participants")?.let { arr ->
+                (0 until arr.length()).mapNotNull {
+                    arr.getJSONObject(it).optString("address").takeIf { a -> a.isNotBlank() }
+                }
+            } ?: emptyList()
+            // 1:1 chats (style 45) come back with an empty participants list, but the
+            // chatIdentifier is the other party's address — use it so names resolve.
+            val resolved = participants.ifEmpty {
+                chat.optString("chatIdentifier")
+                    .takeIf { it.isNotBlank() && !it.startsWith("chat") }
+                    ?.let { listOf(it) }
+                    ?: emptyList()
+            }
+            return Conversation(
+                guid = guid,
+                displayName = chat.string("displayName"),
+                participants = resolved,
+                isGroup = chat.optInt("style") == 43, // 43 = group, 45 = one-on-one
+                lastText = lastText,
+                lastDate = lastDate,
+                lastFromMe = lastFromMe,
+            )
+        }
+
+        /** As [chatToConversation], taking the fields off [message] — the delta's form. */
+        fun conversationFrom(chat: JSONObject, guid: String, message: ChatMessage): Conversation {
+            val speech = !message.isReaction && !message.isGroupEvent
+            return chatToConversation(
+                chat = chat,
+                guid = guid,
+                lastText = if (speech) message.previewText else "",
+                lastDate = message.date,
+                lastFromMe = message.fromMe,
+            ).copy(
+                unread = !message.isGroupEvent && !message.fromMe && message.dateRead == 0L,
+            )
+        }
 
         /** Body text, falling back to an attachment placeholder when null/blank. */
         fun messageText(o: JSONObject): String {
@@ -795,6 +887,11 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                 message = parseMessage(data),
                 isNew = isNew,
                 chatDisplayName = chat.string("displayName"),
+                // Stripped of `chats` to match what the sync stores: the chat object is
+                // held once in its own table, not repeated on every message of that chat.
+                raw = runCatching {
+                    JSONObject(data.toString()).apply { remove("chats") }.toString()
+                }.getOrDefault(""),
             )
         }
     }

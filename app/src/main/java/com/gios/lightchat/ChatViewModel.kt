@@ -11,6 +11,8 @@ import androidx.lifecycle.viewModelScope
 import com.gios.lightchat.api.ApiException
 import com.gios.lightchat.api.BlueBubblesApi
 import com.gios.lightchat.api.Store
+import com.gios.lightchat.db.MessageStore
+import com.gios.lightchat.db.Sync
 import com.gios.lightchat.socket.AppForeground
 import com.gios.lightchat.socket.SocketBus
 import com.gios.lightchat.socket.SocketService
@@ -43,6 +45,9 @@ data class UiState(
     val open: Conversation? = null,            // the currently-open thread, if any
     val messages: List<ChatMessage> = emptyList(),
     val threadLoading: Boolean = false,
+    val loadingOlder: Boolean = false,         // a history page is in flight (see loadOlder)
+    val historyExhausted: Boolean = false,     // the server has no messages older than these
+    val threadWindow: Int = 0,                 // how many of the open thread's messages are shown
     val contacts: Contacts = Contacts(),       // address → name, from the server's address book
     val contactList: List<Contact> = emptyList(), // searchable recipients for a new message
     val composingNew: Boolean = false,         // the "New message" compose screen is open
@@ -73,11 +78,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (url != null && pw != null) BlueBubblesApi(url, pw) else null
     }
 
+    /**
+     * The phone's own copy of the list and of whatever threads have been opened. The app
+     * used to re-download the newest thousand messages on the account on every launch just
+     * to know what the list said; now it reads that off disk and fetches only the delta.
+     */
+    private val store = MessageStore.get(application)
+    private var sync: Sync? = api?.let { Sync(it, store) }
+
     private val _state = MutableStateFlow(
         UiState(
             isConfigured = api != null,
             privateApi = Store.privateApi(application),
             favorites = Store.favorites(application),
+            // Straight off disk, synchronously, before anything is on screen: the list is
+            // the first thing drawn and there is no reason for it to be empty while a
+            // network round trip decides what it should have said. Also what makes the app
+            // usable with the tunnel down.
+            conversations = if (api != null) store.chats() else emptyList(),
+            contacts = Store.contacts(application),
         ),
     )
     val state: StateFlow<UiState> = _state
@@ -90,7 +109,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     // The address book is small (hundreds of contacts) and changes rarely, so we
     // fetch it once per session alongside the first conversation load and cache it.
-    private var contacts = Contacts()
+    private var contacts = Store.contacts(application)
     private var contactList = emptyList<Contact>()
     private var contactsLoaded = false
 
@@ -179,6 +198,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return null
         }
         api = client
+        sync = Sync(client, store)
         Store.setPrivateApi(app, info.privateApiReady)
         _state.update { it.copy(privateApi = info.privateApiReady, message = null) }
         return client
@@ -220,11 +240,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      *  no "Loading…", no scroll change, the cached list stays on screen until the fresh
      *  one lands. */
     private fun reopenThread(conversation: Conversation) {
-        val client = api ?: return
+        val syncer = sync ?: return
         threadJob?.cancel()
         threadJob = viewModelScope.launch(Dispatchers.IO) {
-            val results = conversation.guids.map { g -> runCatching { client.messages(g) } }
-            val msgs = results.mapNotNull { it.getOrNull() }.flatten().distinctBy { it.guid }
+            val msgs = runCatching { syncer.thread(conversation) }.getOrNull().orEmpty()
             if (msgs.isEmpty()) return@launch
             messageCache[conversation.guid] = msgs
             if (_state.value.open?.guid == conversation.guid) {
@@ -236,9 +255,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun loadConversations() {
         val client = api ?: return
-        _state.update { it.copy(status = Status.Loading, message = null) }
+        val syncer = sync ?: return
+        // Loading only when there is nothing to show. With rows on disk the list is already
+        // on screen and correct as of the last sync; putting a spinner over it to fetch a
+        // delta that is usually empty would be a worse app than the one that had no cache.
+        val hadRows = _state.value.conversations.isNotEmpty()
+        if (!hadRows) _state.update { it.copy(status = Status.Loading, message = null) }
         try {
-            val convos = client.conversations().sortedByDescending { it.lastDate }
+            val synced = syncer.refreshList()
+            if (synced == null && hadRows) {
+                // Unreachable, but the phone still knows what it knew. Stay on the cached
+                // list rather than throwing it away or showing an error over it.
+                _state.update { it.copy(status = Status.Ready) }
+                return
+            }
+            val convos = (synced ?: store.chats()).sortedByDescending { it.lastDate }
                 // Honor unreads already cleared on this device (see clearedUnread).
                 .map { c ->
                     if (c.unread && (clearedUnread[c.guid] ?: 0L) >= c.lastDate) c.copy(unread = false) else c
@@ -303,6 +334,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // ---- One thread -------------------------------------------------------
 
     fun open(conversation: Conversation) {
+        // The in-memory cache is free and renders this frame. The on-disk one is read a
+        // moment later, in the thread job — parsing fifty messages and their attachment
+        // metadata is not something to do on the frame that handles the tap.
         val cached = messageCache[conversation.guid]
         openRaw = cached ?: emptyList()
         _state.update {
@@ -310,6 +344,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 open = conversation,
                 messages = cached?.let(::foldReactions) ?: emptyList(),
                 threadLoading = cached == null,
+                loadingOlder = false,
+                historyExhausted = false,
+                // Every thread starts showing its newest page and grows as it is scrolled.
+                threadWindow = MessageStore.PAGE,
             )
         }
         conversation.guids.forEach { markReadIfPrivate(it) }
@@ -321,16 +359,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         PendingAlerts.clear(conversation.guids)
         threadJob?.cancel()
         threadJob = viewModelScope.launch(Dispatchers.IO) {
-            val client = api ?: return@launch
+            val syncer = sync ?: return@launch
             try {
-                // Raw — reactions included; merged across a forked group's sibling
-                // rooms (usually just one guid) and re-sorted by date in foldReactions.
-                // Fetch each room independently so a single stale/dead room can't sink
-                // the whole thread; only surface an error if every room failed (so an
-                // auth failure still reaches handleError → sign-out).
-                val results = conversation.guids.map { g -> runCatching { client.messages(g) } }
-                val msgs = results.mapNotNull { it.getOrNull() }.flatten().distinctBy { it.guid }
-                if (msgs.isEmpty()) results.firstNotNullOfOrNull { it.exceptionOrNull() }?.let { throw it }
+                // Disk first: reopening a thread after the process was killed used to show
+                // "Loading…" and refetch a hundred messages. Now the stored copy is on
+                // screen before the network is touched.
+                if (cached == null) {
+                    val onDisk = store.messages(conversation.guids, limit = MessageStore.PAGE)
+                    if (onDisk.isNotEmpty() && _state.value.open?.guid == conversation.guid) {
+                        openRaw = onDisk
+                        _state.update { it.copy(messages = foldReactions(onDisk), threadLoading = false) }
+                    }
+                }
+                // Raw — reactions included; merged across a forked group's sibling rooms
+                // (usually just one guid) and re-sorted by date in foldReactions. Sync
+                // decides what to ask for: everything on the first open of a chat, and
+                // only what is newer than the newest message held on every open after
+                // that. Each room is fetched independently so one stale or dead room of a
+                // forked group can't sink the whole thread.
+                val msgs = syncer.thread(conversation)
                 messageCache[conversation.guid] = msgs
                 if (_state.value.open?.guid == conversation.guid) {
                     openRaw = msgs
@@ -339,6 +386,55 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             } catch (t: Throwable) {
                 _state.update { if (it.open?.guid == conversation.guid) it.copy(threadLoading = false) else it }
                 handleError(t)
+            }
+        }
+    }
+
+    /**
+     * Fetches the page of history under what is held, when the thread is scrolled to the top
+     * of it.
+     *
+     * **This is the only thing in the app that asks for old messages**, and it only runs
+     * because somebody scrolled to the end of a conversation. Everything else — the list,
+     * the delta sync, opening a thread — deals exclusively in what is new. A chat nobody
+     * scrolls back through never costs more than its most recent page.
+     *
+     * Guarded three ways: not while one is already in flight, not once the server has said
+     * there is nothing older ([UiState.historyExhausted]), and not before the first page has
+     * landed.
+     */
+    fun loadOlder() {
+        val conversation = _state.value.open ?: return
+        val syncer = sync ?: return
+        if (_state.value.loadingOlder || _state.value.historyExhausted) return
+        // Not while the open fetch is still running: both assign openRaw, and whichever
+        // landed second won — which on a short thread meant a page of history being
+        // clobbered straight back to the newest fifty.
+        if (_state.value.threadLoading || threadJob?.isActive == true) return
+        if (openRaw.isEmpty()) return
+        // The window grows by a page each time. Returning a fixed size meant that once the
+        // thread reached it, every further fetch wrote rows nobody could see, the message
+        // count never changed, and the trigger never re-armed — a silent dead end a couple
+        // of hundred messages back.
+        val window = _state.value.threadWindow + MessageStore.PAGE
+        _state.update { it.copy(loadingOlder = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val older = runCatching { syncer.olderThan(conversation, window) }.getOrNull()
+            if (_state.value.open?.guid != conversation.guid) {
+                _state.update { it.copy(loadingOlder = false) }
+                return@launch
+            }
+            if (older == null) {
+                // Nothing came back, so this is the start of the conversation. Recorded in
+                // the store as well as in state, so reopening the thread tomorrow doesn't
+                // ask for the same empty page again.
+                _state.update { it.copy(loadingOlder = false, historyExhausted = true) }
+                return@launch
+            }
+            messageCache[conversation.guid] = older
+            openRaw = older
+            _state.update {
+                it.copy(messages = foldReactions(older), loadingOlder = false, threadWindow = window)
             }
         }
     }
@@ -398,6 +494,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         if (_state.value.open == null) { openRaw = emptyList(); threadJob?.cancel() }
+        messageCache.remove(conversation.guid)
+        viewModelScope.launch(Dispatchers.IO) { runCatching { store.deleteChat(conversation.guids) } }
         messageCache.remove(conversation.guid)
         viewModelScope.launch(Dispatchers.IO) {
             val failed = conversation.guids.any { runCatching { client.deleteChat(it) }.isFailure }
@@ -1079,9 +1177,30 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _state.value.conversations.firstOrNull { incoming.chatGuid in it.guids }
                 ?.let { clearUnread(it.guid) }
         }
+        // **Persist it.** Without this the store would drift from what is on screen, and the
+        // next launch would read a list missing everything that arrived while the app was
+        // open — then fetch it all again. The message body is only kept for threads that
+        // have actually been opened; for the rest the list row is all the app shows.
+        persistIncoming(incoming)
         // A message for a chat not currently in the list (e.g. a brand-new
         // conversation) — pull the list again so it appears with full metadata.
         if (!known) refresh()
+    }
+
+    /** Writes a live message and its list row through to the store, off the main thread. */
+    private fun persistIncoming(incoming: IncomingMessage) {
+        val rows = _state.value.conversations.filter { incoming.chatGuid in it.guids }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                if (rows.isNotEmpty()) store.putChats(rows)
+                if (incoming.raw.isNotBlank() && store.isThreadLoaded(incoming.chatGuid)) {
+                    store.putMessages(
+                        listOf(MessageStore.Row(incoming.chatGuid, incoming.message, incoming.raw)),
+                    )
+                    store.trim(incoming.chatGuid)
+                }
+            }
+        }
     }
 
     /** A `chat-read-status-changed` from the socket: the chat was read somewhere
@@ -1101,6 +1220,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (!convo.unread) return
         _state.update { s ->
             s.copy(conversations = s.conversations.map { if (it.guid == convoGuid) it.copy(unread = false) else it })
+        }
+        // **Written through, not just to state.** The delta filters on creation date, so a
+        // message whose `dateRead` is stamped afterwards is never re-fetched and the stored
+        // row keeps `unread = true` for good. The old full sweep re-derived it from
+        // `dateRead` every launch and so got away with an in-memory clear; this one would
+        // resurrect the dot on every process restart, on every chat that has since gone
+        // quiet.
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { store.putChats(listOf(convo.copy(unread = false))) }
         }
     }
 
@@ -1197,12 +1325,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun signOut() = signOutInternal(null)
 
+    /** The store holds the account's messages, so it goes when the password does. Off the
+     *  main thread: three unbounded DELETEs over a database that may have run for months. */
+    private fun clearStore() {
+        viewModelScope.launch(Dispatchers.IO) { runCatching { store.clear() } }
+    }
+
     private fun signOutInternal(message: String?) {
         loadJob?.cancel()
         threadJob?.cancel()
         api = null
+        sync = null
         stopSocket()
         Store.signOut(app)
+        clearStore()
+        messageCache.clear()
         _state.value = UiState(isConfigured = false, message = message)
     }
 

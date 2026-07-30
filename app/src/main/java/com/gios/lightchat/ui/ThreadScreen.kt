@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
@@ -166,6 +167,28 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                     Text(text = "Loading…", style = ChatType.body, color = ChatColors.onSurfaceDisabled)
                 }
             } else {
+                /**
+                 * **Scrolling to the top of the conversation fetches the page under it.**
+                 *
+                 * The thread holds only what has been looked at — a chat is not downloaded
+                 * in full just because it exists — so reaching the oldest message held is
+                 * the moment to ask for more. `reverseLayout` means "up" is toward the *end*
+                 * of the list, so it's the last visible index that matters, not the first.
+                 *
+                 * `derivedStateOf` so this recomputes on scroll without recomposing the
+                 * whole thread on every frame of it, and the effect is keyed on the flag
+                 * rather than on the scroll position so one crossing fires one fetch.
+                 */
+                val nearOldest by remember(convo.guid) {
+                    derivedStateOf {
+                        val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
+                        val total = state.messages.size
+                        last != null && total > 0 && last >= total - OLDER_TRIGGER_DISTANCE
+                    }
+                }
+                LaunchedEffect(nearOldest, convo.guid) {
+                    if (nearOldest) viewModel.loadOlder()
+                }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -201,6 +224,19 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                             },
                             onDismissPicker = { reactingTo = null },
                         )
+                    }
+                    // Drawn last so reverseLayout puts it above the oldest message — where
+                    // the eye already is when this fires.
+                    if (state.loadingOlder) {
+                        item(key = "older-loading") {
+                            Text(
+                                text = "…",
+                                style = ChatType.hint,
+                                color = ChatColors.onSurfaceDisabled,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -692,3 +728,12 @@ private fun AttachmentFile(attachment: Attachment, textAlign: TextAlign, onOpen:
         onClick = onOpen,
     )
 }
+
+/**
+ * How close to the oldest message held counts as "reached the end".
+ *
+ * Two rows of slack rather than exactly the last one, so the page is already being fetched
+ * by the time the scroll gets there and history appears without a stall. More slack than
+ * this and a thread fetches a page nobody was going to read.
+ */
+private const val OLDER_TRIGGER_DISTANCE = 3

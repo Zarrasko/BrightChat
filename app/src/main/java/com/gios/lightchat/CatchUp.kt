@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.gios.lightchat.api.BlueBubblesApi
 import com.gios.lightchat.api.Store
+import com.gios.lightchat.db.MessageStore
 import com.gios.lightchat.socket.AppForeground
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -131,6 +132,13 @@ object CatchUp {
         }
 
         val convos = sweep.conversations
+        // **The background poll keeps the on-disk list fresh too.** It has just paid for
+        // this data; letting it evaporate would mean the next launch showed a stale list and
+        // then re-fetched the same thing. Chats only, deliberately — `syncedAt` is left
+        // alone, so the app's own delta still re-reads these messages and stores the bodies
+        // for whichever threads are actually open. Advancing it here would skip them.
+        runCatching { MessageStore.get(app).putChats(convos) }
+            .onFailure { Log.d(TAG, "couldn't cache the list: $it") }
         // `newest` as the floor as well as `seen`: a row the collapse skipped (no embedded
         // chat) would otherwise leave `seen` permanently below the probe's answer, so the
         // cheap short-circuit above could never fire again and every poll would pay for a
