@@ -190,6 +190,17 @@ The messages still arrive: they appear in the list with an unread mark and open 
 just don't interrupt. **Settings → Unknown senders** switches it, and "known" is the same test
 the list's Known tab uses — a named group, or any participant in your address book.
 
+### Photos from Roll
+
+[Roll](https://github.com/gi-os/LightCamera), the camera app, sends straight here: its send
+button opens your contacts, you pick a person, and LightChat opens on that thread with the
+photograph already sent. No chooser in between.
+
+That works because LightChat registers as an image share target and reads the recipient from
+the share's `address` extra — the same convention the stock messaging apps use, so anything
+else that shares a photo to LightChat works too, it just lands on the conversation list and
+waits for you to pick a thread.
+
 ### The wheel
 
 Turning the brightness wheel scrolls whatever is up: a thread, the conversation list,

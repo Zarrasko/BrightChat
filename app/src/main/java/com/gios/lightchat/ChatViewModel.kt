@@ -357,6 +357,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // for it — otherwise leaving the app would post a notification for the message
         // just read. See PendingAlerts.
         PendingAlerts.clear(conversation.guids)
+        // A share that arrived without a recipient was waiting for exactly this.
+        flushPendingShared()
         threadJob?.cancel()
         threadJob = viewModelScope.launch(Dispatchers.IO) {
             val syncer = sync ?: return@launch
@@ -978,6 +980,93 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(message = t.message ?: "Couldn’t send image") }
             }
         }
+    }
+
+    /**
+     * Photographs shared in from another app, optionally already addressed.
+     *
+     * With an address this is the whole point of the feature: Roll asked who the photograph
+     * was for, so there is nothing left to choose and the send goes straight out — the thread
+     * opens with the picture already in it rather than opening a picker the user has just
+     * used.
+     *
+     * Without one, they are held and the user is put on the conversation list to pick a
+     * thread. Only a share from a chooser that could not name the recipient reaches that
+     * branch, and guessing would be worse than asking.
+     *
+     * Sequential rather than parallel, like [sendImageFiles]: iMessage has no batch send and
+     * racing several attachments lands them out of order.
+     */
+    fun receiveShared(address: String, files: List<File>) {
+        if (files.isEmpty()) return
+        if (address.isBlank()) {
+            pendingShared = files
+            _state.update {
+                it.copy(
+                    open = null,
+                    composingNew = false,
+                    message = if (files.size == 1) {
+                        "Open a chat to send the photo"
+                    } else {
+                        "Open a chat to send ${files.size} photos"
+                    },
+                )
+            }
+            return
+        }
+        _state.update { it.copy(composingNew = false, open = null, message = "Sending…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            val client = api ?: return@launch
+            val handle = imessageHandle(address)
+            // Constructed rather than looked up, exactly as sendNewImage does: a 1:1 chat's
+            // guid *is* its handle, so this addresses an existing thread and creates one that
+            // doesn't exist without needing to know which case it is.
+            val guid = "iMessage;-;$handle"
+            var sent = 0
+            for (file in files) {
+                val img = readPickedImage(file) ?: continue
+                val ok = runCatching {
+                    client.sendAttachment(guid, img.bytes, img.name, img.mime, newTempGuid(), sendMethod())
+                }.isSuccess
+                if (ok) sent++
+                // The copy in our cache has served its purpose either way; leaving it means
+                // every shared photo stays on the phone twice.
+                runCatching { file.delete() }
+            }
+            if (sent == 0) {
+                _state.update { it.copy(message = "Couldn’t send that photo") }
+                return@launch
+            }
+            messageCache.remove(guid)
+            val convo = Conversation(
+                guid = guid,
+                displayName = "",
+                participants = listOf(handle),
+                isGroup = false,
+                lastText = if (sent == 1) "[Photo]" else "[$sent Photos]",
+                lastDate = System.currentTimeMillis(),
+                lastFromMe = true,
+            )
+            _state.update { it.copy(message = null) }
+            open(convo)
+            refresh()
+        }
+    }
+
+    /**
+     * Photographs shared in without a recipient, waiting for a thread to be opened.
+     *
+     * In memory only: a share the user abandons should not still be pending tomorrow, and the
+     * files are in the cache directory, which the system may clear whenever it likes.
+     */
+    private var pendingShared: List<File> = emptyList()
+
+    /** Called from [open]: if a share is waiting, the thread just opened is its destination. */
+    private fun flushPendingShared() {
+        val waiting = pendingShared
+        if (waiting.isEmpty()) return
+        pendingShared = emptyList()
+        sendImageFiles(waiting)
     }
 
     /** Normalizes a picked address to the E.164 (or lowercased email) handle that

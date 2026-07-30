@@ -3,6 +3,7 @@ package com.gios.lightchat
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
@@ -37,6 +38,9 @@ import com.gios.lightchat.ui.SettingsScreen
 import com.gios.lightchat.ui.SetupScreen
 import com.gios.lightchat.ui.ThreadScreen
 import com.gios.lightchat.ui.theme.LightChatTheme
+
+/** The recipient extra on an incoming share. AOSP messaging's key, and what Roll sends. */
+private const val SHARE_EXTRA_ADDRESS = "address"
 
 class MainActivity : ComponentActivity() {
 
@@ -92,6 +96,7 @@ class MainActivity : ComponentActivity() {
         }
         handlePasswordExtra(intent)
         handleChatGuidExtra(intent)
+        handleSharedImages(intent)
     }
 
     // Hide the status + navigation bars for a full-screen, edge-to-edge look
@@ -170,7 +175,61 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handlePasswordExtra(intent)
         handleChatGuidExtra(intent)
+        handleSharedImages(intent)
     }
+
+    /**
+     * A photograph shared in from another app — Roll's send picker, or anything else that
+     * registers an image share.
+     *
+     * **The URIs are copied into this app's cache before anything else happens.** A share
+     * grant is scoped to the receiving *activity's* lifetime, so holding the URI and reading
+     * it later — after the send coroutine has been rescheduled, or after a configuration
+     * change — hands back a SecurityException that looks like a corrupt photograph. Copying
+     * is also what makes the existing send path usable unchanged: it takes `File`s, because
+     * the in-app picker walks the filesystem directly rather than going through MediaStore.
+     *
+     * The recipient rides in an `address` extra — the AOSP messaging convention, and what
+     * Roll sends. Absent, the photographs wait until a thread is opened.
+     */
+    private fun handleSharedImages(intent: Intent?) {
+        if (intent == null) return
+        val uris: List<Uri> = when (intent.action) {
+            Intent.ACTION_SEND ->
+                @Suppress("DEPRECATION")
+                listOfNotNull(intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))
+
+            Intent.ACTION_SEND_MULTIPLE ->
+                @Suppress("DEPRECATION")
+                intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
+
+            else -> return
+        }
+        if (uris.isEmpty()) return
+        // Consumed, so an activity recreation doesn't send the same photographs twice.
+        intent.removeExtra(Intent.EXTRA_STREAM)
+        val address = intent.getStringExtra(SHARE_EXTRA_ADDRESS)?.trim().orEmpty()
+        intent.removeExtra(SHARE_EXTRA_ADDRESS)
+        val files = uris.mapNotNull { copyIntoCache(it) }
+        if (files.isEmpty()) return
+        viewModel.receiveShared(address, files)
+    }
+
+    /** Copies a shared URI into `cacheDir/shared-in`, returning null if it can't be read. */
+    private fun copyIntoCache(uri: Uri): java.io.File? = runCatching {
+        val dir = java.io.File(cacheDir, "shared-in").apply { mkdirs() }
+        // The name only has to carry a plausible extension — the send reads the mime type
+        // off it — and be unique enough that two shares in a row don't collide.
+        val extension = contentResolver.getType(uri)
+            ?.substringAfterLast('/', "")
+            ?.takeIf { it.isNotBlank() && it.length <= 5 }
+            ?: "jpg"
+        val out = java.io.File(dir, "share-" + System.nanoTime() + "." + extension)
+        contentResolver.openInputStream(uri)?.use { input ->
+            out.outputStream().use { input.copyTo(it) }
+        } ?: return@runCatching null
+        out.takeIf { it.length() > 0 }
+    }.getOrNull()
 
     /** A tapped message notification carries its chat's guid — jump straight to
      *  that thread rather than wherever the app was left. */

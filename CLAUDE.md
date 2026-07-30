@@ -321,6 +321,21 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   disagree: a filter that differs between them lets a stranger through whenever the phone happened
   to be asleep. Note `CatchUp` advances the watermark past a filtered message — suppressing it is
   a decision, not a deferral, and holding the line would re-examine it on every poll forever.
+  **Receiving a shared photo (done):** `MainActivity` registers `ACTION_SEND` /
+  `ACTION_SEND_MULTIPLE` for `image/*`, which is what makes LightChat a share target at all —
+  without the filter an explicit intent aimed at this package resolves to nothing, so Roll's
+  send button reported "LightChat can't receive photos" on a phone with LightChat installed.
+  The two actions are separate and carry differently typed `EXTRA_STREAM` (a `Uri` vs an
+  `ArrayList<Uri>`), so both are declared. **The URIs are copied into `cacheDir/shared-in`
+  before anything else happens**: a share grant is scoped to the receiving *activity's*
+  lifetime, so reading one later — after the send coroutine is rescheduled, or after a
+  configuration change — throws a SecurityException that presents as a corrupt image. Copying
+  also lets the existing send path work unchanged, since it takes `File`s (the in-app picker
+  walks the filesystem, not MediaStore). The recipient arrives in an `address` extra (AOSP
+  messaging's convention, and what Roll sends) and `ChatViewModel.receiveShared` sends
+  straight to `iMessage;-;<handle>` — constructed, not looked up, like `sendNewImage`, so it
+  addresses an existing thread or creates one without needing to know which. With no address
+  the photos are held in `pendingShared` and flushed by the next `open()`.
   **Notification deep-links (done):** message notifications are per-chat (id
   hashed from the chat guid, so each thread keeps its own and a newer message
   replaces it) and tapping one opens that thread: the PendingIntent carries

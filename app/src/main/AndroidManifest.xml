@@ -53,6 +53,24 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!--
+                Receiving a photograph. Without these filters LightChat cannot be a share
+                target at all — an explicit ACTION_SEND aimed at this package resolves to
+                nothing, which is why Roll's send button reported that LightChat can't take
+                photos on a phone with LightChat installed, and fell back to a chooser.
+
+                SEND and SEND_MULTIPLE are separate actions carrying differently typed extras
+                (a Uri versus an ArrayList<Uri>), so registering one does not register the
+                other. Roll additionally passes an `address` extra naming the recipient, which
+                is the AOSP messaging convention; a sender that omits it still works, the
+                photo just waits for a thread to be opened.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
         </activity>
 
         <!-- The incoming-message box. Floating and sized to its content (see
