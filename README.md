@@ -179,6 +179,17 @@ For instant delivery after a reboot without opening the app, enable Tailscale's
 **Always-on VPN** (Android Settings → Network → VPN) and leave "Block connections
 without VPN" **off** — the live socket reconnects the moment the tunnel comes up.
 
+### Unknown senders
+
+**Silent by default.** An iMessage account that has been around a while gets a steady trickle
+from short codes, delivery notices, two-factor senders and whoever last had your number — and on
+this phone each one buzzes, wakes the panel and drops a box over whatever you were doing. So out
+of the box only your contacts and named groups do that.
+
+The messages still arrive: they appear in the list with an unread mark and open normally, they
+just don't interrupt. **Settings → Unknown senders** switches it, and "known" is the same test
+the list's Known tab uses — a named group, or any participant in your address book.
+
 ### The wheel
 
 Turning the brightness wheel scrolls whatever is up: a thread, the conversation list,

@@ -107,6 +107,36 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        // Off by default: an old iMessage account gets a steady trickle from short codes,
+        // delivery notices and two-factor senders, and on this phone every one of them buzzes,
+        // wakes the panel and puts a box in front of what you were doing. Filtered messages still
+        // arrive and still carry an unread mark — they just don't interrupt.
+        var notifyUnknown by remember { mutableStateOf(Store.notifyUnknown(context)) }
+        HapticText(
+            text = if (notifyUnknown) "Unknown senders: notify" else "Unknown senders: silent",
+            style = ChatType.body,
+            color = ChatColors.onSurfaceDim,
+            textAlign = TextAlign.Center,
+            onClick = {
+                notifyUnknown = !notifyUnknown
+                Store.setNotifyUnknown(context, notifyUnknown)
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = if (notifyUnknown) {
+                "Anyone can buzz this phone."
+            } else {
+                "Only your contacts and named groups buzz. The rest still arrive, quietly."
+            },
+            style = ChatType.hint,
+            color = ChatColors.onSurfaceDisabled,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
         HapticText(
             text = "Refresh conversations",
             style = ChatType.body,

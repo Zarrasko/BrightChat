@@ -23,6 +23,7 @@ object Store {
     private const val KEY_POLL_AT = "poll_at"         // last catch-up attempt, wall clock
     private const val KEY_POLL_OK_AT = "poll_ok_at"   // last catch-up that reached the server
     private const val KEY_POLL_FAILS = "poll_fails"   // consecutive failures
+    private const val KEY_NOTIFY_UNKNOWN = "notify_unknown" // alert for senders not in the address book
 
     /** The configured BlueBubbles Server URL, or null if setup hasn't run yet. */
     fun baseUrl(context: Context): String? =
@@ -137,6 +138,26 @@ object Store {
             edit.putInt(KEY_POLL_FAILS, pollFailures(context) + 1)
         }
         edit.apply()
+    }
+
+    /**
+     * Whether a message from somebody not in the address book should raise an alert.
+     *
+     * **Off by default**, which is the whole point of it. An iMessage account that has existed for
+     * years receives a steady trickle from short codes, delivery services, two-factor senders and
+     * whoever last had your number — and on this phone every one of those buzzes, lights the panel
+     * and puts a box in front of whatever you were doing. The messages still arrive and still show
+     * an unread mark in the list; they just don't interrupt.
+     *
+     * "Known" is [Contacts.knows]: a named group, or any participant in the address book. Same
+     * definition as the list's Known tab, so what the setting does is exactly "alert me about the
+     * Known and Favourites tabs" — no second notion of who counts as a stranger.
+     */
+    fun notifyUnknown(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_NOTIFY_UNKNOWN, false)
+
+    fun setNotifyUnknown(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_NOTIFY_UNKNOWN, value).apply()
     }
 
     /** Sign out: wipe the stored password. */

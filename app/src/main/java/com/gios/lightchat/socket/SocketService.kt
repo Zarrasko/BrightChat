@@ -18,6 +18,7 @@ import com.gios.lightchat.HeadsUp
 import com.gios.lightchat.Notifications
 import com.gios.lightchat.PendingAlerts
 import com.gios.lightchat.PollAlarm
+import com.gios.lightchat.SenderFilter
 import com.gios.lightchat.ReadStatusEvent
 import com.gios.lightchat.TypingEvent
 import com.gios.lightchat.api.BlueBubblesApi
@@ -291,14 +292,24 @@ class SocketService : Service() {
         val data = args?.firstOrNull() as? JSONObject ?: return
         val incoming = BlueBubblesApi.messageEvent(data, isNew) ?: return
         SocketBus.incoming.tryEmit(incoming)
-        val alertable = isNew && !incoming.message.fromMe && !incoming.message.isGroupEvent
+        // Read once: this is a JSON parse per call, and both the filter and the title want it.
+        val contacts = contacts()
+        val alertable = isNew &&
+            !incoming.message.fromMe &&
+            !incoming.message.isGroupEvent &&
+            // A stranger doesn't interrupt unless you've asked to be interrupted. The message
+            // still arrives above — only the alert is gated. See SenderFilter.
+            SenderFilter.mayAlert(
+                this,
+                SenderFilter.knownSender(contacts, incoming.chatDisplayName, incoming.message.sender),
+            )
         // Arrived while the app was open. Not necessarily *seen*: the user can be on the
         // list, or in another thread, and pressing the power button from there used to mean
         // the message was never recorded anywhere. Hold it for the screen going off
         // instead — see PendingAlerts.
         if (alertable && AppForeground.active) {
             val title = incoming.chatDisplayName.ifBlank {
-                incoming.message.sender?.let { contacts().name(it) ?: it } ?: "Message"
+                incoming.message.sender?.let { contacts.name(it) ?: it } ?: "Message"
             }
             PendingAlerts.add(incoming.chatGuid, title, incoming.message.text, incoming.message.date)
         }
@@ -310,7 +321,7 @@ class SocketService : Service() {
             // the raw address. Read fresh so it reflects the latest address book.
             val title = incoming.chatDisplayName.ifBlank {
                 val sender = incoming.message.sender
-                sender?.let { contacts().name(it) ?: it } ?: "Message"
+                sender?.let { contacts.name(it) ?: it } ?: "Message"
             }
             // The notification is the record — it stays in LightOS's list and feeds
             // LightGlance's dot. The box is the alert, and buzzes either way.

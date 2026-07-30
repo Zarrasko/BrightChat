@@ -136,16 +136,21 @@ object CatchUp {
         // cheap short-circuit above could never fire again and every poll would pay for a
         // full sweep. Safe — the sweep was issued after the probe, so it covers it.
         val seen = maxOf(convos.maxOfOrNull { it.lastDate } ?: 0L, newest)
+        val contacts = Store.contacts(app)
         // Incoming, unread account-wide (a dateRead stamp means it was read on some device),
         // newer than the line. Anything newer that fails this is either our own message or
         // one already read, and the watermark may safely pass it.
-        val missed = convos.filter { it.unread && !it.lastFromMe && it.lastDate > watermark }
+        val missed = convos
+            .filter { it.unread && !it.lastFromMe && it.lastDate > watermark }
+            // Strangers, unless asked for. The watermark still passes a filtered message —
+            // suppressing it is a decision, not a deferral, so it must not be re-examined every
+            // poll for the rest of time. See SenderFilter.
+            .filter { SenderFilter.mayAlert(app, contacts.knows(it)) }
         if (missed.isEmpty()) {
             Store.setLastAlertedAt(app, maxOf(watermark, seen))
             return true
         }
 
-        val contacts = Store.contacts(app)
         val titled = missed.map { convo ->
             val title = convo.displayName.ifBlank {
                 convo.participants.firstOrNull()?.let { contacts.name(it) ?: it } ?: "Message"

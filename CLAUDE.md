@@ -309,6 +309,18 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   watermark is the durable backstop), cleared when the thread is opened, and posted as
   plain notifications — no buzz, no box — from `MainActivity.onStop`, which on this phone
   means the screen went off.
+  **Unknown senders are silent by default (done):** an iMessage account that has existed for
+  years receives a steady trickle from short codes, delivery notices, two-factor senders and
+  whoever last had the number, and on this phone every one of them buzzed, woke the panel and put
+  a box in front of whatever was on screen. `Store.notifyUnknown` (default **false**, Settings →
+  "Unknown senders") gates the *alert* only — a filtered message still merges into the thread,
+  still bumps the list and still carries its unread mark. "Known" is `Contacts.knows`: a named
+  group, or any participant in the address book — deliberately the same definition as the list's
+  Known tab, so the setting reads as "alert me about Known and Favourites" rather than introducing
+  a second notion of a stranger. `SenderFilter` exists so the socket path and `CatchUp` cannot
+  disagree: a filter that differs between them lets a stranger through whenever the phone happened
+  to be asleep. Note `CatchUp` advances the watermark past a filtered message — suppressing it is
+  a decision, not a deferral, and holding the line would re-examine it on every poll forever.
   **Notification deep-links (done):** message notifications are per-chat (id
   hashed from the chat guid, so each thread keeps its own and a newer message
   replaces it) and tapping one opens that thread: the PendingIntent carries
@@ -366,6 +378,10 @@ clears the password and returns to setup.
   with everything else. Also caches the **Private API flag** (`privateApi`/
   `setPrivateApi`) read from `server/info`, so the UI knows on launch whether to
   offer tapbacks before the first refresh lands.
+- **`SenderFilter`** (`SenderFilter.kt`) — the one place that decides whether a message may
+  interrupt. Two callers (`SocketService.onMessage` for live messages, `CatchUp` for the poll)
+  holding different shapes of the same fact, so it takes a `known` boolean rather than deriving it;
+  `knownSender` is the socket's version, off a single incoming message.
 - **`SecureStore`** (`api/SecureStore.kt`) — at-rest encryption only. An
   AES-256-GCM key lives non-exportable in the AndroidKeyStore (hardware-backed)
   and encrypts the password. (Trimmed down from `ask`'s version — no Ed25519 /
