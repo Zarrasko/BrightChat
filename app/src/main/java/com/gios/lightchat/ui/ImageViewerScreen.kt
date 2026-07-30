@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.material3.Text
 import com.gios.lightchat.Attachment
 import com.gios.lightchat.ColorMode
+import com.gios.lightchat.hw.WheelScroll
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.delay
 import com.gios.lightchat.ui.theme.ChatColors
@@ -120,6 +122,22 @@ fun ImageViewerScreen(
         val maxY = container.height * (s - 1f) / 2f
         return Offset(o.x.coerceIn(-maxX, maxX), o.y.coerceIn(-maxY, maxY))
     }
+
+    // The wheel pans a zoomed photo vertically, which is the one thing dragging is worst
+    // at here: a drag that starts on the image is also a tap candidate, so nudging a
+    // zoomed photo a little tends to close the viewer instead. There is no ScrollableState
+    // to hoist — the transform is a translation, not a scroll — so one is made out of the
+    // same clamped assignment the drag uses. Reporting what was actually applied matters:
+    // at full zoom-out the clamp is zero-width, so the wheel truthfully has nothing to
+    // move and its debt is dropped rather than saved up.
+    val pan = remember {
+        ScrollableState { delta ->
+            val before = offset
+            offset = clamp(Offset(before.x, before.y - delta), scale)
+            before.y - offset.y
+        }
+    }
+    WheelScroll(pan, active = !closing)
 
     Box(
         modifier = Modifier

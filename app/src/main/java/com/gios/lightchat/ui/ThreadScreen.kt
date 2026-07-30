@@ -64,6 +64,7 @@ import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.Contacts
 import com.gios.lightchat.Conversation
 import com.gios.lightchat.ReactionType
+import com.gios.lightchat.hw.WheelScroll
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
 
@@ -107,6 +108,13 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     // Saveable: handing off to a third-party camera is a realistic process-death
     // window on this phone, and coming back to a closed picker would orphan the photo.
     var picking by rememberSaveable(convo.guid) { mutableStateOf(false) }
+
+    // The wheel walks the thread. `reverse`, because the list is reverse-laid-out: the
+    // scroll axis is reversed with it, so an unflipped notch up would head off towards
+    // last month while the page appeared to fall downwards. Both overlays below stay
+    // composed on top of this list, so the notch has to be handed to them instead —
+    // otherwise the thread scrolls under a photo you're looking at.
+    WheelScroll(listState, active = viewingImage == null && !picking, reverse = true)
 
     // Which messages begin a same-speaker run (so only they get a name label).
     val labeled = remember(state.messages) {

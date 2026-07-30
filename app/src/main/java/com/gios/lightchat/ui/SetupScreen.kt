@@ -30,6 +30,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.gios.lightchat.ChatViewModel
+import com.gios.lightchat.hw.WheelScroll
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatDimens
 import com.gios.lightchat.ui.theme.ChatType
@@ -43,6 +44,12 @@ fun SetupScreen(viewModel: ChatViewModel) {
     var password by remember { mutableStateOf("") }
     val canSave = serverUrl.isNotBlank() && password.isNotBlank()
 
+    // Hoisted out of the modifier so the wheel can reach it: setup is the one screen a
+    // user meets with the keyboard already up, and the wheel is how you get to the field
+    // the IME is covering without dismissing it.
+    val scroll = rememberScrollState()
+    WheelScroll(scroll)
+
     // Scrollable so the focused password field scrolls clear of the keyboard —
     // on the Light Phone's short screen the IME otherwise covers it (BasicTextField
     // brings itself into view inside a verticalScroll; weighted spacers can't live
@@ -51,7 +58,7 @@ fun SetupScreen(viewModel: ChatViewModel) {
         modifier = Modifier
             .fillMaxSize()
             .imePadding()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scroll)
             .padding(ChatDimens.screenPadding),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

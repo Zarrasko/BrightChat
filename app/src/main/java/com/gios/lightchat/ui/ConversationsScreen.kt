@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.gios.lightchat.ChatViewModel
+import com.gios.lightchat.hw.WheelScroll
 import com.gios.lightchat.Conversation
 import com.gios.lightchat.Status
 import com.gios.lightchat.ui.theme.ChatColors
@@ -71,6 +72,10 @@ fun ConversationsScreen(
     onNewMessage: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
+
+    // The wheel scrolls whichever tab is showing. The state is the one hoisted in
+    // LightChatApp, so a notch moves the list you can see and not one of its siblings.
+    WheelScroll(listState)
 
     // Partitioned once per list/contacts/favorites change, not per row.
     val visible = remember(state.conversations, state.contacts, state.favorites, tab) {

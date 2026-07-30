@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.gios.lightchat.ColorMode
 import com.gios.lightchat.Gallery
+import com.gios.lightchat.hw.WheelScroll
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
 import java.io.File
@@ -143,6 +144,11 @@ fun PhotoPickerScreen(
         )
         return
     }
+
+    // Below the early return rather than beside the state it points at: with the
+    // viewfinder up the grid is off screen, and a wheel wired above this line would
+    // scroll it out of sight while you were framing a photograph.
+    WheelScroll(gridState)
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
         Row(

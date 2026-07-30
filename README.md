@@ -19,6 +19,8 @@
 >   current on LightOS, so photos you just took were never offered. This one reads DCIM
 >   and Pictures directly. Multi-select, an inline camera, and the whole thing runs in
 >   colour — with the grayscale grant above, picking and framing a photo aren't guesswork.
+> - **The brightness wheel scrolls.** Threads, the conversation list, contact search, the
+>   photo grid — see below.
 >
 > <p>
 > <img src="docs/screenshots/thread.png" width="260" alt="A thread in LightChat on a Light Phone III">
@@ -175,6 +177,34 @@ For instant delivery after a reboot without opening the app, enable Tailscale's
 **Always-on VPN** on the phone (Android Settings → Network → VPN) and leave
 "Block connections without VPN" **off** — the live socket reconnects the moment
 the tunnel comes up.
+
+## The wheel
+
+Turning the brightness wheel scrolls whatever is up: a thread, the conversation list,
+contact search on the new-message screen, a group's member list, the photo grid, and the
+setup form. Only the turns — the wheel click and the camera button belong to LightControl,
+which owns them phone-wide and passes bare notches through to `com.gios.*` for exactly
+this.
+
+It works because the wheel arrives as an ordinary key event. Light patched
+`/system/usr/keylayout/Generic.kl` to label scancodes 19 and 20 `WHEEL_CCW`/`WHEEL_CW`,
+and nothing in `PhoneWindowManager` intercepts them, so they reach the focused window like
+any other key — which is also why an app that ignores the keycode appears to have a dead
+wheel. `hw/LightKeys.kt` resolves the labels at runtime and falls back to the raw scancode,
+gated on the sensor's device name so a paired keyboard's `r` can't scroll a thread.
+
+Reading a text is the case that makes the handling fussy, and most of the detail falls out
+of it. The keys are claimed in `dispatchKeyEvent`, above the view hierarchy, so a notch reaches
+the thread rather than the compose bar that has focus — and both halves of each DOWN+UP
+pair are swallowed, because a wheel that types into a half-written message is worse than
+one that does nothing. The thread's list is `reverseLayout`, which reverses its scroll axis
+too, so the sign is flipped for that one list; otherwise a notch upwards would head off
+towards last month while the page appeared to fall the other way. And notches are
+frame-timed rather than applied as they land: the sensor fires every ~35 ms, faster than a
+frame, and acting on each one gives a stack of jumps with nothing for the eye to follow.
+The first notch after a pause is also held until a second confirms it, since the wheel sits
+under a thumb and a stray brush shouldn't move the message you were reading. `hw/Wheel.kt`
+has the numbers.
 
 ## Install
 

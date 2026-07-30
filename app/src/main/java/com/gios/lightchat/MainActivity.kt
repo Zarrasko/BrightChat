@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -12,6 +13,7 @@ import androidx.activity.viewModels
 import com.gios.lightchat.api.Store
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -22,6 +24,10 @@ import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.gios.lightchat.hw.LightKey
+import com.gios.lightchat.hw.LightKeys
+import com.gios.lightchat.hw.LocalWheelBus
+import com.gios.lightchat.hw.WheelBus
 import com.gios.lightchat.socket.AppForeground
 import com.gios.lightchat.ui.ConversationTab
 import com.gios.lightchat.ui.ConversationsScreen
@@ -39,6 +45,33 @@ class MainActivity : ComponentActivity() {
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    /** Wheel notches on their way to whichever screen is up. */
+    private val wheel = WheelBus()
+
+    /**
+     * Every hardware key arrives here first — `DecorView` calls the window callback before
+     * it walks the view hierarchy — which is what lets a notch beat the compose bar while
+     * it holds focus and the keyboard is up.
+     *
+     * Both halves of the pair are consumed. One notch is a complete DOWN+UP, and letting
+     * the UP through means the focused text field takes it as a keypress: the wheel would
+     * type into the message you were about to send.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        when (LightKeys.of(event)) {
+            LightKey.WheelUp -> {
+                if (event.action == KeyEvent.ACTION_DOWN) wheel.send(1)
+                return true
+            }
+            LightKey.WheelDown -> {
+                if (event.action == KeyEvent.ACTION_DOWN) wheel.send(-1)
+                return true
+            }
+            else -> Unit
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -51,7 +84,10 @@ class MainActivity : ComponentActivity() {
         enableImmersive()
         setContent {
             LightChatTheme {
-                LightChatApp(viewModel)
+                // Every screen below can reach the wheel.
+                CompositionLocalProvider(LocalWheelBus provides wheel) {
+                    LightChatApp(viewModel)
+                }
             }
         }
         handlePasswordExtra(intent)

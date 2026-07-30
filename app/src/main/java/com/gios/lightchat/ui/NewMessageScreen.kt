@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.Contact
+import com.gios.lightchat.hw.WheelScroll
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
 
@@ -100,6 +102,13 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
         )
         return
     }
+
+    // Contact search can return forty rows on a phone that shows six, and the keyboard is
+    // up the whole time this screen exists — which is precisely the case the wheel is for,
+    // since it doesn't need the hand that's typing. Below the early return, so nothing here
+    // competes with the picker's grid.
+    val matchList = rememberLazyListState()
+    WheelScroll(matchList)
 
     Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 20.dp)) {
         ScreenHeader(
@@ -193,7 +202,7 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
                     .filter { it.name.contains(q, true) || it.address.contains(q, true) }
                     .take(40)
             }
-            LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            LazyColumn(state = matchList, modifier = Modifier.weight(1f).fillMaxWidth()) {
                 items(matches, key = { it.address }) { contact ->
                     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
                         HapticText(

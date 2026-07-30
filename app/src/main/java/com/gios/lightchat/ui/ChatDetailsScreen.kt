@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.gios.lightchat.ChatViewModel
+import com.gios.lightchat.hw.WheelScroll
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
 
@@ -53,6 +55,11 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
     // The address whose Remove (or "leave") is one tap from firing; any other
     // tap resets it, so a stray touch can't remove someone.
     var confirming by remember { mutableStateOf<String?>(null) }
+
+    // A big group's member list runs well past the screen, and the wheel is the only way
+    // down it that doesn't put a thumb over the Remove taps.
+    val members = rememberLazyListState()
+    WheelScroll(members)
 
     Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 20.dp)) {
         ScreenHeader(
@@ -106,7 +113,7 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
         Spacer(modifier = Modifier.height(24.dp))
         Text(text = "People", style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
         Spacer(modifier = Modifier.height(4.dp))
-        LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
+        LazyColumn(state = members, modifier = Modifier.weight(1f).fillMaxWidth()) {
             items(convo.participants, key = { it }) { address ->
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),

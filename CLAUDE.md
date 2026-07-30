@@ -565,6 +565,25 @@ clears the password and returns to setup.
   handle by `imessageHandle` — a constructed guid can't lean on `newChat`'s loose
   AppleScript address resolution), sends the attachment to it (which creates the
   chat server-side), then opens the thread + refreshes.
+- **`hw/`** — the brightness wheel (`LightKeys.kt`, `Wheel.kt`), the same module the
+  sibling apps carry. `LightKeys.of` recognises a notch: `KeyEvent.keyCodeFromString` on
+  Light's added `WHEEL_CCW`/`WHEEL_CW` labels first, then the raw scancodes 19/20 gated on
+  the sensor's device name (`Pixart pat9126ja`) so a paired keyboard's `r`/`t` can't scroll.
+  `MainActivity.dispatchKeyEvent` claims both DOWN and UP — above the view hierarchy, which
+  is what lets a notch beat the focused compose bar, and swallowing the UP is what stops the
+  wheel typing into a half-written message — and pushes ±1 onto a `WheelBus` that screens
+  read through `LocalWheelBus`. Each scroller calls `WheelScroll(state)`: notches accumulate
+  as a pixel debt paid down a fraction per frame (the sensor fires faster than a frame, so
+  applying each one on arrival is a stack of jumps), and the first notch after a 1.5s pause
+  is held until a second confirms it. **`WheelScroll(state, reverse = true)` for the thread**
+  — `reverseLayout` reverses the scroll axis with it, so an unflipped notch would walk
+  towards older messages while the page appeared to move the other way. `active` gates the
+  thread's list while the image viewer or the photo picker is drawn over it (both are
+  overlays; the thread stays composed underneath and would otherwise answer the same notch).
+  There are no `Dialog`/`ModalBottomSheet` windows in the app, so the template's
+  `WheelInDialog` is not carried. `ImageViewerScreen` has no scroller to hoist, so its pan
+  offset is wrapped in a hand-made `ScrollableState` — the wheel pans a zoomed photo, which
+  dragging does badly here because a drag is also a tap candidate and a tap closes it.
 - **Screens** (`ui/`) — `SetupScreen` (password entry), `ConversationsScreen`
   (list, tap title → settings, Refresh, **New**), `NewMessageScreen` (a "To" field
   that searches the contact index by name/number/email or takes a raw address,
