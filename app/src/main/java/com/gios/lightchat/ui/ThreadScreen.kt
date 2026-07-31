@@ -65,6 +65,7 @@ import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.Contacts
 import com.gios.lightchat.Conversation
 import com.gios.lightchat.ReactionType
+import com.gios.lightchat.URL_REGEX
 import com.gios.lightchat.hw.WheelScroll
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
@@ -86,8 +87,10 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     // shown as a banner above the compose bar until sent or cancelled.
     var replyingTo by remember(convo.guid) { mutableStateOf<ChatMessage?>(null) }
 
-    // Chat details (tap the title): participants, rename, add/remove, leave.
-    // Groups only — a 1:1 has nothing to manage.
+    // The contact page (tap the title): people, the note, the photos and the links, and —
+    // for a group — rename / add / remove / leave. Every conversation has one now: a 1:1
+    // had nothing to *manage*, but it has as much to look back at as a group does, and the
+    // note only makes sense per person.
     var showDetails by remember(convo.guid) { mutableStateOf(false) }
     if (showDetails) {
         BackHandler { showDetails = false }
@@ -154,12 +157,8 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                 title = state.contacts.title(convo),
                 onBack = viewModel::closeThread,
                 modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
-                // Group details (members, rename, leave) live behind the title.
-                onTitleClick = if (convo.isGroup) {
-                    { showDetails = true }
-                } else {
-                    null
-                },
+                // The contact page lives behind the title, for a group and a 1:1 alike.
+                onTitleClick = { showDetails = true },
             )
 
             if (state.messages.isEmpty() && state.threadLoading) {
@@ -607,9 +606,6 @@ private fun MessageContent(
         }
     }
 }
-
-/** Matches bare http/https URLs in message text so they can be made tappable. */
-private val URL_REGEX = Regex("""https?://[^\s]+""")
 
 /**
  * Turns any http/https URLs in [text] into tappable links (underlined, opened by

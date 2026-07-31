@@ -11,6 +11,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import com.gios.lightchat.api.BlueBubblesApi
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /**
@@ -26,27 +28,74 @@ object Attachments {
      *  and downsampling at decode time is what keeps memory in check. */
     private const val MAX_DIM = 1080
 
+    /**
+     * The same for a grid thumbnail.
+     *
+     * The contact page shows fifteen to eighteen cells at once, each about 120px wide. At
+     * [MAX_DIM] every one of those is a four-megabyte bitmap, which is both more memory
+     * than this phone has to spare and more than the cache below can hold — so the grid
+     * would evict and re-decode continuously while it scrolled.
+     */
+    private const val THUMB_DIM = 256
+
     /** Decoded images held in memory; bitmaps are already downsampled, so a modest
      *  count keeps the working set tiny while smoothing re-scroll. */
     private val memory = object : LruCache<String, ImageBitmap>(16) {}
+
+    /** Thumbnails, cached separately: they are ~18x smaller, so many more fit, and a
+     *  grid cell must never evict the full-size photo the viewer is showing. */
+    private val thumbnails = object : LruCache<String, ImageBitmap>(96) {}
+
+    /**
+     * At most this many downloads at once.
+     *
+     * Every visible grid cell asks for its own image on the frame it composes, and they
+     * all go down one Tailscale tunnel to a Mac. Unbounded, opening the contact page on a
+     * photo-heavy conversation fires twenty simultaneous requests and none of them
+     * finishes quickly.
+     */
+    private val downloads = Semaphore(4)
 
     /**
      * The decoded image for [attachment], or null if it isn't an image, the
      * download fails, or the bytes don't decode. Runs entirely off the main thread.
      */
-    suspend fun image(context: Context, api: BlueBubblesApi, attachment: Attachment): ImageBitmap? {
+    suspend fun image(context: Context, api: BlueBubblesApi, attachment: Attachment): ImageBitmap? =
+        load(context, api, attachment, MAX_DIM, memory)
+
+    /** As [image], but decoded small for the contact page's grid. Shares the cached file
+     *  on disk, so a photo opened full-screen afterwards does not download again. */
+    suspend fun thumbnail(context: Context, api: BlueBubblesApi, attachment: Attachment): ImageBitmap? =
+        load(context, api, attachment, THUMB_DIM, thumbnails)
+
+    private suspend fun load(
+        context: Context,
+        api: BlueBubblesApi,
+        attachment: Attachment,
+        maxDim: Int,
+        cache: LruCache<String, ImageBitmap>,
+    ): ImageBitmap? {
         if (!attachment.isImage) return null
-        memory.get(attachment.guid)?.let { return it }
+        cache.get(attachment.guid)?.let { return it }
         return withContext(Dispatchers.IO) {
             val file = File(context.cacheDir, "att_" + safeName(attachment.guid))
             if (!file.exists() || file.length() == 0L) {
-                runCatching { api.downloadAttachment(attachment.guid, file) }.getOrElse {
-                    file.delete() // don't leave a truncated file to be trusted next time
-                    return@withContext null
+                val ok = downloads.withPermit {
+                    // Re-checked inside the permit: a full-size and a thumbnail request for
+                    // the same photo queue together, and the second would otherwise
+                    // re-download over a file the first had just written.
+                    if (file.exists() && file.length() > 0L) {
+                        true
+                    } else {
+                        runCatching { api.downloadAttachment(attachment.guid, file) }
+                            .onFailure { file.delete() } // never trust a truncated file later
+                            .isSuccess
+                    }
                 }
+                if (!ok) return@withContext null
             }
-            val image = decode(file)?.asImageBitmap() ?: return@withContext null
-            memory.put(attachment.guid, image)
+            val image = decode(file, maxDim)?.asImageBitmap() ?: return@withContext null
+            cache.put(attachment.guid, image)
             image
         }
     }

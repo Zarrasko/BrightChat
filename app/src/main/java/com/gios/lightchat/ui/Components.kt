@@ -2,6 +2,8 @@
 
 package com.gios.lightchat.ui
 
+import android.content.Context
+import android.text.format.DateUtils
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -24,6 +26,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
+import java.text.DateFormat
+import java.util.Date
 
 /** Tappable text with a haptic tick on press — the vandamd "button". */
 @Composable
@@ -104,4 +108,23 @@ fun ScreenHeader(
         Spacer(modifier = Modifier.weight(1f))
         Spacer(modifier = Modifier.width(24.dp))
     }
+}
+
+/**
+ * A timestamp in a list, iMessage-style: a clock time for today ("3:14 PM"), "Yesterday",
+ * the weekday within the last week ("Monday"), then a short date ("7/1/26"). Absolute past
+ * a day — "18 hours ago" stops being parseable.
+ *
+ * Shared by the conversation list and the contact page's links, so the two cannot drift
+ * into telling the time differently on the same screenful. Blank for an unknown date, which
+ * callers must not concatenate a separator onto.
+ */
+internal fun listTime(context: Context, ts: Long): String {
+    if (ts <= 0L) return ""
+    if (DateUtils.isToday(ts)) return DateUtils.formatDateTime(context, ts, DateUtils.FORMAT_SHOW_TIME)
+    if (DateUtils.isToday(ts + DateUtils.DAY_IN_MILLIS)) return "Yesterday"
+    if (System.currentTimeMillis() - ts < 7 * DateUtils.DAY_IN_MILLIS) {
+        return DateUtils.formatDateTime(context, ts, DateUtils.FORMAT_SHOW_WEEKDAY)
+    }
+    return DateFormat.getDateInstance(DateFormat.SHORT).format(Date(ts))
 }

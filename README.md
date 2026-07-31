@@ -5,7 +5,7 @@ talking to an always-on, self-hosted [BlueBubbles Server](https://github.com/Blu
 reached privately over [Tailscale](https://tailscale.com/). Package
 `com.gios.lightchat`.
 
-**Current version: v1.0.9.** See [Version history](#version-history).
+**Current version: v1.1.14.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -201,6 +201,33 @@ the share's `address` extra — the same convention the stock messaging apps use
 else that shares a photo to LightChat works too, it just lands on the conversation list and
 waits for you to pick a thread.
 
+### The contact page
+
+Tap a conversation's title — a group or a 1:1 — and you get everything it has
+accumulated: the people in it, a note, every photograph anyone sent, and every link.
+
+The photographs are a grid of what the phone holds for that conversation, newest first, and
+tapping one opens it full screen, in colour, the same viewer the thread uses. The links are
+every URL anyone sent, once each, with who sent it and when.
+
+Neither is the whole conversation, and the page says so. It reads the newest couple of
+hundred messages; scrolling to the bottom — or tapping **Look further back**, for a page
+too short to scroll — asks the Mac for the page under it. So a conversation you never
+scroll costs nothing, and one you do costs a page at a time. A chat whose thread has never
+been opened holds nothing at all, and the page says that rather than claiming there are no
+photographs in it.
+
+The **Note** row opens [LightNotebook](https://github.com/gi-os/LightNotebook), which keeps
+one note per conversation and makes it on the first tap. Nothing is read back across the
+gap — the row is a door, not a preview — and if Notebook isn't installed the row says
+so and does nothing.
+
+The note is keyed by the conversation's normalised handles (`+12125550148`), never by its
+chat guid: a guid belongs to one Mac's `chat.db`, so restoring a backup, or moving to
+another Mac, would strand every note ever written. The cost is that changing a group's
+membership changes its key, and the old group note stays in Notebook but stops being
+reachable from here. A 1:1, which is what the note is mostly for, never moves.
+
 ### The wheel
 
 Turning the brightness wheel scrolls whatever is up: a thread, the conversation list,
@@ -270,6 +297,8 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v1.0.7 | Fix: always notify, even after the phone has been off for hours; adopts the house CI workflow |
 | v1.0.8 | Hardware wheel scrolls threads, the conversation list, contact search, and the photo grid |
 | v1.0.9 | README: documents what the wheel needs |
+| v1.0.10 – v1.0.13 | Unknown senders are silent by default; messages are kept on the phone and only the delta is synced; receiving photos shared from Roll |
+| v1.1.14 | A contact page for every conversation: photos, links, and a note kept in LightNotebook |
 
 ## Licence
 

@@ -24,6 +24,7 @@ object Store {
     private const val KEY_POLL_OK_AT = "poll_ok_at"   // last catch-up that reached the server
     private const val KEY_POLL_FAILS = "poll_fails"   // consecutive failures
     private const val KEY_NOTIFY_UNKNOWN = "notify_unknown" // alert for senders not in the address book
+    private const val KEY_NOTED = "noted_keys"        // conversations whose note has been opened
 
     /** The configured BlueBubbles Server URL, or null if setup hasn't run yet. */
     fun baseUrl(context: Context): String? =
@@ -159,6 +160,32 @@ object Store {
     fun setNotifyUnknown(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_NOTIFY_UNKNOWN, value).apply()
     }
+
+    /**
+     * Whether this phone has ever opened the LightNotebook note for a conversation.
+     *
+     * The contact page's note row is a deep link and nothing more — LightNotebook is not
+     * queried, so there is no way to ask whether a note exists. This is the honest half of
+     * the answer: not "there is a note", but "you have been here before", which is what
+     * decides between "Open note" and "Add a note".
+     *
+     * Keyed by the conversation's normalised handles (see `ChatViewModel.noteKey`), which
+     * never contain a newline, so the same newline-joined storage as [favorites] holds.
+     */
+    fun noteOpened(context: Context, key: String): Boolean = key in notedKeys(context)
+
+    fun setNoteOpened(context: Context, key: String) {
+        if (key.isBlank()) return
+        val next = notedKeys(context) + key
+        prefs(context).edit().putString(KEY_NOTED, next.joinToString("\n")).apply()
+    }
+
+    private fun notedKeys(context: Context): Set<String> =
+        prefs(context).getString(KEY_NOTED, null)
+            ?.split('\n')
+            ?.filter { it.isNotBlank() }
+            ?.toSet()
+            ?: emptySet()
 
     /** Sign out: wipe the stored password. */
     fun signOut(context: Context) {

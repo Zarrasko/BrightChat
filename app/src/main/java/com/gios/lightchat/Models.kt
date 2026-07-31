@@ -1,6 +1,20 @@
 package com.gios.lightchat
 
 /**
+ * Bare http/https URLs in message text.
+ *
+ * One matcher for the whole app: the thread makes these tappable inline (`linkify`) and the
+ * contact page lists them. Two regexes would drift, and then a link would be tappable in a
+ * message but missing from the list of links in that same conversation.
+ *
+ * The trailing character class is what stops "have a look at https://example.com/a." from
+ * carrying the full stop into the link. It always did, and underlining a sentence's
+ * punctuation was only ugly; now that the same match is a de-duplication key, `…/a` and
+ * `…/a.` would list the same article twice.
+ */
+internal val URL_REGEX = Regex("""https?://[^\s]*[^\s.,;:!?)\]'"”’]""")
+
+/**
  * A conversation — BlueBubbles calls it a "chat". The [guid] (e.g.
  * `iMessage;+;chat36268974474180030`) is the key used to fetch its messages and,
  * later, to send into it.

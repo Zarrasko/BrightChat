@@ -38,6 +38,16 @@ private const val TYPING_EXPIRY_MS = 12_000L
  *  the onStart one landing a few hundred milliseconds later. */
 private const val RESUME_REFRESH_MIN_GAP_MS = 3_000L
 
+/**
+ * Messages the contact page reads per page.
+ *
+ * Larger than the thread's, because a page of the grid is three photos wide and fifty
+ * messages of an ordinary conversation are not fifty photos — most of them are text. Two
+ * hundred is roughly a screenful of grid in a chat that trades pictures, and one fetch in
+ * one that doesn't.
+ */
+private const val DETAILS_PAGE = 200
+
 data class UiState(
     val isConfigured: Boolean,                 // a server URL and password are stored
     val status: Status = Status.Idle,
@@ -100,6 +110,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         ),
     )
     val state: StateFlow<UiState> = _state
+
+    /**
+     * The contact page's own state (photos, links). Separate from [state] because building
+     * it walks every message held for a conversation and extracts every URL in them, and
+     * that must not happen on the frame that opens a thread — only when the page is opened.
+     */
+    private val _details = MutableStateFlow(DetailsState())
+    val details: StateFlow<DetailsState> = _details
+
+    private var detailsJob: Job? = null
 
     private var loadJob: Job? = null
 
@@ -441,6 +461,136 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ---- The contact page -------------------------------------------------
+
+    /**
+     * Opens the contact page over the current thread: reads what the store holds and
+     * extracts the photos and links from it.
+     *
+     * Off the store only — no network. The page shows what the phone has, and scrolling it
+     * asks for more (see [loadMoreDetails]), which is the same bargain the thread makes.
+     */
+    fun openDetails() {
+        val conversation = _state.value.open ?: return
+        detailsJob?.cancel()
+        _details.value = DetailsState(chatGuid = conversation.guid, loading = true)
+        detailsJob = viewModelScope.launch(Dispatchers.IO) {
+            // The one store read in the app that had no guard. It is on a plain `launch`
+            // with no exception handler, so a locked or corrupt database here would not
+            // show an empty page — it would end the process.
+            val read = runCatching {
+                val loaded = conversation.guids.any { store.isThreadLoaded(it) }
+                loaded to store.messages(conversation.guids, limit = DETAILS_PAGE)
+            }
+            // `cancel()` cannot interrupt a blocking SQLite call, so the read above finishes
+            // even when the page has since been closed and reopened. Publishing it then
+            // would stamp a fresh session with a stale window.
+            if (!isActive) return@launch
+            val (loaded, held) = read.getOrElse {
+                _details.update { s -> if (s.chatGuid == conversation.guid) s.copy(loading = false) else s }
+                return@launch
+            }
+            publishDetails(conversation, held, loaded, window = DETAILS_PAGE, exhausted = false)
+        }
+    }
+
+    /** Leaves the contact page. The extracted lists are dropped rather than kept warm:
+     *  they are a few hundred objects and rebuilding them costs one disk read. */
+    fun closeDetails() {
+        detailsJob?.cancel()
+        detailsJob = null
+        _details.value = DetailsState()
+    }
+
+    /**
+     * Reads further back for the contact page — scrolled to the bottom of it.
+     *
+     * Same mechanism as the thread's [loadOlder], and deliberately so: one page more of
+     * history per crossing, fetched from the Mac if the phone doesn't have it.
+     *
+     * The extra guard over [loadOlder] is the growth check. [MessageStore.KEEP_PER_CHAT]
+     * caps what a chat keeps on disk, so past that cap a fetch stores a page and the trim
+     * immediately drops it again: the server always has something older, `olderThan` never
+     * returns null, and the page would keep making a network request per scroll for a grid
+     * that never grows. If a wider window produced no more messages, this is as far back as
+     * the page goes.
+     */
+    fun loadMoreDetails() {
+        val conversation = _state.value.open ?: return
+        val syncer = sync ?: return
+        val current = _details.value
+        if (current.chatGuid != conversation.guid) return
+        if (current.loading || current.exhausted) return
+        // Not while the thread's own first page is still landing. Deliberately *not*
+        // `threadJob?.isActive`, which the screen cannot observe: bailing on something
+        // invisible leaves the trigger armed on a condition that never changes again, and
+        // the page would simply never page for the rest of the session.
+        if (_state.value.threadLoading) return
+        if (current.scanned == 0) return
+        val window = current.window + DETAILS_PAGE
+        _details.update { it.copy(loading = true) }
+        detailsJob = viewModelScope.launch(Dispatchers.IO) {
+            val older = runCatching { syncer.olderThan(conversation, window) }.getOrNull()
+            // See openDetails: a cancelled job's network call still returns.
+            if (!isActive) return@launch
+            if (_details.value.chatGuid != conversation.guid) return@launch
+            if (older == null) {
+                _details.update { it.copy(loading = false, exhausted = true) }
+                return@launch
+            }
+            publishDetails(
+                conversation,
+                older,
+                loaded = true,
+                window = window,
+                exhausted = older.size <= current.scanned,
+            )
+        }
+    }
+
+    private fun publishDetails(
+        conversation: Conversation,
+        messages: List<ChatMessage>,
+        loaded: Boolean,
+        window: Int,
+        exhausted: Boolean,
+    ) {
+        val images = imagesIn(messages)
+        val links = linksIn(messages)
+        _details.update { current ->
+            if (current.chatGuid != conversation.guid) {
+                current
+            } else {
+                current.copy(
+                    threadLoaded = loaded,
+                    images = images,
+                    links = links,
+                    window = window,
+                    scanned = messages.size,
+                    loading = false,
+                    exhausted = exhausted,
+                )
+            }
+        }
+    }
+
+    /**
+     * The key LightNotebook keeps this conversation's note under.
+     *
+     * Every participant's normalised handle, sorted and joined — stable across a restore,
+     * across a new Mac, and across iMessage forking a group into sibling rooms, none of
+     * which is true of a chat guid. Falls back to the guid only when a conversation somehow
+     * has no participants, where a wrong-but-stable key still beats an empty one.
+     */
+    fun noteKey(conversation: Conversation): String =
+        conversation.participants
+            .map { imessageHandle(it) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+            .joinToString(",")
+            .ifBlank { conversation.guid }
+
     /**
      * Stars / unstars a conversation (long-press in the list), moving it between the
      * Favorites and Known tabs. Local only — BlueBubbles has no favorites concept —
@@ -473,6 +623,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         openRaw = emptyList()
         threadJob?.cancel()
+        // The contact page belongs to the thread; leaving the thread while it is open (the
+        // Leave button does exactly that) must not leave its photos addressed to a
+        // conversation that is no longer open.
+        closeDetails()
         _state.update { it.copy(open = null, messages = emptyList(), threadLoading = false) }
     }
 
@@ -833,6 +987,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun loadImage(attachment: Attachment): ImageBitmap? {
         val client = api ?: return null
         return Attachments.image(app, client, attachment)
+    }
+
+    /** The small decode, for the contact page's grid. Same file on disk as [loadImage]. */
+    suspend fun loadThumbnail(attachment: Attachment): ImageBitmap? {
+        val client = api ?: return null
+        return Attachments.thumbnail(app, client, attachment)
     }
 
     /**

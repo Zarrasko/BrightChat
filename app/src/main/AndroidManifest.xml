@@ -36,6 +36,21 @@
          has no dialog for it, so in practice it's granted over adb — see Delivery. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!--
+      Android 11 package visibility. Without both of these LightNotebook is invisible to
+      this app: the contact page's note row would always read "install Notebook" on a phone
+      that has it, and `queryIntentActivities` for the note link would come back empty.
+      That exact failure cost a day when Roll's send button reported that LightChat could
+      not receive photos on a phone with LightChat installed.
+    -->
+    <queries>
+        <package android:name="com.gios.lightnotebook" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="lightnotebook" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"

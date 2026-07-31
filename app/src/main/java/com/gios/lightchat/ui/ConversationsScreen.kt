@@ -2,10 +2,6 @@
 
 package com.gios.lightchat.ui
 
-import android.content.Context
-import android.text.format.DateUtils
-import java.text.DateFormat
-import java.util.Date
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -284,17 +280,3 @@ private fun ConversationRow(
     }
 }
 
-/**
- * The list's timestamp, iMessage-style: a clock time for today ("3:14 PM"),
- * "Yesterday", the weekday within the last week ("Monday"), then a short date
- * ("7/1/26"). Absolute past a day — "18 hours ago" stops being parseable.
- */
-private fun listTime(context: Context, ts: Long): String {
-    if (ts <= 0L) return ""
-    if (DateUtils.isToday(ts)) return DateUtils.formatDateTime(context, ts, DateUtils.FORMAT_SHOW_TIME)
-    if (DateUtils.isToday(ts + DateUtils.DAY_IN_MILLIS)) return "Yesterday"
-    if (System.currentTimeMillis() - ts < 7 * DateUtils.DAY_IN_MILLIS) {
-        return DateUtils.formatDateTime(context, ts, DateUtils.FORMAT_SHOW_WEEKDAY)
-    }
-    return DateFormat.getDateInstance(DateFormat.SHORT).format(Date(ts))
-}
