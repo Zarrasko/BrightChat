@@ -326,6 +326,23 @@ class SocketService : Service() {
             // The notification is the record — it stays in LightOS's list and feeds
             // LightGlance's dot. The box is the alert, and buzzes either way.
             Notifications.post(this, title, incoming.message.text, incoming.chatGuid)
+            // Move the watermark past it, which is what stopped this alerting twice.
+            //
+            // `lastAlertedAt` is meant to be the single line deciding whether a message has been
+            // alerted for, however many layers see it. This branch was the one layer that posted
+            // without moving it, so the next CatchUp — from any of its six triggers, and so within
+            // five minutes — still found the message newer than the line and still `unread`, since
+            // with no Private API nothing ever marks it read. It posted and buzzed again. Exactly
+            // twice, because CatchUp then advanced the line itself.
+            //
+            // Same trade the foreground path already makes in MainActivity.flushPendingAlerts:
+            // moving the line past this message also moves it past anything older the socket
+            // silently missed while wedged, which CatchUp's own header calls out. Alerting once for
+            // the message in front of the user beats alerting twice for every message.
+            Store.setLastAlertedAt(
+                this,
+                maxOf(Store.lastAlertedAt(this), incoming.message.date),
+            )
             HeadsUp.show(
                 this,
                 title,
