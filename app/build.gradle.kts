@@ -25,7 +25,7 @@ android {
         targetSdk = 35
         // CI overwrites both from the workflow run number; see .github/workflows/build.yml
         versionCode = 9
-        versionName = "1.5.0"
+        versionName = "1.6.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
