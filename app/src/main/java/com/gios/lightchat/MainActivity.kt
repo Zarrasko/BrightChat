@@ -31,6 +31,7 @@ import com.gios.lightchat.hw.LocalWheelBus
 import com.gios.lightchat.hw.WheelBus
 import com.gios.lightchat.socket.AppForeground
 import com.gios.lightchat.ui.ConversationTab
+import com.gios.lightchat.ui.DialerScreen
 import com.gios.lightchat.ui.ConversationsScreen
 import com.gios.lightchat.ui.tabOf
 import com.gios.lightchat.ui.NewMessageScreen
@@ -280,13 +281,17 @@ fun LightChatApp(viewModel: ChatViewModel) {
     // composition whenever a thread, settings or the composer is open, so anything
     // remembered inside it is thrown away and coming back would reset the list to
     // the top. rememberSaveable carries them through process death too.
-    var tab by rememberSaveable { mutableStateOf(ConversationTab.Known) }
+    // **Favorites is the front page.** The starred list is the handful of people this phone is
+    // actually for, and opening on the full message list meant scrolling past everyone else to
+    // reach them. Known is still one tap away and still called "Messages".
+    var tab by rememberSaveable { mutableStateOf(ConversationTab.Favorites) }
     // One scroll position per tab, so switching tabs doesn't scramble the others.
     // Spelled out rather than built in a loop: `remember` inside an iteration is
     // positional, and three named values are easier to trust than that.
     val favoritesScroll = rememberLazyListState()
     val knownScroll = rememberLazyListState()
     val unknownScroll = rememberLazyListState()
+    val dialScroll = rememberLazyListState()
 
     // A tapped notification can open a thread that isn't on the current tab (a
     // message from an unknown number while Known is showing). Follow it, so closing
@@ -316,6 +321,7 @@ fun LightChatApp(viewModel: ChatViewModel) {
             BackHandler { viewModel.closeThread() }
             ThreadScreen(viewModel)
         }
+        tab == ConversationTab.Dial -> DialerScreen(tab = tab, onSelectTab = { tab = it })
         else -> ConversationsScreen(
             viewModel,
             tab = tab,
@@ -323,6 +329,10 @@ fun LightChatApp(viewModel: ChatViewModel) {
                 ConversationTab.Favorites -> favoritesScroll
                 ConversationTab.Known -> knownScroll
                 ConversationTab.Unknown -> unknownScroll
+                // Unreachable — the branch above catches Dial before this runs — but the
+                // compiler wants every entry and an exception here would be a crash waiting for
+                // whoever adds a fifth tab.
+                ConversationTab.Dial -> dialScroll
             },
             onSelectTab = { tab = it },
             onOpenSettings = { showSettings = true },

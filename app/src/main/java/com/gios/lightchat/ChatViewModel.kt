@@ -65,6 +65,7 @@ data class UiState(
     val privateApi: Boolean = false,           // server's Private API live → tapbacks available
     val typingChatGuid: String? = null,        // chat whose other party is currently typing
     val favorites: Set<String> = emptySet(),   // starred chat guids (local, see Store.favorites)
+    val pins: List<String> = emptyList(),      // starred chats held at the top, newest pin first
     val message: String? = null,               // transient status / error line
 )
 
@@ -102,6 +103,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             isConfigured = api != null,
             privateApi = Store.privateApi(application),
             favorites = Store.favorites(application),
+            pins = Store.pins(application),
             // Straight off disk, synchronously, before anything is on screen: the list is
             // the first thing drawn and there is no reason for it to be empty while a
             // network round trip decides what it should have said. Also what makes the app
@@ -599,6 +601,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * server but not of the app. Keyed on the primary guid, like [messageCache]: a
      * forked group's other rooms all resolve to the same conversation.
      */
+    /**
+     * Pin or unpin, which only ever reorders the starred list.
+     *
+     * Unstarring elsewhere drops the pin with it (see [toggleFavorite]), so nothing here has to
+     * check whether the chat is still starred — by the time this runs it is on the Favorites tab,
+     * which is the only place the verb exists.
+     */
+    fun togglePin(conversation: Conversation) {
+        val next = Pins.toggle(_state.value.pins, conversation.guid)
+        _state.update { it.copy(pins = next) }
+        Store.setPins(app, next)
+    }
+
     fun toggleFavorite(conversation: Conversation) {
         // The write is deliberately *after* the update, not inside it: update's lambda
         // re-runs on CAS contention (a socket event landing at the same moment), which
@@ -611,9 +626,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 s.favorites + conversation.guid
             }
-            s.copy(favorites = next)
+            // A pin is an order within the starred list, so a chat leaving that list takes its
+            // position with it. Kept here rather than in Pins because this is the one place that
+            // knows a star was actually removed — Pins.order deliberately tolerates a pin for a
+            // chat it cannot see, since that also happens while the list is still syncing.
+            s.copy(favorites = next, pins = Pins.prune(s.pins, next))
         }
         Store.setFavorites(app, next)
+        Store.setPins(app, _state.value.pins)
     }
 
     fun closeThread() {

@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.hw.WheelScroll
 import com.gios.lightchat.Conversation
+import com.gios.lightchat.Pins
 import com.gios.lightchat.Status
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
@@ -74,8 +75,12 @@ fun ConversationsScreen(
     WheelScroll(listState)
 
     // Partitioned once per list/contacts/favorites change, not per row.
-    val visible = remember(state.conversations, state.contacts, state.favorites, tab) {
-        state.conversations.filter { tabOf(it, state.contacts, state.favorites) == tab }
+    val visible = remember(state.conversations, state.contacts, state.favorites, state.pins, tab) {
+        val onTab = state.conversations.filter { tabOf(it, state.contacts, state.favorites) == tab }
+        // Pins only mean anything on Favorites. A pin is an order *within* the starred list, and
+        // applying it to Messages would move a chat above conversations that are simply newer —
+        // which is the one thing that list promises not to do.
+        if (tab == ConversationTab.Favorites) Pins.order(onTab, state.pins) else onTab
     }
     val unreadTabs = remember(state.conversations, state.contacts, state.favorites) {
         state.conversations
@@ -156,6 +161,16 @@ fun ConversationsScreen(
                         onDelete = { viewModel.deleteConversation(convo) },
                         onClick = { viewModel.open(convo) },
                         onToggleFavorite = { viewModel.toggleFavorite(convo) },
+                        // Only on Favorites, and only there because that is the only list a pin
+                        // has an opinion about. Its own small verb rather than another gesture:
+                        // the row already spends its long-press on starring and its swipe on
+                        // Delete, and a third would be one too many to remember.
+                        pinned = if (tab == ConversationTab.Favorites) {
+                            Pins.isPinned(state.pins, convo.guid)
+                        } else {
+                            null
+                        },
+                        onTogglePin = { viewModel.togglePin(convo) },
                     )
                 }
             }
@@ -182,6 +197,9 @@ private fun ConversationRow(
     onDelete: () -> Unit,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
+    /** Whether this row is pinned, or null on a tab where pinning means nothing. */
+    pinned: Boolean? = null,
+    onTogglePin: () -> Unit = {},
 ) {
     val haptics = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
@@ -259,6 +277,15 @@ private fun ConversationRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                if (pinned != null) {
+                    Spacer(modifier = Modifier.width(12.dp))
+                    HapticText(
+                        text = if (pinned) "Pinned" else "Pin",
+                        style = ChatType.hint,
+                        color = if (pinned) ChatColors.onSurface else ChatColors.onSurfaceDim,
+                        onClick = onTogglePin,
+                    )
+                }
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     text = listTime(LocalContext.current, convo.lastDate),

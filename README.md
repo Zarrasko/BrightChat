@@ -5,7 +5,7 @@ talking to an always-on, self-hosted [BlueBubbles Server](https://github.com/Blu
 reached privately over [Tailscale](https://tailscale.com/). Package
 `com.gios.lightchat`.
 
-**Current version: v1.9.x.** See [Version history](#version-history).
+**Current version: v2.0.x.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -307,6 +307,7 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v1.7.x | Placing a call backgrounds LightChat to the home screen instead of launching the phone app, so the call screen has the foreground and hanging up doesn't land back in the thread |
 | v1.8.x | The step aside happens on the tap rather than 1.8 seconds later — the delay existed for a retry ladder that no longer exists |
 | v1.9.x | Fixes v1.8 going home without calling: `ACTION_CALL` starts an activity that places the call, and the immediate home launch cancelled it. Uses `TelecomManager.placeCall` instead, which needs no activity |
+| v2.0.x | A dialer that is also the contacts list — T9 search over the phone's address book, press-and-hold 1–9 to speed dial. Favorites is now the front page, and starred chats can be pinned to the top of it |
 
 ## Licence
 

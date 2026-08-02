@@ -25,6 +25,8 @@ object Store {
     private const val KEY_POLL_FAILS = "poll_fails"   // consecutive failures
     private const val KEY_NOTIFY_UNKNOWN = "notify_unknown" // alert for senders not in the address book
     private const val KEY_NOTED = "noted_keys"        // conversations whose note has been opened
+    private const val KEY_PINS = "pinned_guids"      // starred chats held at the top, newest pin first
+    private const val KEY_SPEED_DIAL = "speed_dial"   // digit -> number\u0000name
     private const val KEY_CODE = "login_code"         // the newest one-time code seen
     private const val KEY_CODE_AT = "login_code_at"   // when the message carrying it arrived
 
@@ -238,6 +240,59 @@ object Store {
         val age = now - at
         if (age < 0L || age > CODE_TTL_MS) return null
         return LoginCode(code, at)
+    }
+
+    /**
+     * The pinned conversation guids, newest pin first.
+     *
+     * Newline-joined like [favorites] beside it, and for the same reason: a guid never contains a
+     * newline, and one preference read beats a JSON parse on every list recomposition.
+     */
+    fun pins(context: Context): List<String> =
+        prefs(context).getString(KEY_PINS, null)
+            ?.split('\n')
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
+
+    fun setPins(context: Context, value: List<String>) {
+        prefs(context).edit().putString(KEY_PINS, value.joinToString("\n")).apply()
+    }
+
+    /** One speed-dial slot: the number a held key rings, and whose it is. */
+    data class Speed(val number: String, val name: String)
+
+    /**
+     * The slot on [digit], or null if nothing has been put there.
+     *
+     * Stored as one line per slot, `digit\u0000number\u0000name`, rather than as JSON: three
+     * fields and nine possible rows do not justify a parser, and the separator is a character
+     * that cannot occur in any of them.
+     */
+    fun speedDial(context: Context, digit: Int): Speed? = speedDialAll(context)[digit]
+
+    fun speedDialAll(context: Context): Map<Int, Speed> {
+        val raw = prefs(context).getString(KEY_SPEED_DIAL, null) ?: return emptyMap()
+        val out = HashMap<Int, Speed>()
+        for (line in raw.split('\n')) {
+            val parts = line.split('\u0000')
+            if (parts.size != 3) continue
+            val digit = parts[0].toIntOrNull() ?: continue
+            if (parts[1].isBlank()) continue
+            out[digit] = Speed(parts[1], parts[2])
+        }
+        return out
+    }
+
+    fun setSpeedDial(context: Context, digit: Int, number: String, name: String) {
+        if (digit !in 1..9 || number.isBlank()) return
+        val next = speedDialAll(context).toMutableMap()
+        next[digit] = Speed(number, name)
+        prefs(context).edit()
+            .putString(
+                KEY_SPEED_DIAL,
+                next.entries.joinToString("\n") { "${it.key}\u0000${it.value.number}\u0000${it.value.name}" },
+            )
+            .apply()
     }
 
     /** Sign out: wipe the stored password. */
