@@ -54,6 +54,7 @@ import com.gios.lightchat.Attachment
 import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.Contacts
 import com.gios.lightchat.DetailsState
+import com.gios.lightchat.Dialer
 import com.gios.lightchat.NotebookLink
 import com.gios.lightchat.SharedLink
 import com.gios.lightchat.api.Store
@@ -121,6 +122,10 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
     val noteKey = remember(convo.guid) { viewModel.noteKey(convo) }
     val noteTitle = state.contacts.title(convo)
     val notebookInstalled = remember { NotebookLink.available(context) }
+    // Asked once for the page, not once per person: it is a PackageManager IPC and the answer
+    // cannot differ between two rows of the same list. Same reasoning as notebookInstalled
+    // above, and the same reason both are hoisted out of the LazyColumn.
+    val canDial = remember { Dialer.available(context) }
     var noteOpened by remember(noteKey) { mutableStateOf(Store.noteOpened(context, noteKey)) }
     // The participant list keyed the People rows directly; a handle listed twice by the
     // server is a duplicate-key crash in a LazyColumn.
@@ -238,6 +243,15 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                     PersonRow(
                         address = address,
                         contacts = state.contacts,
+                        // **The group case is the reason this row has a Call at all.** A group
+                        // thread's header offers none, because picking who to ring on the
+                        // user's behalf is the one thing it cannot honestly do — here every
+                        // member is already listed, so the choice is just a tap.
+                        onCall = if (canDial && Dialer.callable(address)) {
+                            { Dialer.dial(context, address) }
+                        } else {
+                            null
+                        },
                         // A group of two is one departure from being a 1:1, and the server
                         // will not remove the last other person anyway.
                         canRemove = canManage && people.size > 2,
@@ -487,6 +501,8 @@ private fun PersonRow(
     canRemove: Boolean,
     confirming: Boolean,
     onRemove: () -> Unit,
+    /** Null when there is nothing to ring — an Apple ID, or a phone with no dialer. */
+    onCall: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -509,6 +525,17 @@ private fun PersonRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+        // Call before Remove, and never dimmed-but-present when there is nothing to ring: a
+        // verb that explains itself only after being tapped is a verb that shouldn't be there.
+        if (onCall != null) {
+            Spacer(modifier = Modifier.width(12.dp))
+            HapticText(
+                text = "Call",
+                style = ChatType.hint,
+                color = ChatColors.onSurfaceDim,
+                onClick = onCall,
+            )
         }
         if (canRemove) {
             Spacer(modifier = Modifier.width(12.dp))

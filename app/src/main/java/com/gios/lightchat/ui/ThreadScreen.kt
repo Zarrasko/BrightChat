@@ -64,6 +64,7 @@ import com.gios.lightchat.ChatMessage
 import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.Contacts
 import com.gios.lightchat.Conversation
+import com.gios.lightchat.Dialer
 import com.gios.lightchat.ReactionType
 import com.gios.lightchat.URL_REGEX
 import com.gios.lightchat.hw.WheelScroll
@@ -104,6 +105,27 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     // lands exactly where you were, and the thread is already rendered underneath,
     // which is also what hides the delayed grayscale restore (see ColorMode).
     var viewingImage by remember(convo.guid) { mutableStateOf<Attachment?>(null) }
+
+    val context = LocalContext.current
+    /**
+     * The number the header's Call rings, or null for no Call at all.
+     *
+     * Three conditions, and each removes a way for the verb to lie. **One participant**,
+     * because a group has no default person to ring and choosing one for the user is worse
+     * than not offering it — that choice belongs on the contact page, where every member is
+     * listed. **Callable**, because an iMessage handle is as often an Apple ID as a number
+     * (see [Dialer.callable]). **A dialer present**, asked once here rather than discovered
+     * by a launch that goes nowhere, which is the same bargain the note row makes with
+     * LightNotebook.
+     *
+     * Keyed on the participants rather than computed per recomposition: the availability
+     * check is a PackageManager IPC, and the header recomposes on every arriving message.
+     */
+    val callNumber = remember(convo.participants, convo.isGroup) {
+        convo.participants
+            .singleOrNull()
+            ?.takeIf { !convo.isGroup && Dialer.callable(it) && Dialer.available(context) }
+    }
 
     // Our own picker, not the system one: MediaStore is never current on LightOS, so
     // the system picker doesn't offer photos you just took. Drawn as an overlay for
@@ -159,6 +181,25 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                 modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
                 // The contact page lives behind the title, for a group and a 1:1 alike.
                 onTitleClick = { showDetails = true },
+                // **Call, and only for a one-to-one with a number.**
+                //
+                // A group has no default person to ring — the choice of who is the whole
+                // question, and the contact page is where it can be asked, so the header
+                // stays out of it rather than picking somebody. A 1:1 over an Apple ID has
+                // nobody to ring at all. Either way the slot falls back to the spacer that
+                // keeps the title centred.
+                trailing = if (callNumber != null) {
+                    {
+                        HapticText(
+                            text = "Call",
+                            style = ChatType.hint,
+                            color = ChatColors.onSurfaceDim,
+                            onClick = { Dialer.dial(context, callNumber) },
+                        )
+                    }
+                } else {
+                    null
+                },
             )
 
             if (state.messages.isEmpty() && state.threadLoading) {

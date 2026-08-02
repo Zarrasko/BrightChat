@@ -45,6 +45,17 @@
     -->
     <queries>
         <package android:name="com.gios.lightnotebook" />
+        <!--
+          The dialer, for the Call verb on the contact page and the thread header. Without
+          this, `queryIntentActivities` for ACTION_DIAL comes back empty on a phone that
+          plainly has a phone app, and the verb hides itself — the same failure mode the
+          LightNotebook entry above exists to prevent, and the one that cost a day when Roll
+          reported LightChat couldn't receive photos.
+        -->
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="lightnotebook" />

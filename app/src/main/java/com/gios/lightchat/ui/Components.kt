@@ -79,6 +79,15 @@ fun ScreenHeader(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onTitleClick: (() -> Unit)? = null,
+    /**
+     * An action on the right, in place of the spacer that balances the back chevron.
+     *
+     * Optional and nullable rather than a default empty lambda, because the spacer is
+     * load-bearing: it is what keeps the title on the centre line instead of being pushed off
+     * it by an icon on one side only. A caller that supplies something is responsible for it
+     * being about the same width, which for a short word it is.
+     */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         HapticText(
@@ -106,7 +115,7 @@ fun ScreenHeader(
             )
         }
         Spacer(modifier = Modifier.weight(1f))
-        Spacer(modifier = Modifier.width(24.dp))
+        if (trailing != null) trailing() else Spacer(modifier = Modifier.width(24.dp))
     }
 }
 
