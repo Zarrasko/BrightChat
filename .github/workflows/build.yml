@@ -67,6 +67,12 @@ jobs:
           ./gradlew :app:testDebugUnitTest --stacktrace
 
       - name: Build APKs
+        env:
+          # Read into BuildConfig at compile time. Not a deploy key and not scoped to anything
+          # but filing issues on one private repo, because it ends up inside a sideloaded APK
+          # anyone can unzip. A missing secret is not a build failure: reports queue on the
+          # phone until a keyed build arrives.
+          REPORT_TOKEN: ${{ secrets.REPORT_TOKEN }}
         run: |
           chmod +x ./gradlew
           ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace

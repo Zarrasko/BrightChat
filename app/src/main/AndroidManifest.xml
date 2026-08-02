@@ -25,6 +25,9 @@
       iMessaged you, which is no use for ringing a landline.
     -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Shake-to-report reads the accelerometer; not a permission, but declared so a build
+         without one is honest about it. Optional: the chip simply never appears. -->
+    <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="false" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- The photo picker reads DCIM and Pictures directly, because MediaStore (which
@@ -89,7 +92,7 @@
             android:exported="true"
             android:screenOrientation="portrait"
             android:launchMode="singleTask"
-            android:windowSoftInputMode="adjustResize"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustResize"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

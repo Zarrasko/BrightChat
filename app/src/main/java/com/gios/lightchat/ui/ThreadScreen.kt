@@ -108,6 +108,24 @@ fun ThreadScreen(viewModel: ChatViewModel) {
 
     val context = LocalContext.current
     val ring = rememberCaller()
+
+    /**
+     * **Opening a chat should not open the keyboard.**
+     *
+     * The manifest now says `stateAlwaysHidden`, which is the declarative half and covers the
+     * window appearing. This is the other half: the compose field is the only focusable thing on
+     * this screen, so anything that hands focus around — coming back from the dialer, a
+     * notification deep link swapping the open thread under a composed screen — can land on it,
+     * and focus on a text field is what summons the IME. Reading a thread is the common case and
+     * typing is the deliberate one; a keyboard covering half the messages you came to read gets
+     * that backwards.
+     */
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    LaunchedEffect(convo.guid) {
+        focusManager.clearFocus(force = true)
+        keyboard?.hide()
+    }
     /**
      * Whether the header's Call is armed — the second-tap confirm, the same shape as Remove on
      * the contact page and for a stronger reason. `ACTION_CALL` rings from the tap with nothing

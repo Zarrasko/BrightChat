@@ -30,6 +30,23 @@ import com.gios.lightchat.hw.LightKeys
 import com.gios.lightchat.hw.LocalWheelBus
 import com.gios.lightchat.hw.WheelBus
 import com.gios.lightchat.socket.AppForeground
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.gios.lightchat.report.Reports
+import com.gios.lightchat.report.Screenshot
+import com.gios.lightchat.report.ShakeDetector
+import com.gios.lightchat.report.Trouble
+import com.gios.lightchat.ui.ReportChip
+import com.gios.lightchat.ui.ReportReason
+import com.gios.lightchat.ui.ReportRequest
+import com.gios.lightchat.ui.ReportSheet
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import com.gios.lightchat.ui.ConversationTab
 import com.gios.lightchat.ui.DialerScreen
 import com.gios.lightchat.ui.ConversationsScreen
@@ -99,11 +116,95 @@ class MainActivity : ComponentActivity() {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         enableImmersive()
+        // Shake three times to report a glitch. Ported from Roll unchanged in behaviour, and
+        // deliberately: this is diagnostic UI, not product surface, so it should be one learned
+        // gesture across every app on this phone rather than four slightly different ones.
+        shake = ShakeDetector(this) { onShaken() }.takeIf { it.available }
         setContent {
             LightChatTheme {
+                // Anything written while the phone was offline, or by a build with no key in it,
+                // goes out now.
+                LaunchedEffect(Unit) { Reports.flush(this@MainActivity) }
+
+                val reports = rememberCoroutineScope()
+                val report by reportRequest.collectAsState()
+                val sheetOpen by reportSheetOpen.collectAsState()
+
+                // A failure the app noticed on its own offers itself rather than waiting to be
+                // shaken about.
+                val trouble by Trouble.latest.collectAsState()
+                LaunchedEffect(trouble) {
+                    val failure = trouble ?: return@LaunchedEffect
+                    Trouble.clear()
+                    if (reportRequest.value != null) return@LaunchedEffect
+                    shake?.stop()
+                    Screenshot.capture(window) { bitmap ->
+                        reportRequest.value = ReportRequest(ReportReason.Failed, bitmap, failure)
+                    }
+                }
+
                 // Every screen below can reach the wheel.
                 CompositionLocalProvider(LocalWheelBus provides wheel) {
-                    LightChatApp(viewModel)
+                    if (report != null && sheetOpen) {
+                        val pending = report!!
+                        BackHandler {
+                            reportSheetOpen.value = false
+                            reportRequest.value = null
+                            shake?.start()
+                        }
+                        ReportSheet(
+                            reason = pending.reason,
+                            hasScreenshot = pending.shot != null,
+                            failure = pending.failure?.what,
+                            seedNote = pending.failure?.let { "Could not ${it.what}" }.orEmpty(),
+                            onDismiss = {
+                                reportSheetOpen.value = false
+                                reportRequest.value = null
+                                shake?.start()
+                            },
+                            onSend = { symptom, note, includeScreenshot ->
+                                reportSheetOpen.value = false
+                                reportRequest.value = null
+                                shake?.start()
+                                val shot = pending.shot.takeIf { includeScreenshot }
+                                reports.launch {
+                                    Reports.enqueue(
+                                        this@MainActivity,
+                                        Reports.compose(
+                                            context = this@MainActivity,
+                                            symptom = symptom,
+                                            note = note,
+                                            screenshot = shot?.let { Screenshot.encode(it) },
+                                            failure = pending.failure,
+                                        ),
+                                    )
+                                    Reports.flush(this@MainActivity)
+                                }
+                            },
+                        )
+                    } else {
+                        Box(Modifier.fillMaxSize()) {
+                            LightChatApp(viewModel)
+                            // Bottom-start, clear of the compose field's send affordance on the
+                            // right. Nothing opens by itself: the chip asks, and says nothing if
+                            // ignored — silence is "not now", so an unsent crash log is still
+                            // there for the next launch to offer again.
+                            report?.let { pending ->
+                                Box(
+                                    Modifier.align(Alignment.BottomStart).padding(16.dp),
+                                ) {
+                                    ReportChip(
+                                        reason = pending.reason,
+                                        onOpen = { reportSheetOpen.value = true },
+                                        onExpire = {
+                                            reportRequest.value = null
+                                            shake?.start()
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -116,6 +217,29 @@ class MainActivity : ComponentActivity() {
     // (matches vandamd's LightOS apps, which call the same thing via Expo). The
     // bars slide back transiently on an edge swipe, then re-hide. Re-applied on
     // focus because returning from the keyboard/recents can resurface them.
+    /** Null on a phone with no accelerometer, where the gesture simply does not exist. */
+    private var shake: ShakeDetector? = null
+    private val reportRequest = MutableStateFlow<ReportRequest?>(null)
+    private val reportSheetOpen = MutableStateFlow(false)
+
+    /**
+     * Three shakes.
+     *
+     * The screenshot is taken *here*, at the moment of the gesture, rather than when the sheet
+     * opens — by then the thing that looked wrong may have redrawn itself, and a report about a
+     * glitch whose picture shows the app working is worse than one with no picture.
+     *
+     * The detector is stopped while a report is pending, so shaking at the chip does not queue a
+     * second one behind it; every path that clears the request starts it again.
+     */
+    private fun onShaken() {
+        if (reportRequest.value != null) return
+        shake?.stop()
+        Screenshot.capture(window) { bitmap ->
+            reportRequest.value = ReportRequest(ReportReason.Shaken, bitmap)
+        }
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) enableImmersive()
@@ -135,6 +259,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         AppForeground.active = true
+        shake?.start()
         Notifications.clear(this)
         // The user is here; a box telling them about a message they're about to read is
         // just something in the way.
