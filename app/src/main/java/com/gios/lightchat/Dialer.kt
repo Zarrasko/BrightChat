@@ -5,8 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Handler
-import android.os.Looper
 import android.telecom.TelecomManager
 import androidx.core.content.ContextCompat
 
@@ -16,9 +14,8 @@ import androidx.core.content.ContextCompat
  * **Placing the call is not the same as showing it.** `ACTION_CALL` hands the number to telecom
  * and shows nothing at all; putting the call screen up is the default dialer's job, and LightOS's
  * dialer does not do it for a call another app started, and does not act on being asked either.
- * So the call is placed, the screen is asked for, and then this app gets out of the way — see
- * [surfaceInCallScreen] and [goHome]. Without that, a call connects with the chat thread still on
- * screen and no visible way to hang up.
+ * So the call is placed and this app immediately gets out of the way — see [standAside]. Without
+ * that, a call connects with the chat thread still on screen and no visible way to hang up.
  *
  * **The number is placed, not typed.** `ACTION_CALL` dials straight from the tap, which needs
  * `CALL_PHONE` — the first dangerous permission this app has ever asked for, and worth being
@@ -127,81 +124,51 @@ object Dialer {
             context.startActivity(
                 Intent(Intent.ACTION_CALL, telUri(address)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
-            surfaceInCallScreen(context)
+            standAside(context)
             true
         }.getOrDefault(false)
     }
 
     /**
-     * Brings the in-call screen to the front after a call has been placed.
-     *
-     * **`ACTION_CALL` places the call and shows nothing.** What puts the call screen up is the
-     * default dialer's `InCallService`, launching its own activity when telecom tells it a call
-     * exists — and LightOS's dialer does not do that for a call started by another app. The
-     * result is a connected call with LightChat still on screen and no visible way to hang up,
-     * which is worse than not calling: the call is real, it is billing, and the only sign of it
-     * is the notification.
-     *
-     * [TelecomManager.showInCallScreen] is the documented way to ask for it, needs no permission
-     * of its own, and does nothing at all when there is no ongoing call.
-     *
-     * **Which is why this retries.** `startActivity` returns before telecom has a call to show —
-     * asking immediately is asking about a call that does not exist yet, and the request is
-     * silently dropped. The delays walk out past a slow radio without leaving the user looking
-     * at a chat thread for a second and a half; the later attempts land on a call screen that is
-     * already up, where re-showing it is a no-op. Cheaper than watching call state, which needs
-     * `READ_PHONE_STATE` and a listener to unregister.
-     */
-    private fun surfaceInCallScreen(context: Context) {
-        // From the application context, and deliberately: the posted work outlives the tap, and
-        // the system service fetched from an activity would otherwise be reached through it.
-        val app = context.applicationContext
-        val telecom = app.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager ?: return
-        val main = Handler(Looper.getMainLooper())
-        for (delay in SURFACE_ATTEMPTS_MS) {
-            main.postDelayed({ runCatching { telecom.showInCallScreen(false) } }, delay)
-        }
-        // And then, once, the blunt instrument: get out of the way. See [goHome].
-        main.postDelayed({ goHome(app) }, GO_HOME_MS)
-    }
-
-    /**
-     * Backs out to the home screen, so the call has the foreground.
+     * Steps aside so the call has the foreground, immediately after placing it.
      *
      * **The problem was never the dialer, it was this app.** LightChat places the call and then
      * stays in front of it, because it is an ordinary activity that nothing has asked to leave.
-     * `showInCallScreen` tries to pull the call screen over the top of it; v1.6 tried launching
-     * the phone app to the same end. Both are ways of shoving something in front of an app that
-     * has no business still being there. Leaving is the smaller action and the one with nothing
-     * to argue about: the call screen is what LightOS shows when nothing else is in the way.
+     * v1.5 asked `TelecomManager.showInCallScreen` to pull the call screen over the top, three
+     * times on a timer; v1.6 launched the phone app to the same end. Both treat "LightChat is
+     * still on screen" as something to cover up rather than as the thing that is wrong. Going
+     * home is the smaller action: the call screen is what LightOS shows when nothing is in the
+     * way, so nothing has to be launched or asked for.
      *
-     * It also leaves the phone somewhere sensible afterwards. Launching the dialer left a task
-     * stack with LightChat under it, so hanging up dropped you back into a conversation you had
-     * finished with; going home means the call ends where a call ending should.
+     * **No delay, and the delay was never doing anything.** It was there to walk out past a slow
+     * radio, back when the point was to ask a dialer to show a call that did not exist yet — a
+     * request about a call telecom has not registered is dropped in silence, so the retry ladder
+     * was real. Leaving does not depend on the call existing. `startActivity` for the call has
+     * already been issued by the time this runs, and telecom will bring the in-call UI up when
+     * it is ready whether or not this app is still in front. Waiting 1.8 seconds only meant 1.8
+     * seconds of looking at a chat thread after pressing Call.
+     *
+     * `showInCallScreen` is still asked, once, before leaving. It costs one call on a dialer that
+     * ignores it, and on any other phone it is the correct route — this app runs on more phones
+     * than Gio's, and "the LightOS dialer is unhelpful so always go home" would be wrong on all
+     * of them.
      *
      * `ACTION_MAIN` + `CATEGORY_HOME` — what the home key does — rather than `finish()` on the
-     * activity. This runs from a posted runnable with no activity to hand, and finishing would
-     * throw away the thread's scroll position for the sake of a call. The app is backgrounded,
-     * not closed: it comes back exactly as it was.
+     * activity: finishing would throw away the thread's scroll position for the sake of a call.
+     * The app is backgrounded, not closed, and comes back exactly as it was. It also leaves the
+     * phone somewhere sensible afterwards, where launching the dialer left LightChat underneath
+     * it in the task stack and hanging up dropped you back into a finished conversation.
      */
-    private fun goHome(app: Context) {
+    private fun standAside(context: Context) {
+        val app = context.applicationContext
+        runCatching {
+            (app.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager)?.showInCallScreen(false)
+        }
         val home = Intent(Intent.ACTION_MAIN)
             .addCategory(Intent.CATEGORY_HOME)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { app.startActivity(home) }
     }
-
-    /**
-     * When to step aside, in millis after placing.
-     *
-     * After the last [SURFACE_ATTEMPTS_MS] attempt, so a dialer that does honour
-     * `showInCallScreen` has already put the call up and this changes nothing. Late enough that
-     * the screen is not pulled away while the tap still feels like it is happening.
-     */
-    private const val GO_HOME_MS = 1800L
-
-    /** When to ask for the call screen, in millis after placing. See [surfaceInCallScreen]. */
-    private val SURFACE_ATTEMPTS_MS = longArrayOf(250L, 700L, 1500L)
 
     /**
      * Ring [address] by whatever route works, best first.

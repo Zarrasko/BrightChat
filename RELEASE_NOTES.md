@@ -1,25 +1,21 @@
-## LightChat v1.7 — get out of the way, don't push in front
+## LightChat v1.8 — stepping aside happens on the tap
 
-**The problem was never the dialer. It was this app.** LightChat places the call and then stays
-in front of it, because it is an ordinary activity and nothing has asked it to leave.
+**The 1.8-second wait is gone.** Press Call and LightChat leaves immediately, so the call screen
+is what you are looking at rather than a chat thread you have finished with.
 
-Two versions were spent shoving something over the top of it. v1.5 asked
-`TelecomManager.showInCallScreen` to pull the call screen forward, three times. v1.6 launched the
-phone app outright to the same end. Both treat "LightChat is still on screen" as a thing to cover
-up rather than as the thing that is wrong.
+The delay was inherited from a problem that no longer exists. It was there to walk out past a
+slow radio, back when the plan was to *ask* the dialer to show a call — a request about a call
+telecom has not registered yet is dropped in silence, so v1.5's ladder of three attempts at 250,
+700 and 1500ms was real work. v1.7 replaced all of that with going home, and kept the timing out
+of caution rather than for a reason. Leaving does not depend on the call existing: the intent
+that places it has already been issued, and telecom brings the in-call UI up when it is ready
+whether or not this app is still in front. All the wait bought was 1.8 seconds of looking at the
+wrong screen.
 
-So it now simply goes home, 1.8 seconds after the call is placed — `ACTION_MAIN` +
-`CATEGORY_HOME`, exactly what the home key does. The call screen is what LightOS shows when
-nothing else is in the way, so nothing needs to be launched or asked for.
+`showInCallScreen` is still asked for, once, immediately before leaving. It costs a single call
+on a dialer that ignores it, and on any other phone it is the correct route — this app runs on
+more phones than one, and "the LightOS dialer is unhelpful so always go home" would be wrong on
+all of them.
 
-It also leaves the phone somewhere sensible afterwards. Launching the dialer left a task stack
-with LightChat underneath it, so hanging up dropped you back into a conversation you had already
-finished with. Going home means the call ends where a call ending should.
-
-**Backgrounded, not closed.** Going home rather than calling `finish()` on the activity: this
-runs from a posted runnable with no activity to hand, and finishing would throw away the thread's
-scroll position for the sake of a call. LightChat comes back exactly as it was.
-
-The three `showInCallScreen` attempts stay ahead of it, unchanged. On a dialer that honours them
-the call screen is already up by the time this fires, and going home to a foreground call screen
-does nothing at all.
+Everything else about the step aside is unchanged: `ACTION_MAIN` + `CATEGORY_HOME` rather than
+`finish()`, so the app is backgrounded and comes back with the thread exactly where it was.
