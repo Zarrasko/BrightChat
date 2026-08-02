@@ -145,6 +145,12 @@ dependencies {
     implementation("io.socket:socket.io-client:2.1.0") {
         exclude(group = "org.json", module = "json")
     }
+    // Shake-to-report posts with okhttp. It is already on the classpath transitively, under
+    // socket.io-client — but transitively is not a dependency, it is a coincidence: the day the
+    // socket library changes its transport this stops compiling for a reason nobody would guess
+    // from the error. Declared, so it is a fact rather than luck.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
     // No Google Play Services / Firebase anywhere — that's the whole point.
 
     // The first unit tests in this app, for LoginCodes. It is pure Kotlin with no Android

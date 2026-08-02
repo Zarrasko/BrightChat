@@ -37,6 +37,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.gios.lightchat.report.ReportContext
 import com.gios.lightchat.report.Reports
 import com.gios.lightchat.report.Screenshot
 import com.gios.lightchat.report.ShakeDetector
@@ -174,7 +175,15 @@ class MainActivity : ComponentActivity() {
                                             context = this@MainActivity,
                                             symptom = symptom,
                                             note = note,
-                                            screenshot = shot?.let { Screenshot.encode(it) },
+                                            // Which screen was up when it went wrong, kept by
+                                            // ReportContext as the app navigates.
+                                            screen = ReportContext.screen,
+                                            // Roll passes its own crash log here. This app has no
+                                            // uncaught-exception handler of its own yet, so the
+                                            // only failures it can report are the ones it noticed
+                                            // and recorded through Trouble.
+                                            crash = null,
+                                            shot = shot?.let { Screenshot.encode(it) },
                                             failure = pending.failure,
                                         ),
                                     )
