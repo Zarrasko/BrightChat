@@ -9,6 +9,15 @@
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
+    <!--
+      Placing a call from a conversation. The first dangerous permission this app has ever held,
+      and it is asked for on the first tap of Call rather than at launch. ACTION_DIAL needs
+      nothing and was what v1.3 shipped, but it only ever hands the number to the dialer app to
+      display — and LightOS's dialer opens on an empty keypad rather than on the number. CALL
+      goes to the telecom stack instead, which parses nothing. Refuse it and the Call verb falls
+      back to DIAL rather than going dead; see Dialer.
+    -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- The photo picker reads DCIM and Pictures directly, because MediaStore (which

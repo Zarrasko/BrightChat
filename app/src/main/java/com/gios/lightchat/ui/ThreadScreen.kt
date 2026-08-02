@@ -107,6 +107,7 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     var viewingImage by remember(convo.guid) { mutableStateOf<Attachment?>(null) }
 
     val context = LocalContext.current
+    val ring = rememberCaller()
     /**
      * The number the header's Call rings, or null for no Call at all.
      *
@@ -194,7 +195,7 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                             text = "Call",
                             style = ChatType.hint,
                             color = ChatColors.onSurfaceDim,
-                            onClick = { Dialer.dial(context, callNumber) },
+                            onClick = { ring(callNumber) },
                         )
                     }
                 } else {

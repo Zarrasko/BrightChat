@@ -1,5 +1,6 @@
 package com.gios.lightchat
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -43,6 +44,25 @@ class DialerTest {
         // DIAL only ever fills the keypad in.
         assertTrue(Dialer.callable("22395"))
         assertTrue(Dialer.callable("611"))
+    }
+
+    @Test
+    fun `dialable keeps only what changes the call`() {
+        // The regression this exists for. v1.3 handed the raw string to Uri.fromParts, which
+        // percent-encodes a decoded SSP — so `+13152122695` left as `tel:%2B13152122695` and
+        // LightOS's dialer opened on an empty keypad.
+        assertEquals("+13152122695", Dialer.dialable("+13152122695"))
+        assertEquals("+13152122695", Dialer.dialable("+1 (315) 212-2695"))
+        assertEquals("6082646591", Dialer.dialable("608-264-6591"))
+        assertEquals("6082646591", Dialer.dialable("  608.264.6591  "))
+    }
+
+    @Test
+    fun `dialable keeps the characters that mean something to the network`() {
+        // Pause and wait, which is how a stored extension works, and the feature-code symbols.
+        assertEquals("+13152122695,,123", Dialer.dialable("+1 315 212 2695,,123"))
+        assertEquals("*67", Dialer.dialable("*67"))
+        assertEquals("#31#", Dialer.dialable("#31#"))
     }
 
     @Test

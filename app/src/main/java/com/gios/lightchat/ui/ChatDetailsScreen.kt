@@ -126,6 +126,7 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
     // cannot differ between two rows of the same list. Same reasoning as notebookInstalled
     // above, and the same reason both are hoisted out of the LazyColumn.
     val canDial = remember { Dialer.available(context) }
+    val ring = rememberCaller()
     var noteOpened by remember(noteKey) { mutableStateOf(Store.noteOpened(context, noteKey)) }
     // The participant list keyed the People rows directly; a handle listed twice by the
     // server is a duplicate-key crash in a LazyColumn.
@@ -248,7 +249,7 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                         // user's behalf is the one thing it cannot honestly do — here every
                         // member is already listed, so the choice is just a tap.
                         onCall = if (canDial && Dialer.callable(address)) {
-                            { Dialer.dial(context, address) }
+                            { ring(address) }
                         } else {
                             null
                         },

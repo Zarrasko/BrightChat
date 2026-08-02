@@ -2,8 +2,11 @@
 
 package com.gios.lightchat.ui
 
+import android.Manifest
 import android.content.Context
 import android.text.format.DateUtils
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -13,7 +16,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import com.gios.lightchat.Dialer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -136,4 +144,48 @@ internal fun listTime(context: Context, ts: Long): String {
         return DateUtils.formatDateTime(context, ts, DateUtils.FORMAT_SHOW_WEEKDAY)
     }
     return DateFormat.getDateInstance(DateFormat.SHORT).format(Date(ts))
+}
+
+
+/**
+ * Ringing somebody, permission and all, as one function the caller just calls.
+ *
+ * Two screens offer a Call — the thread header for a one-to-one, and every name on the contact
+ * page — and both need the same three-step dance: ask for `CALL_PHONE` if it isn't held, place
+ * the call if it is, and open the dialer if the user says no. Written once here because the
+ * failure mode of writing it twice is the two copies disagreeing about what a refusal means,
+ * and a refusal is the branch nobody exercises.
+ *
+ * **The request happens on the tap, not on the screen opening.** A permission dialog that
+ * appears because you looked at a conversation is a permission dialog that gets refused; one
+ * that appears because you pressed Call explains itself. The number is held across the dialog
+ * in [pending] because the launcher's result arrives on a later frame, by which time the tap
+ * that knew who to ring is long gone.
+ *
+ * **A refusal is remembered by Android, not by us.** Refuse twice and the system stops showing
+ * the dialog, and `launch` returns immediately with `false` — which lands in the same fallback
+ * as a fresh refusal, so the Call verb keeps opening the dialer forever rather than becoming
+ * an inert button. That is the reason the fallback exists at all.
+ */
+@Composable
+fun rememberCaller(): (String) -> Unit {
+    val context = LocalContext.current
+    var pending by remember { mutableStateOf<String?>(null) }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val number = pending
+        pending = null
+        if (number != null) {
+            // Granted, so `ring` takes the ACTION_CALL path; refused, and it falls through to
+            // the dialer on its own. Either way this is the same one call.
+            if (granted) Dialer.ring(context, number) else Dialer.dial(context, number)
+        }
+    }
+    return { number ->
+        if (Dialer.canCallDirectly(context)) {
+            Dialer.ring(context, number)
+        } else {
+            pending = number
+            ask.launch(Manifest.permission.CALL_PHONE)
+        }
+    }
 }

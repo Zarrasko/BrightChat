@@ -1,37 +1,40 @@
-## LightChat v1.3 — you can call the person you're texting
+## LightChat v1.4 — calling actually places the call
 
-**A conversation is with somebody, and sometimes the thing to do is ring them.** There is now a
-Call in the thread header and one beside every name on the contact page.
+**v1.3's Call opened the dialer on an empty keypad.** The number was there in the intent and
+never arrived on screen, which looks exactly like the intent being ignored and is the reason
+nothing anywhere reported an error.
 
-The app doesn't place the call. It hands the number to whatever holds the dialer —
-`ACTION_DIAL`, which opens the calling app with the number filled in and waits for the green
-button. The other option, `ACTION_CALL`, rings straight from the tap and needs `CALL_PHONE`, a
-permission this app has never held and has no other use for. It would also turn a misplaced
-thumb on the contact page into a call to somebody, with no undo, on a page whose other verbs
-are Remove and Leave — and which is scrolled with the wheel precisely so a thumb isn't sitting
-over the taps.
+The cause was `Uri.fromParts("tel", number, null)`. Its scheme-specific part is documented as
+*decoded*, so it percent-encodes on the way out and an E.164 handle leaves as
+`tel:%2B13152122695`. A dialer that decodes that is fine. LightOS's is the only dialer on the
+phone and does not, so it opened with nothing filled in. The v1.3 notes explained at some length
+why `fromParts` was the careful choice over `Uri.parse` — the reasoning was about a `#` being
+read as a fragment, which is real, and it traded a rare bug for one that happens every time.
 
-**Two places, because they answer different questions.** The thread header offers Call only for
-a one-to-one: a group has no default person to ring, and picking one on your behalf is the one
-thing that screen cannot honestly do. The contact page lists every member, so there the choice
-is just a tap — which is where a group's Call belongs and why the row has one at all.
+The number now goes through `Dialer.dialable` first, which reduces it to the characters that
+change what gets dialled — digits, a leading `+`, `*` and `#`, and the `,` and `;` that make a
+stored extension work — and drops the brackets, spaces and dashes that are only there for a
+human to read. Nothing left needs encoding except `#`, which is escaped by hand. Four unit tests
+pin it, including the exact string that failed.
 
-**An iMessage handle is as often an Apple ID as it is a number**, and the two are not
-distinguishable by asking Android; they arrive from the server as opaque strings. A handle with
-an `@` in it is never callable, and neither is one with letters in it — `1-800-FLOWERS` reaches
-no keypad. Those rows simply don't offer a Call rather than offering a dimmed one, because a
-verb that explains itself only after being tapped is a verb that shouldn't be there. Short codes
-do get one: the number that texted you a verification code is one worth being able to look at,
-and DIAL only ever fills the keypad in.
+**And the call is now placed rather than typed.** `ACTION_CALL` hands the number to the telecom
+stack, which parses nothing and does not care what the dialer app makes of a URI — on this phone
+that is the difference between a call and a keypad. It needs `CALL_PHONE`, the first dangerous
+permission this app has ever held, so:
 
-Two smaller things that would each have been a bug report. The number becomes a `tel:` URI
-through `Uri.fromParts` rather than `Uri.parse("tel:$number")` — a `#` in a stored extension
-terminates a parsed URI at the fragment, so the dialer would open on half a number. And the
-manifest gains a `<queries>` entry for `ACTION_DIAL`: without it, Android 11 package visibility
-hides the dialer from `queryIntentActivities`, the availability check comes back empty on a
-phone that plainly has a phone app, and the verb hides itself. That is the same failure the
-LightNotebook entry beside it exists to prevent, and the one that cost a day when Roll reported
-LightChat couldn't receive photos.
+- It is asked for on the **first tap of Call**, never at launch. A permission dialog that
+  appears because you opened a conversation is one that gets refused.
+- Refusing is not a dead end. The call falls back to `ACTION_DIAL`, the same route as v1.3 but
+  now with a URI that works. Refuse twice and Android stops showing the dialog entirely, which
+  lands in that same fallback rather than leaving an inert button.
+- The permission is re-checked at the moment of the call, not trusted from when the screen was
+  composed — it can be revoked from settings in between, and `ACTION_CALL` without it is a
+  `SecurityException` that takes the process down rather than an error anyone sees.
 
-`Dialer.callable` is pure Kotlin with five unit tests over the handle shapes BlueBubbles
-actually returns.
+One more thing that was wrong and would have hidden the feature outright: whether to show Call
+at all was decided by asking whether an activity handles `ACTION_DIAL`, copied from how the note
+row checks for LightNotebook. That is the wrong question twice over. `ACTION_CALL` doesn't go to
+an activity at all, so a phone that calls perfectly well can resolve nothing; and with one dialer
+installed, that app's intent filters alone decide whether the verb appears. It now asks
+`FEATURE_TELEPHONY` — can this hardware make a call — and keeps the `ACTION_DIAL` lookup only as
+a second chance.
