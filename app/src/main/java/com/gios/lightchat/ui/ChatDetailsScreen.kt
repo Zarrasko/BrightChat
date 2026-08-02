@@ -55,6 +55,7 @@ import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.Contacts
 import com.gios.lightchat.DetailsState
 import com.gios.lightchat.Dialer
+import com.gios.lightchat.NewContact
 import com.gios.lightchat.NotebookLink
 import com.gios.lightchat.SharedLink
 import com.gios.lightchat.api.Store
@@ -258,6 +259,16 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                         // user's behalf is the one thing it cannot honestly do — here every
                         // member is already listed, so the choice is just a tap.
                         confirmingCall = confirmingCall == address,
+                        // **Only when there is no name.** A member the address book already knows
+                        // has nothing to save, and the row is dense enough without a verb that
+                        // does nothing. This is the whole of "add an unknown sender to contacts":
+                        // the contact page already lists exactly the handles a conversation has,
+                        // named or not.
+                        onSave = if (state.contacts.name(address) == null && NewContact.savable(address)) {
+                            { NewContact.create(context, address) }
+                        } else {
+                            null
+                        },
                         onCall = if (canDial && Dialer.callable(address)) {
                             {
                                 if (confirmingCall == address) {
@@ -525,6 +536,8 @@ private fun PersonRow(
     onCall: (() -> Unit)? = null,
     /** Whether this row's Call is one tap from ringing. */
     confirmingCall: Boolean = false,
+    /** Null when the address book already knows them, or the handle is an Apple ID. */
+    onSave: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -547,6 +560,17 @@ private fun PersonRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+        // Save first: on an unknown number it is the verb that makes the other two better, since
+        // a saved contact is one this app can name from then on.
+        if (onSave != null) {
+            Spacer(modifier = Modifier.width(12.dp))
+            HapticText(
+                text = "Save",
+                style = ChatType.hint,
+                color = ChatColors.onSurfaceDim,
+                onClick = onSave,
+            )
         }
         // Call before Remove, and never dimmed-but-present when there is nothing to ring: a
         // verb that explains itself only after being tapped is a verb that shouldn't be there.

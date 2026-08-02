@@ -149,12 +149,9 @@ fun DialerScreen(
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "Dial",
-                style = ChatType.body,
-                color = ChatColors.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
+            // No title. The pad below says what this screen is more plainly than a word could,
+            // and on a 3.92" panel a header that only labels is a row of contacts given up.
+            Spacer(modifier = Modifier.weight(1f))
             if (digits.isNotEmpty()) {
                 HapticText(
                     text = "Clear",
@@ -209,17 +206,22 @@ fun DialerScreen(
                                 )
                             }
                         }
-                        items(results, key = { it.id }) { contact ->
+                        // **Nothing until you type.** The address book in full is a list nobody
+                        // scrolls to find somebody in — that is what the pad is for — and putting
+                        // it on screen at rest means every glance at this tab starts with the
+                        // wrong three hundred people. Typing one digit is enough to make the list
+                        // worth having.
+                        items(if (digits.isEmpty()) emptyList() else results, key = { it.id }) { contact ->
                             DialRow(
                                 title = contact.name,
                                 subtitle = contact.subtitle,
                                 onClick = { contact.primary?.let { ring(it.raw) } },
                             )
                         }
-                        if (results.isEmpty() && digits.isEmpty()) {
+                        if (digits.isNotEmpty() && results.isEmpty()) {
                             item(key = "empty") {
                                 Text(
-                                    text = "No contacts on this phone.",
+                                    text = "Nobody matches that.",
                                     style = ChatType.hint,
                                     color = ChatColors.onSurfaceDim,
                                     modifier = Modifier.padding(vertical = 24.dp),

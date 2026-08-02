@@ -210,15 +210,21 @@ private fun ConversationRow(
     val offsetX = remember(convo.guid) { Animatable(0f) }
 
     Box(modifier = Modifier.fillMaxWidth()) {
-        // Behind the row: the Delete action, uncovered as the row slides left. Tapping
-        // it deletes (the row vanishes optimistically) — the swipe is its own confirm.
-        if (canDelete) {
+        // Behind the row, uncovered as it slides left. Tapping acts immediately — the swipe is
+        // its own confirm.
+        //
+        // **On Favorites this is Unstar, not Delete.** The long-press on that tab now pins, so
+        // unstarring needs somewhere to live, and it belongs here: it is the destructive-ish verb
+        // and this is where the destructive verb goes. Deleting a chat you starred is rarer than
+        // unstarring one, and Delete is still one tab away on Messages.
+        val revealable = pinned != null || canDelete
+        if (revealable) {
             Box(modifier = Modifier.matchParentSize(), contentAlignment = Alignment.CenterEnd) {
                 HapticText(
-                    text = "Delete",
+                    text = if (pinned != null) "Unstar" else "Delete",
                     style = ChatType.body,
                     color = ChatColors.onSurface,
-                    onClick = onDelete,
+                    onClick = if (pinned != null) onToggleFavorite else onDelete,
                 )
             }
         }
@@ -229,7 +235,7 @@ private fun ConversationRow(
                 // Opaque so the Delete action stays hidden under the row until swiped.
                 .background(ChatColors.background)
                 .then(
-                    if (canDelete) {
+                    if (revealable) {
                         Modifier.pointerInput(convo.guid) {
                             detectHorizontalDragGestures(
                                 onHorizontalDrag = { change, drag ->
@@ -257,11 +263,27 @@ private fun ConversationRow(
                         // While open, a tap just closes the row rather than opening it.
                         if (offsetX.value < -1f) scope.launch { offsetX.animateTo(0f) } else onClick()
                     },
-                    // Star / unstar. The row moving to another tab *is* the
-                    // confirmation, so there's no marker to draw here.
+                    /**
+                     * **Long-press means the useful verb for the list you are on.**
+                     *
+                     * Everywhere else that is star / unstar, and the row moving to another tab is
+                     * its own confirmation. On Favorites the chat is already starred, so starring
+                     * is the one thing it cannot do — there the press pins instead, and the "↑"
+                     * appearing on the title is the confirmation.
+                     *
+                     * The first attempt gave pinning its own text verb in the row. It shared the
+                     * line with the title and the timestamp on a 3.92" panel, so the title lost
+                     * about a third of its width to a word that is only relevant on one tab —
+                     * and a tap target that small sitting inside a row that is itself clickable
+                     * and swipeable is a coin toss. A gesture the row already has costs nothing.
+                     */
                     onLongClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        if (offsetX.value < -1f) scope.launch { offsetX.animateTo(0f) } else onToggleFavorite()
+                        when {
+                            offsetX.value < -1f -> scope.launch { offsetX.animateTo(0f) }
+                            pinned != null -> onTogglePin()
+                            else -> onToggleFavorite()
+                        }
                     },
                 )
                 .padding(vertical = 14.dp),
@@ -270,22 +292,16 @@ private fun ConversationRow(
                 Text(
                     // Text-only unread marker, in keeping with the B&W style; the
                     // brighter subtitle below reinforces it.
-                    text = (if (convo.unread) "• " else "") + title,
+                    // Two markers, both text, both prefixes, because that is how this app says
+                    // "something is true about this row" everywhere else. A pin is an anchor:
+                    // "↑" reads as "held up here" without needing a legend.
+                    text = (if (pinned == true) "↑ " else "") + (if (convo.unread) "• " else "") + title,
                     style = ChatType.body,
                     color = ChatColors.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                if (pinned != null) {
-                    Spacer(modifier = Modifier.width(12.dp))
-                    HapticText(
-                        text = if (pinned) "Pinned" else "Pin",
-                        style = ChatType.hint,
-                        color = if (pinned) ChatColors.onSurface else ChatColors.onSurfaceDim,
-                        onClick = onTogglePin,
-                    )
-                }
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     text = listTime(LocalContext.current, convo.lastDate),
