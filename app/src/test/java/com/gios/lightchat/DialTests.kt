@@ -138,6 +138,30 @@ class AddressBookTest {
     }
 
     @Test
+    fun `the phone book becomes a name index, every number of it`() {
+        val phone = AddressBook.merge(
+            listOf(
+                row(1, "Kate Jacobs", "315-212-2695"),
+                row(1, "Kate Jacobs", "212-555-0148"),
+                row(2, "  ", "608-264-6591"),
+            ),
+        )
+        val index = AddressBook.asNameIndex(phone)
+        // Both of Kate's lines, because a person is reached on whichever one they messaged from.
+        assertEquals("Kate Jacobs", index["3152122695"])
+        assertEquals("Kate Jacobs", index["2125550148"])
+        // The nameless row's "name" is its own number; writing that into the index would put
+        // digits over a real name from the server.
+        assertEquals(null, index["6082646591"])
+    }
+
+    @Test
+    fun `rows only the message index knows stay out of the name index`() {
+        val synthesised = AddressBook.withKnown(emptyList(), mapOf("3152122695" to "Liz"))
+        assertEquals(emptyMap<String, String>(), AddressBook.asNameIndex(synthesised))
+    }
+
+    @Test
     fun `no index changes nothing`() {
         val phone = AddressBook.merge(listOf(row(1, "Alex", "1112223333")))
         assertEquals(phone, AddressBook.withKnown(phone, emptyMap()))

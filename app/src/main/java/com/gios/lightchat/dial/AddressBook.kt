@@ -105,6 +105,35 @@ object AddressBook {
     }
 
     /**
+     * The phone's address book as a handle → name index.
+     *
+     * **The other direction of [withKnown], and the one that was missing.** The dialer folded the
+     * message index into the address book so the *dialer* could name everybody. Nothing did the
+     * reverse, so the conversation list, the thread header and the notifications all named people
+     * from the BlueBubbles index alone — which is the Mac's address book. Saving Kate Jacobs on
+     * the phone changed nothing anywhere in the app, which is not what "I saved a contact" means.
+     *
+     * Every number of every contact, not just the first: a person is reached on whichever line
+     * they happened to message from, and an index that only knows their mobile names half their
+     * conversations. Keys are [key], which is the same normalisation
+     * [com.gios.lightchat.Contacts.key] uses, so the two indexes can simply be merged.
+     */
+    fun asNameIndex(contacts: List<PhoneContact>): Map<String, String> {
+        val out = HashMap<String, String>()
+        for (contact in contacts) {
+            val name = contact.name.trim()
+            if (name.isEmpty()) continue
+            // A synthesised row from the message index has its own number as its name; putting
+            // that back into the index would write "3152122695" over a real name from the server.
+            if (contact.numbers.any { it.label == FROM_MESSAGES }) continue
+            for (number in contact.numbers) {
+                if (number.key.isNotBlank()) out[number.key] = name
+            }
+        }
+        return out
+    }
+
+    /**
      * The phone's address book with everybody BlueBubbles knows folded in.
      *
      * **Two address books, and neither is complete on its own.** The phone's has landlines and

@@ -28,6 +28,17 @@ class AddressBookRepo(private val context: Context) {
             .take(AddressBook.MAX)
     }
 
+    /**
+     * Just the names, for the rest of the app.
+     *
+     * Separate from [load] because the callers want different things: the dialer wants people to
+     * scroll and ring, and the conversation list wants a lookup. Sharing the query and not the
+     * shape keeps one ContentResolver round trip.
+     */
+    suspend fun nameIndex(): Map<String, String> = withContext(Dispatchers.IO) {
+        AddressBook.asNameIndex(AddressBook.merge(readNumbers()))
+    }
+
     private fun readNumbers(): List<AddressBook.Row> {
         val columns = arrayOf(
             ContactsContract.CommonDataKinds.Phone.CONTACT_ID,

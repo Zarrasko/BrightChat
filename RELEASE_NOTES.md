@@ -1,46 +1,31 @@
-## LightChat v2.2 — both address books, and a way off a speed dial
+## LightChat v2.3 — a contact saved on the phone actually names somebody
 
-### Everybody you message has a contact now
+**Save Kate Jacobs on the handset and the app kept showing her number.** Everywhere: the
+conversation list, the thread header, the notification that woke you up.
 
-Two address books, and neither is complete on its own. The phone's has landlines and people who
-have never texted. The BlueBubbles index is the Mac's contacts as iMessage sees them, and it
-holds people who exist on the account but were never saved to this handset — a number you have
-messaged for a year from the Mac was a stranger to the dialer, showing up as digits with no name
-or not at all.
+The cause is one this app has had since it was written and only became visible now that it can
+save contacts. Names come from `Contacts`, an index built from the **BlueBubbles server's** copy
+of the Mac's address book. The handset's own address book was never read for this — v2.2 taught
+the *dialer* to fold the two together, but that merge ran in one direction and only the dialer
+used it. Nothing else in the app had any way to learn a name you had just typed.
 
-The dialer's list is now both, folded together. **The phone wins every collision**, and that is
-the whole of the merge rule: its rows carry structure — several numbers, a label per number, your
-own choice of default — while the message index is one name per key with none of that. Where both
-know a number, keeping the phone's row loses nothing; the other way round would throw away
-everything but the name.
+The index is now built from both, and **the phone's wins a collision**, because it is the one you
+just edited. Where the Mac has a name and the phone does not, the Mac's stands.
 
-Somebody who exists only in the message index gets a row reading **"From messages"** under their
-name, rather than a silent one. The difference matters when you are looking at it: that number has
-no entry on the phone, so the Save verb on their contact page is the thing to do about it, and a
-blank label would just look like a contact missing its type.
+It happens in two places, for two different waits. On the server fetch, so the merge is what gets
+persisted — which is what lets `SocketService` name a notification sender while the app is not
+running. And once when the ViewModel is constructed, because the persisted index is the *last*
+merge: somebody saved since then would otherwise be missing until the next sync, which on a phone
+that has been open all day is a long time to keep showing digits for a person you have just named.
 
-Email handles are dropped. This list exists to be dialled from, and a row whose only verb cannot
-work is a row that lies about what it does — the same reason the address-book query reads numbers
-and not emails.
+Every number of every contact goes into the index, not just the first. A person is reached on
+whichever line they happened to message from, and an index that only knows their mobile names
+half their conversations.
 
-The ids for those synthesised rows are negative and derived from the number rather than counted.
-They share a list with real contact ids and are used as list keys, so they have to be unique
-against those and stable across a reload; a counter would renumber everybody the moment one
-contact was added.
+Two things deliberately kept out. A contact with no name is titled by its own number for the
+dialer's list; writing that back would put digits over a real name from the server. And so are
+the rows v2.2 synthesises from the message index itself, which would otherwise round-trip a name
+back into the index it came from.
 
-### The speed dials are visible, and can be cleared
-
-v2.0 let you put somebody on a key and gave you no way to see who was there or take them off. Both
-were the same omission: a slot you cannot see is a slot you cannot change your mind about.
-
-With nothing typed, the list is now the speed dials — the digit, the name, the number, and
-**Clear**. Tapping the name rings them, which makes the resting screen useful rather than the
-blank it was in v2.1. Typing a digit replaces it with search, exactly as before.
-
-Clear as a word rather than a long-press or a swipe, deliberately. Holding the key already means
-"ring this", and giving that gesture a second meaning depending on where the finger happens to be
-would make the one gesture on this screen ambiguous. Assigning now says so too: "Alex on 3 — hold
-3 to ring, or Clear it below".
-
-Four more unit tests over the merge: the phone winning a collision, emails being dropped, the ids
-being negative, distinct and stable, and an empty index changing nothing.
+All of this needs the contacts permission, which is asked for the first time you open the Dial
+tab. Without it every path here is an empty map and the behaviour is exactly what it was.

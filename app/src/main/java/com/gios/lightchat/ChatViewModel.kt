@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.gios.lightchat.api.ApiException
 import com.gios.lightchat.api.BlueBubblesApi
 import com.gios.lightchat.api.Store
+import com.gios.lightchat.dial.AddressBookRepo
 import com.gios.lightchat.db.MessageStore
 import com.gios.lightchat.db.Sync
 import com.gios.lightchat.socket.AppForeground
@@ -133,6 +134,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // The address book is small (hundreds of contacts) and changes rarely, so we
     // fetch it once per session alongside the first conversation load and cache it.
     private var contacts = Store.contacts(application)
+
     private var contactList = emptyList<Contact>()
     private var contactsLoaded = false
 
@@ -166,6 +168,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         observeSocket()
+        // **The handset's own contacts, folded in on construction.**
+        //
+        // The persisted index is the last merge with the server, so somebody saved on the phone
+        // since then is missing from it until the next fetch — a long time to keep showing digits
+        // for a person you have just named. Empty when the contacts permission has not been
+        // granted, in which case nothing here changes anything.
+        viewModelScope.launch {
+            val local = runCatching { AddressBookRepo(application).nameIndex() }.getOrDefault(emptyMap())
+            if (local.isEmpty()) return@launch
+            contacts = Contacts.fromMap(contacts.asMap() + local)
+            Store.setContacts(application, contacts.asMap())
+            _state.update { it.copy(contacts = contacts) }
+        }
         if (api != null) {
             refresh()
             startSocket()
@@ -304,7 +319,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 ?.privateApiReady ?: _state.value.privateApi
             if (!contactsLoaded) {
                 runCatching { client.contacts() }.onSuccess { raw ->
-                    contacts = Contacts.from(raw)
+                    /**
+                     * **Both address books, and the phone's wins.**
+                     *
+                     * The server's copy is the Mac's contacts, which is what this app has always
+                     * named people from. Anybody saved on the handset — a number you got today
+                     * and put a name to — was invisible to it, so the list and the thread header
+                     * and the notifications all kept showing digits after you had plainly said
+                     * who it was. The dialer already folds the two together for its own list
+                     * (`AddressBook.withKnown`); this is the same merge in the other direction,
+                     * and the direction everything except the dialer reads.
+                     *
+                     * The phone overwrites on a collision because it is the one the user just
+                     * edited. Where the Mac has a name and the phone does not, the Mac's stands.
+                     * Empty when the contacts permission has not been granted — that only
+                     * happens after opening the Dial tab — in which case this is the old
+                     * behaviour exactly.
+                     */
+                    val local = runCatching { AddressBookRepo(app).nameIndex() }.getOrDefault(emptyMap())
+                    contacts = Contacts.fromMap(Contacts.from(raw).asMap() + local)
                     // Persist so SocketService can name notification senders even
                     // when the app (and this ViewModel) isn't running.
                     Store.setContacts(app, contacts.asMap())
