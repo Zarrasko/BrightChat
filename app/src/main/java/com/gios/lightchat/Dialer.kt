@@ -16,9 +16,9 @@ import androidx.core.content.ContextCompat
  * **Placing the call is not the same as showing it.** `ACTION_CALL` hands the number to telecom
  * and shows nothing at all; putting the call screen up is the default dialer's job, and LightOS's
  * dialer does not do it for a call another app started, and does not act on being asked either.
- * So the call is placed, the screen is asked for, and then the phone app is simply opened — see
- * [surfaceInCallScreen] and [openDialerApp]. Without that, a call connects with the chat thread
- * still on screen and no visible way to hang up.
+ * So the call is placed, the screen is asked for, and then this app gets out of the way — see
+ * [surfaceInCallScreen] and [goHome]. Without that, a call connects with the chat thread still on
+ * screen and no visible way to hang up.
  *
  * **The number is placed, not typed.** `ACTION_CALL` dials straight from the tap, which needs
  * `CALL_PHONE` — the first dangerous permission this app has ever asked for, and worth being
@@ -161,55 +161,44 @@ object Dialer {
         for (delay in SURFACE_ATTEMPTS_MS) {
             main.postDelayed({ runCatching { telecom.showInCallScreen(false) } }, delay)
         }
-        // And then, once, the blunt instrument: open the phone app itself. See [openDialerApp].
-        main.postDelayed({ openDialerApp(app, telecom) }, OPEN_DIALER_MS)
+        // And then, once, the blunt instrument: get out of the way. See [goHome].
+        main.postDelayed({ goHome(app) }, GO_HOME_MS)
     }
 
     /**
-     * Opens the phone app, as the last word on getting the call on screen.
+     * Backs out to the home screen, so the call has the foreground.
      *
-     * [TelecomManager.showInCallScreen] is a *request* — it tells the default dialer to put its
-     * in-call activity up, and a dialer that doesn't act on it leaves the call running behind
-     * whatever you were doing with nothing to say so. That is what LightOS's phone app does, and
-     * no amount of asking politely changes it. Launching the app directly is not a request: it
-     * is the same thing that happens when the user taps Phone on the home screen, which is the
-     * one route that has always worked, and once there is an active call that is the screen it
-     * lands on.
+     * **The problem was never the dialer, it was this app.** LightChat places the call and then
+     * stays in front of it, because it is an ordinary activity that nothing has asked to leave.
+     * `showInCallScreen` tries to pull the call screen over the top of it; v1.6 tried launching
+     * the phone app to the same end. Both are ways of shoving something in front of an app that
+     * has no business still being there. Leaving is the smaller action and the one with nothing
+     * to argue about: the call screen is what LightOS shows when nothing else is in the way.
      *
-     * **The launcher intent with `NEW_TASK` and nothing else**, which matters. That combination
-     * brings the phone app's *existing task* to the front, so if its in-call activity is already
-     * running — because `showInCallScreen` did work, or because the dialer put it up by itself —
-     * this surfaces exactly that and changes nothing. Adding `CLEAR_TOP` or `SINGLE_TOP` here
-     * would tear down the in-call activity and leave the keypad in front of a live call, which
-     * is the failure this whole sequence exists to avoid, arrived at from the other direction.
+     * It also leaves the phone somewhere sensible afterwards. Launching the dialer left a task
+     * stack with LightChat under it, so hanging up dropped you back into a conversation you had
+     * finished with; going home means the call ends where a call ending should.
      *
-     * The package comes from telecom rather than being hardcoded: LightOS's dialer is the only
-     * one on Gio's phone, but a hardcoded package name is a bug on any other, and
-     * `defaultDialerPackage` is the same answer the system uses to route the call.
-     *
-     * Visible to `getLaunchIntentForPackage` because of the `ACTION_DIAL` entry in the manifest's
-     * `<queries>` — without that, Android 11 package visibility returns null here on a phone that
-     * plainly has a phone app.
+     * `ACTION_MAIN` + `CATEGORY_HOME` — what the home key does — rather than `finish()` on the
+     * activity. This runs from a posted runnable with no activity to hand, and finishing would
+     * throw away the thread's scroll position for the sake of a call. The app is backgrounded,
+     * not closed: it comes back exactly as it was.
      */
-    private fun openDialerApp(app: Context, telecom: TelecomManager) {
-        val pkg = runCatching { telecom.defaultDialerPackage }
-            .getOrNull()
-            ?.takeIf { it.isNotBlank() }
-            ?: return
-        val launch = runCatching { app.packageManager.getLaunchIntentForPackage(pkg) }
-            .getOrNull()
-            ?: return
-        runCatching { app.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    private fun goHome(app: Context) {
+        val home = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_HOME)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { app.startActivity(home) }
     }
 
     /**
-     * When to give up asking and just open the phone app, in millis after placing.
+     * When to step aside, in millis after placing.
      *
      * After the last [SURFACE_ATTEMPTS_MS] attempt, so a dialer that does honour
-     * `showInCallScreen` has already been given its three chances and this only ever re-surfaces
-     * a task that is already in front.
+     * `showInCallScreen` has already put the call up and this changes nothing. Late enough that
+     * the screen is not pulled away while the tap still feels like it is happening.
      */
-    private const val OPEN_DIALER_MS = 1800L
+    private const val GO_HOME_MS = 1800L
 
     /** When to ask for the call screen, in millis after placing. See [surfaceInCallScreen]. */
     private val SURFACE_ATTEMPTS_MS = longArrayOf(250L, 700L, 1500L)

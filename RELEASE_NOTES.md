@@ -1,26 +1,25 @@
-## LightChat v1.6 — the phone app is opened, not asked
+## LightChat v1.7 — get out of the way, don't push in front
 
-**v1.5 asked LightOS's dialer to show the call. It didn't.**
+**The problem was never the dialer. It was this app.** LightChat places the call and then stays
+in front of it, because it is an ordinary activity and nothing has asked it to leave.
 
-`TelecomManager.showInCallScreen` is a *request*: it tells the default dialer to put its in-call
-activity up, and a dialer that doesn't act on it leaves the call running behind whatever you
-were doing with nothing to say so. Retrying it three times past the radio, which is what v1.5
-added, only makes the same request three times. The premise was wrong, not the timing.
+Two versions were spent shoving something over the top of it. v1.5 asked
+`TelecomManager.showInCallScreen` to pull the call screen forward, three times. v1.6 launched the
+phone app outright to the same end. Both treat "LightChat is still on screen" as a thing to cover
+up rather than as the thing that is wrong.
 
-So the phone app is now opened outright, 1.8 seconds after the call is placed — its launcher
-intent, exactly what happens when you tap Phone on the home screen, which is the one route that
-has always worked. With a call up, that is the screen it lands on.
+So it now simply goes home, 1.8 seconds after the call is placed — `ACTION_MAIN` +
+`CATEGORY_HOME`, exactly what the home key does. The call screen is what LightOS shows when
+nothing else is in the way, so nothing needs to be launched or asked for.
 
-**`FLAG_ACTIVITY_NEW_TASK` and nothing else**, which is the part worth getting right. That
-combination brings the phone app's *existing* task to the front, so if the in-call activity is
-already running — because the dialer put it up by itself, or because `showInCallScreen` did work
-on some other build — this surfaces exactly that and changes nothing. Adding `CLEAR_TOP` or
-`SINGLE_TOP` would tear the in-call activity down and leave the keypad in front of a live call:
-the same failure this sequence exists to prevent, reached from the other side.
+It also leaves the phone somewhere sensible afterwards. Launching the dialer left a task stack
+with LightChat underneath it, so hanging up dropped you back into a conversation you had already
+finished with. Going home means the call ends where a call ending should.
 
-The three `showInCallScreen` attempts are kept ahead of it. They cost nothing on a dialer that
-ignores them, and on any other phone they are the correct route — this app is public, and
-hardcoding "LightOS's dialer is broken so always kick the app" would be wrong everywhere else.
-For the same reason the package comes from `defaultDialerPackage` rather than a literal: it is
-the same answer the system used to route the call, and a hardcoded package name is a bug on
-every phone but one.
+**Backgrounded, not closed.** Going home rather than calling `finish()` on the activity: this
+runs from a posted runnable with no activity to hand, and finishing would throw away the thread's
+scroll position for the sake of a call. LightChat comes back exactly as it was.
+
+The three `showInCallScreen` attempts stay ahead of it, unchanged. On a dialer that honours them
+the call screen is already up by the time this fires, and going home to a foreground call screen
+does nothing at all.

@@ -5,7 +5,7 @@ talking to an always-on, self-hosted [BlueBubbles Server](https://github.com/Blu
 reached privately over [Tailscale](https://tailscale.com/). Package
 `com.gios.lightchat`.
 
-**Current version: v1.6.x.** See [Version history](#version-history).
+**Current version: v1.7.x.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -304,6 +304,7 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v1.4.x | Calling actually works: `ACTION_CALL` to the telecom stack (falling back to `ACTION_DIAL` if `CALL_PHONE` is refused), and the `tel:` URI no longer percent-encodes the `+` out of an E.164 number |
 | v1.5.x | The call screen is brought up after placing (`TelecomManager.showInCallScreen`, retried past the radio) instead of the call connecting in the background; Call confirms on a second tap |
 | v1.6.x | The phone app is opened outright after placing a call, since LightOS's dialer ignores `showInCallScreen` |
+| v1.7.x | Placing a call backgrounds LightChat to the home screen instead of launching the phone app, so the call screen has the foreground and hanging up doesn't land back in the thread |
 
 ## Licence
 
