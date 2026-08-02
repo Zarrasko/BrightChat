@@ -152,7 +152,8 @@ class AddressBookTest {
         assertEquals("Kate Jacobs", index["2125550148"])
         // The nameless row's "name" is its own number; writing that into the index would put
         // digits over a real name from the server.
-        assertEquals(null, index["6082646591"])
+        assertTrue(index["6082646591"] == null)
+        assertEquals(2, index.size)
     }
 
     @Test

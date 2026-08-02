@@ -123,8 +123,15 @@ object AddressBook {
         for (contact in contacts) {
             val name = contact.name.trim()
             if (name.isEmpty()) continue
-            // A synthesised row from the message index has its own number as its name; putting
-            // that back into the index would write "3152122695" over a real name from the server.
+            // **A row titled by its own number is not a name.** [merge] falls back to the number
+            // when the address book has no name, which is right for a list you look at and wrong
+            // for an index you look *up* — writing it back would put "3152122695" over a real
+            // name from the server, which is the exact thing this whole feature exists to stop.
+            // Checking for a letter rather than comparing against the number catches it however
+            // the fallback was written.
+            if (name.none { it.isLetter() }) continue
+            // Same again for a row synthesised from the message index, which carries its key as
+            // its name and would otherwise round-trip back into the index it came from.
             if (contact.numbers.any { it.label == FROM_MESSAGES }) continue
             for (number in contact.numbers) {
                 if (number.key.isNotBlank()) out[number.key] = name
