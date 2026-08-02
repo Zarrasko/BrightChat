@@ -189,3 +189,15 @@ fun rememberCaller(): (String) -> Unit {
         }
     }
 }
+
+
+/**
+ * How long an armed "Call?" stays armed before it disarms itself.
+ *
+ * The Remove verb beside it needs no timeout, because it lives in a list and is disarmed by
+ * tapping anything else in that list. Call in the thread header has nothing beside it to tap,
+ * so an armed confirm would sit there indefinitely — and a "Call?" left over from a minute ago
+ * turns the next stray touch on the header into a call. Long enough to read the question and
+ * decide, short enough that it is never still waiting when you come back to the thread.
+ */
+const val CALL_CONFIRM_MS = 4_000L

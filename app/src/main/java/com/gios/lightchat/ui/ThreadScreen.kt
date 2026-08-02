@@ -109,6 +109,20 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     val context = LocalContext.current
     val ring = rememberCaller()
     /**
+     * Whether the header's Call is armed — the second-tap confirm, the same shape as Remove on
+     * the contact page and for a stronger reason. `ACTION_CALL` rings from the tap with nothing
+     * in between, and the header sits directly above a scrolling thread: a thumb that overshoots
+     * the top of the list lands on it. One tap now asks, the next one calls.
+     */
+    var confirmingCall by remember(convo.guid) { mutableStateOf(false) }
+    // Disarms itself. See CALL_CONFIRM_MS — nothing else on the header can disarm it, so
+    // without this an armed confirm outlives the intention behind it.
+    LaunchedEffect(confirmingCall) {
+        if (!confirmingCall) return@LaunchedEffect
+        kotlinx.coroutines.delay(CALL_CONFIRM_MS)
+        confirmingCall = false
+    }
+    /**
      * The number the header's Call rings, or null for no Call at all.
      *
      * Three conditions, and each removes a way for the verb to lie. **One participant**,
@@ -192,10 +206,19 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                 trailing = if (callNumber != null) {
                     {
                         HapticText(
-                            text = "Call",
+                            text = if (confirmingCall) "Call?" else "Call",
                             style = ChatType.hint,
-                            color = ChatColors.onSurfaceDim,
-                            onClick = { ring(callNumber) },
+                            // Brightened once armed, exactly as Remove? is: the word changed, and
+                            // on a greyscale panel the weight is what makes that noticeable.
+                            color = if (confirmingCall) ChatColors.onSurface else ChatColors.onSurfaceDim,
+                            onClick = {
+                                if (confirmingCall) {
+                                    confirmingCall = false
+                                    ring(callNumber)
+                                } else {
+                                    confirmingCall = true
+                                }
+                            },
                         )
                     }
                 } else {

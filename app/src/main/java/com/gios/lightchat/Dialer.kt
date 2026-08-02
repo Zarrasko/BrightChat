@@ -5,10 +5,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.telecom.TelecomManager
 import androidx.core.content.ContextCompat
 
 /**
  * Calling somebody from a conversation.
+ *
+ * **Placing the call is not the same as showing it.** `ACTION_CALL` hands the number to telecom
+ * and shows nothing at all; putting the call screen up is the default dialer's job, and LightOS's
+ * dialer does not do it for a call another app started. See [surfaceInCallScreen] — without that,
+ * a call connects with the chat thread still on screen and no visible way to hang up.
  *
  * **The number is placed, not typed.** `ACTION_CALL` dials straight from the tap, which needs
  * `CALL_PHONE` — the first dangerous permission this app has ever asked for, and worth being
@@ -117,9 +125,44 @@ object Dialer {
             context.startActivity(
                 Intent(Intent.ACTION_CALL, telUri(address)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
+            surfaceInCallScreen(context)
             true
         }.getOrDefault(false)
     }
+
+    /**
+     * Brings the in-call screen to the front after a call has been placed.
+     *
+     * **`ACTION_CALL` places the call and shows nothing.** What puts the call screen up is the
+     * default dialer's `InCallService`, launching its own activity when telecom tells it a call
+     * exists — and LightOS's dialer does not do that for a call started by another app. The
+     * result is a connected call with LightChat still on screen and no visible way to hang up,
+     * which is worse than not calling: the call is real, it is billing, and the only sign of it
+     * is the notification.
+     *
+     * [TelecomManager.showInCallScreen] is the documented way to ask for it, needs no permission
+     * of its own, and does nothing at all when there is no ongoing call.
+     *
+     * **Which is why this retries.** `startActivity` returns before telecom has a call to show —
+     * asking immediately is asking about a call that does not exist yet, and the request is
+     * silently dropped. The delays walk out past a slow radio without leaving the user looking
+     * at a chat thread for a second and a half; the later attempts land on a call screen that is
+     * already up, where re-showing it is a no-op. Cheaper than watching call state, which needs
+     * `READ_PHONE_STATE` and a listener to unregister.
+     */
+    private fun surfaceInCallScreen(context: Context) {
+        // From the application context, and deliberately: the posted work outlives the tap, and
+        // the system service fetched from an activity would otherwise be reached through it.
+        val app = context.applicationContext
+        val telecom = app.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager ?: return
+        val main = Handler(Looper.getMainLooper())
+        for (delay in SURFACE_ATTEMPTS_MS) {
+            main.postDelayed({ runCatching { telecom.showInCallScreen(false) } }, delay)
+        }
+    }
+
+    /** When to ask for the call screen, in millis after placing. See [surfaceInCallScreen]. */
+    private val SURFACE_ATTEMPTS_MS = longArrayOf(250L, 700L, 1500L)
 
     /**
      * Ring [address] by whatever route works, best first.

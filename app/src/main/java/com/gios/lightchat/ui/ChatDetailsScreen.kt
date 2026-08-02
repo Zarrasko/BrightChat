@@ -127,6 +127,15 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
     // above, and the same reason both are hoisted out of the LazyColumn.
     val canDial = remember { Dialer.available(context) }
     val ring = rememberCaller()
+    // The address whose Call is armed. Separate from `confirming` above, which arms a Remove:
+    // one state for both would make tapping Call arm that person's Remove as well, and the two
+    // verbs sit next to each other in the row.
+    var confirmingCall by remember(convo.guid) { mutableStateOf<String?>(null) }
+    LaunchedEffect(confirmingCall) {
+        if (confirmingCall == null) return@LaunchedEffect
+        kotlinx.coroutines.delay(CALL_CONFIRM_MS)
+        confirmingCall = null
+    }
     var noteOpened by remember(noteKey) { mutableStateOf(Store.noteOpened(context, noteKey)) }
     // The participant list keyed the People rows directly; a handle listed twice by the
     // server is a duplicate-key crash in a LazyColumn.
@@ -248,8 +257,18 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                         // thread's header offers none, because picking who to ring on the
                         // user's behalf is the one thing it cannot honestly do — here every
                         // member is already listed, so the choice is just a tap.
+                        confirmingCall = confirmingCall == address,
                         onCall = if (canDial && Dialer.callable(address)) {
-                            { ring(address) }
+                            {
+                                if (confirmingCall == address) {
+                                    confirmingCall = null
+                                    ring(address)
+                                } else {
+                                    // Arming one disarms any other, so two rows can never both
+                                    // be asking — the same rule Remove follows.
+                                    confirmingCall = address
+                                }
+                            }
                         } else {
                             null
                         },
@@ -504,6 +523,8 @@ private fun PersonRow(
     onRemove: () -> Unit,
     /** Null when there is nothing to ring — an Apple ID, or a phone with no dialer. */
     onCall: (() -> Unit)? = null,
+    /** Whether this row's Call is one tap from ringing. */
+    confirmingCall: Boolean = false,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -532,9 +553,9 @@ private fun PersonRow(
         if (onCall != null) {
             Spacer(modifier = Modifier.width(12.dp))
             HapticText(
-                text = "Call",
+                text = if (confirmingCall) "Call?" else "Call",
                 style = ChatType.hint,
-                color = ChatColors.onSurfaceDim,
+                color = if (confirmingCall) ChatColors.onSurface else ChatColors.onSurfaceDim,
                 onClick = onCall,
             )
         }

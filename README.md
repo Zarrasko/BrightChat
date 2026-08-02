@@ -5,7 +5,7 @@ talking to an always-on, self-hosted [BlueBubbles Server](https://github.com/Blu
 reached privately over [Tailscale](https://tailscale.com/). Package
 `com.gios.lightchat`.
 
-**Current version: v1.4.x.** See [Version history](#version-history).
+**Current version: v1.5.x.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -302,6 +302,7 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v1.2.x | Groups offered to Roll's send picker (`ChatsProvider`) and addressed by guid on the way back in; a login code from an unknown sender always alerts, and is served to LightKeyboard for three minutes |
 | v1.3.x | Call the person you're texting — `ACTION_DIAL` to the default calling app, from the thread header for a 1:1 and from every name on the contact page |
 | v1.4.x | Calling actually works: `ACTION_CALL` to the telecom stack (falling back to `ACTION_DIAL` if `CALL_PHONE` is refused), and the `tel:` URI no longer percent-encodes the `+` out of an E.164 number |
+| v1.5.x | The call screen is brought up after placing (`TelecomManager.showInCallScreen`, retried past the radio) instead of the call connecting in the background; Call confirms on a second tap |
 
 ## Licence
 

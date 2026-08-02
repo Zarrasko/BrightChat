@@ -1,40 +1,31 @@
-## LightChat v1.4 — calling actually places the call
+## LightChat v1.5 — the call screen comes up, and Call asks first
 
-**v1.3's Call opened the dialer on an empty keypad.** The number was there in the intent and
-never arrived on screen, which looks exactly like the intent being ignored and is the reason
-nothing anywhere reported an error.
+**v1.4 placed the call and showed nothing.** The call connected, in the background, with the
+chat thread still on screen and no visible way to hang it up. That is worse than not calling at
+all: the call is real, it is billing, and the only sign of it is a notification.
 
-The cause was `Uri.fromParts("tel", number, null)`. Its scheme-specific part is documented as
-*decoded*, so it percent-encodes on the way out and an E.164 handle leaves as
-`tel:%2B13152122695`. A dialer that decodes that is fine. LightOS's is the only dialer on the
-phone and does not, so it opened with nothing filled in. The v1.3 notes explained at some length
-why `fromParts` was the careful choice over `Uri.parse` — the reasoning was about a `#` being
-read as a fragment, which is real, and it traded a rare bug for one that happens every time.
+`ACTION_CALL` hands the number to telecom and stops there. Putting the call screen up is the
+default dialer's `InCallService`, which launches its own activity when telecom tells it a call
+exists — and LightOS's dialer does not do that for a call another app started. So the app now
+asks for it: `TelecomManager.showInCallScreen`, which is the documented route, needs no
+permission of its own, and does nothing when there is no ongoing call.
 
-The number now goes through `Dialer.dialable` first, which reduces it to the characters that
-change what gets dialled — digits, a leading `+`, `*` and `#`, and the `,` and `;` that make a
-stored extension work — and drops the brackets, spaces and dashes that are only there for a
-human to read. Nothing left needs encoding except `#`, which is escaped by hand. Four unit tests
-pin it, including the exact string that failed.
+It asks three times, at 250ms, 700ms and 1.5s. `startActivity` returns before telecom has a call
+to show, so asking immediately is asking about a call that does not exist yet and the request is
+dropped in silence — that single fact is why one attempt would have looked like no fix at all.
+The later attempts land on a screen that is already up, where re-showing it does nothing.
+Cheaper than watching call state, which needs `READ_PHONE_STATE` and a listener to unregister.
 
-**And the call is now placed rather than typed.** `ACTION_CALL` hands the number to the telecom
-stack, which parses nothing and does not care what the dialer app makes of a URI — on this phone
-that is the difference between a call and a keypad. It needs `CALL_PHONE`, the first dangerous
-permission this app has ever held, so:
+### Call asks before it rings
 
-- It is asked for on the **first tap of Call**, never at launch. A permission dialog that
-  appears because you opened a conversation is one that gets refused.
-- Refusing is not a dead end. The call falls back to `ACTION_DIAL`, the same route as v1.3 but
-  now with a URI that works. Refuse twice and Android stops showing the dialog entirely, which
-  lands in that same fallback rather than leaving an inert button.
-- The permission is re-checked at the moment of the call, not trusted from when the screen was
-  composed — it can be revoked from settings in between, and `ACTION_CALL` without it is a
-  `SecurityException` that takes the process down rather than an error anyone sees.
+Since v1.4 the tap rings immediately, and the thread header sits directly above a scrolling list
+— a thumb that overshoots the top of the thread lands on it. Call is now armed by the first tap
+and placed by the second: "Call" becomes "Call?", brightening the way "Remove?" does, and a
+second tap rings. Same pattern as Remove on the contact page, and the same reason.
 
-One more thing that was wrong and would have hidden the feature outright: whether to show Call
-at all was decided by asking whether an activity handles `ACTION_DIAL`, copied from how the note
-row checks for LightNotebook. That is the wrong question twice over. `ACTION_CALL` doesn't go to
-an activity at all, so a phone that calls perfectly well can resolve nothing; and with one dialer
-installed, that app's intent filters alone decide whether the verb appears. It now asks
-`FEATURE_TELEPHONY` — can this hardware make a call — and keeps the `ACTION_DIAL` lookup only as
-a second chance.
+One difference from Remove, which needed no timeout because it lives in a list and is disarmed
+by tapping anything else in it. The header has nothing beside it to tap, so an armed "Call?"
+would wait indefinitely and turn the next stray touch into a call. It disarms itself after four
+seconds. On the contact page, arming one person's Call disarms every other, so two rows can
+never both be asking — and Call and Remove hold separate state, or arming one would arm the
+other in a row where they sit side by side.
