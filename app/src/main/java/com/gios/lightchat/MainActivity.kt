@@ -42,6 +42,18 @@ import com.gios.lightchat.ui.theme.LightChatTheme
 /** The recipient extra on an incoming share. AOSP messaging's key, and what Roll sends. */
 private const val SHARE_EXTRA_ADDRESS = "address"
 
+/**
+ * A chat-room guid on an incoming share — how a sender addresses a *group*.
+ *
+ * There is no AOSP convention for this, because AOSP's model of a recipient is an address and
+ * a group iMessage does not have one: it is a room on the server with its own identity, and the
+ * set of people in it is a property of the room rather than the way you reach it. So this is a
+ * key private to these two apps, read from this app's own ChatsProvider — which is what makes
+ * it safe to treat as opaque and pass straight through to the API. A sender that doesn't know
+ * about it keeps working unchanged; it only ever adds a case.
+ */
+private const val SHARE_EXTRA_CHAT_GUID = "chat_guid"
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: ChatViewModel by viewModels()
@@ -190,7 +202,9 @@ class MainActivity : ComponentActivity() {
      * the in-app picker walks the filesystem directly rather than going through MediaStore.
      *
      * The recipient rides in an `address` extra — the AOSP messaging convention, and what
-     * Roll sends. Absent, the photographs wait until a thread is opened.
+     * Roll sends for a person. A group instead rides in `chat_guid`, since a group has no
+     * address to put in the AOSP extra (see [SHARE_EXTRA_CHAT_GUID]). With neither, the
+     * photographs wait until a thread is opened.
      */
     private fun handleSharedImages(intent: Intent?) {
         if (intent == null) return
@@ -209,10 +223,12 @@ class MainActivity : ComponentActivity() {
         // Consumed, so an activity recreation doesn't send the same photographs twice.
         intent.removeExtra(Intent.EXTRA_STREAM)
         val address = intent.getStringExtra(SHARE_EXTRA_ADDRESS)?.trim().orEmpty()
+        val chatGuid = intent.getStringExtra(SHARE_EXTRA_CHAT_GUID)?.trim().orEmpty()
         intent.removeExtra(SHARE_EXTRA_ADDRESS)
+        intent.removeExtra(SHARE_EXTRA_CHAT_GUID)
         val files = uris.mapNotNull { copyIntoCache(it) }
         if (files.isEmpty()) return
-        viewModel.receiveShared(address, files)
+        viewModel.receiveShared(address, chatGuid, files)
     }
 
     /** Copies a shared URI into `cacheDir/shared-in`, returning null if it can't be read. */

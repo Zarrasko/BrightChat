@@ -25,6 +25,8 @@ object Store {
     private const val KEY_POLL_FAILS = "poll_fails"   // consecutive failures
     private const val KEY_NOTIFY_UNKNOWN = "notify_unknown" // alert for senders not in the address book
     private const val KEY_NOTED = "noted_keys"        // conversations whose note has been opened
+    private const val KEY_CODE = "login_code"         // the newest one-time code seen
+    private const val KEY_CODE_AT = "login_code_at"   // when the message carrying it arrived
 
     /** The configured BlueBubbles Server URL, or null if setup hasn't run yet. */
     fun baseUrl(context: Context): String? =
@@ -186,6 +188,57 @@ object Store {
             ?.filter { it.isNotBlank() }
             ?.toSet()
             ?: emptySet()
+
+    /**
+     * How long a one-time code is worth offering.
+     *
+     * Three minutes, which is shorter than any service's own expiry and longer than the walk
+     * from "a code arrived" to "the field is focused". The number is a guess at human latency
+     * rather than at cryptography: the cost of being too short is retyping six digits, and the
+     * cost of being too long is the keyboard confidently offering a code that no longer works,
+     * in the one slot the user taps without reading.
+     */
+    const val CODE_TTL_MS = 3 * 60 * 1000L
+
+    /** A code and when it landed. */
+    data class LoginCode(val code: String, val arrivedAt: Long)
+
+    /**
+     * Records the newest one-time code.
+     *
+     * Written by whichever of the socket or the catch-up poll saw the message first, and the
+     * newer one wins — a phone that wakes to two codes should offer the one it can still use.
+     * [arrivedAt] is the *message's* timestamp rather than now, so a code fished out of a
+     * catch-up poll five minutes late is already expired by [loginCode] instead of arriving
+     * fresh.
+     */
+    fun setLoginCode(context: Context, code: String, arrivedAt: Long) {
+        if (code.isBlank()) return
+        val existing = prefs(context).getLong(KEY_CODE_AT, 0L)
+        if (arrivedAt < existing) return
+        prefs(context).edit()
+            .putString(KEY_CODE, code)
+            .putLong(KEY_CODE_AT, arrivedAt)
+            .apply()
+    }
+
+    /**
+     * The code, if there is one and it is still fresh.
+     *
+     * The expiry is applied here rather than by clearing the value on a timer, because nothing
+     * is guaranteed to be running to do the clearing — the process dies, the phone dozes, and
+     * a value that outlived its window has to answer for itself when it is next read.
+     */
+    fun loginCode(context: Context, now: Long = System.currentTimeMillis()): LoginCode? {
+        val code = prefs(context).getString(KEY_CODE, null)?.takeIf { it.isNotBlank() } ?: return null
+        val at = prefs(context).getLong(KEY_CODE_AT, 0L)
+        if (at <= 0L) return null
+        // Also rejects a timestamp in the future, which is what a clock correction between the
+        // Mac and the phone looks like, and which would otherwise pin a code indefinitely.
+        val age = now - at
+        if (age < 0L || age > CODE_TTL_MS) return null
+        return LoginCode(code, at)
+    }
 
     /** Sign out: wipe the stored password. */
     fun signOut(context: Context) {

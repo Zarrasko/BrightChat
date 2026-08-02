@@ -138,6 +138,28 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            The group conversations, for Roll's send picker. Exported and read-only: Roll asks
+            "who is this photograph for?" out of the address book, which knows about people and
+            has no way to represent a group iMessage. Groups only, no permission — see
+            ChatsProvider for why that trade is the right one here.
+
+            A fixed authority rather than ${applicationId}-derived, because the reader has to
+            hardcode it and a suffix that moves with the package id is a string that looks
+            configurable and isn't.
+        -->
+        <provider
+            android:name=".share.ChatsProvider"
+            android:authorities="com.gios.lightchat.chats"
+            android:exported="true" />
+
+        <!-- The one-time login code that just arrived, for three minutes, for LightKeyboard's
+             suggestion strip. See CodeProvider. -->
+        <provider
+            android:name=".share.CodeProvider"
+            android:authorities="com.gios.lightchat.code"
+            android:exported="true" />
+
         <!-- Shares downloaded non-image attachments to external apps (ACTION_VIEW /
              share) via a content:// URI — no broad storage permission needed. -->
         <provider

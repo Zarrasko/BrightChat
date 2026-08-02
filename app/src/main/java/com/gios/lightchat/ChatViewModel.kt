@@ -1146,21 +1146,30 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Photographs shared in from another app, optionally already addressed.
      *
-     * With an address this is the whole point of the feature: Roll asked who the photograph
+     * With a recipient this is the whole point of the feature: Roll asked who the photograph
      * was for, so there is nothing left to choose and the send goes straight out — the thread
      * opens with the picture already in it rather than opening a picker the user has just
      * used.
      *
-     * Without one, they are held and the user is put on the conversation list to pick a
+     * **Two shapes of recipient, because a group is not a person.** [address] is a handle and
+     * addresses a 1:1 thread, whose guid can simply be *constructed* from it — which is what
+     * makes it work for a thread that doesn't exist yet. A group has no handle at all: it is a
+     * room on the server, and the only way to name it is [chatGuid], which the sender got from
+     * this app's own ChatsProvider. So a guid, when there is one, is used verbatim and no guid
+     * is constructed — constructing one for a group is exactly the bug this avoids, since
+     * `iMessage;-;<anything>` is by definition a two-person chat and the photograph would go to
+     * one member instead of the room.
+     *
+     * Without either, they are held and the user is put on the conversation list to pick a
      * thread. Only a share from a chooser that could not name the recipient reaches that
      * branch, and guessing would be worse than asking.
      *
      * Sequential rather than parallel, like [sendImageFiles]: iMessage has no batch send and
      * racing several attachments lands them out of order.
      */
-    fun receiveShared(address: String, files: List<File>) {
+    fun receiveShared(address: String, chatGuid: String, files: List<File>) {
         if (files.isEmpty()) return
-        if (address.isBlank()) {
+        if (address.isBlank() && chatGuid.isBlank()) {
             pendingShared = files
             _state.update {
                 it.copy(
@@ -1178,11 +1187,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(composingNew = false, open = null, message = "Sending…") }
         viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
-            val handle = imessageHandle(address)
-            // Constructed rather than looked up, exactly as sendNewImage does: a 1:1 chat's
-            // guid *is* its handle, so this addresses an existing thread and creates one that
-            // doesn't exist without needing to know which case it is.
-            val guid = "iMessage;-;$handle"
+            val handle = if (chatGuid.isBlank()) imessageHandle(address) else ""
+            // A group's guid is handed over as-is. A person's is constructed rather than looked
+            // up, exactly as sendNewImage does: a 1:1 chat's guid *is* its handle, so this
+            // addresses an existing thread and creates one that doesn't exist without needing to
+            // know which case it is. There is no equivalent trick for a room, which is why the
+            // group case needs the guid passed in rather than derived.
+            val guid = chatGuid.ifBlank { "iMessage;-;$handle" }
             var sent = 0
             for (file in files) {
                 val img = readPickedImage(file) ?: continue
@@ -1199,10 +1210,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             messageCache.remove(guid)
-            val convo = Conversation(
+            // The stored row first, so a group opens with its real name and members instead of
+            // the placeholder below — which for a group would be a nameless chat with an empty
+            // participant list, i.e. a thread titled "Unknown" for a room the user just picked
+            // by name. The fallback still matters for the 1:1 case, where the thread may not
+            // exist on this phone yet.
+            val convo = store.chat(guid)?.copy(
+                lastText = if (sent == 1) "[Photo]" else "[$sent Photos]",
+                lastDate = System.currentTimeMillis(),
+                lastFromMe = true,
+            ) ?: Conversation(
                 guid = guid,
                 displayName = "",
-                participants = listOf(handle),
+                participants = listOfNotNull(handle.takeIf { it.isNotBlank() }),
                 isGroup = false,
                 lastText = if (sent == 1) "[Photo]" else "[$sent Photos]",
                 lastDate = System.currentTimeMillis(),

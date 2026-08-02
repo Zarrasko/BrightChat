@@ -21,9 +21,21 @@ object SenderFilter {
      *   a named group, or any participant with a name. Passed in rather than derived here because
      *   the two callers already hold different shapes of the same fact: the socket has a single
      *   incoming message, the poll has a whole conversation.
+     * @param carriesCode whether the message is a one-time login code ([LoginCodes]).
+     *
+     * **A login code always alerts, stranger or not**, and that is the one exception in here.
+     * The whole reason a code arrives from a number you have never seen is that it was generated
+     * for you seconds ago by something you are sitting in front of, waiting. Every other unknown
+     * sender is an interruption you did not ask for; this one is an interruption you caused, and
+     * silencing it makes the setting that silences strangers quietly break logging in — which is
+     * the worst kind of bug, because nothing appears to fail and the cause is a preference set
+     * weeks earlier.
+     *
+     * It does not widen anything else: the code still has to survive [LoginCodes.find], which
+     * requires the message to say in words that it is carrying one.
      */
-    fun mayAlert(context: Context, known: Boolean): Boolean =
-        known || Store.notifyUnknown(context)
+    fun mayAlert(context: Context, known: Boolean, carriesCode: Boolean = false): Boolean =
+        known || carriesCode || Store.notifyUnknown(context)
 
     /**
      * The socket's version of "known", from a live message.

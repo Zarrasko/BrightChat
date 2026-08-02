@@ -25,7 +25,7 @@ android {
         targetSdk = 35
         // CI overwrites both from the workflow run number; see .github/workflows/build.yml
         versionCode = 9
-        versionName = "1.1.0"
+        versionName = "1.2.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -126,4 +126,9 @@ dependencies {
         exclude(group = "org.json", module = "json")
     }
     // No Google Play Services / Firebase anywhere — that's the whole point.
+
+    // The first unit tests in this app, for LoginCodes. It is pure Kotlin with no Android
+    // imports precisely so it can be tested on the JVM — the parser decides what gets pinned
+    // to the keyboard's suggestion strip, and being wrong there is silent.
+    testImplementation("junit:junit:4.13.2")
 }

@@ -59,6 +59,13 @@ jobs:
           keyPassword=${KEY_PASSWORD}
           EOF
 
+      # Before the APKs, so a failing test stops the release rather than being noticed after
+      # Obtainium has already installed it.
+      - name: Unit tests
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :app:testDebugUnitTest --stacktrace
+
       - name: Build APKs
         run: |
           chmod +x ./gradlew

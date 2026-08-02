@@ -15,6 +15,7 @@ import com.gios.lightchat.Contacts
 import com.gios.lightchat.CatchUp
 import com.gios.lightchat.DeliveryWorker
 import com.gios.lightchat.HeadsUp
+import com.gios.lightchat.LoginCodes
 import com.gios.lightchat.Notifications
 import com.gios.lightchat.PendingAlerts
 import com.gios.lightchat.PollAlarm
@@ -294,14 +295,26 @@ class SocketService : Service() {
         SocketBus.incoming.tryEmit(incoming)
         // Read once: this is a JSON parse per call, and both the filter and the title want it.
         val contacts = contacts()
+        // A one-time code, if this is one. Read before the alert gate because it decides the
+        // gate, and held for the keyboard either way — see CodeProvider. Only for genuinely new
+        // incoming messages: a code re-delivered by a reconnect is one the user has already
+        // seen, and re-pinning it would put an old number back in the suggestion strip.
+        val code = if (isNew && !incoming.message.fromMe && !incoming.message.isGroupEvent) {
+            LoginCodes.find(incoming.message.text)
+        } else {
+            null
+        }
+        if (code != null) Store.setLoginCode(this, code, incoming.message.date)
         val alertable = isNew &&
             !incoming.message.fromMe &&
             !incoming.message.isGroupEvent &&
-            // A stranger doesn't interrupt unless you've asked to be interrupted. The message
-            // still arrives above — only the alert is gated. See SenderFilter.
+            // A stranger doesn't interrupt unless you've asked to be interrupted — unless what
+            // they sent is the code you are waiting on. The message still arrives above; only
+            // the alert is gated. See SenderFilter.
             SenderFilter.mayAlert(
                 this,
                 SenderFilter.knownSender(contacts, incoming.chatDisplayName, incoming.message.sender),
+                carriesCode = code != null,
             )
         // Arrived while the app was open. Not necessarily *seen*: the user can be on the
         // list, or in another thread, and pressing the power button from there used to mean

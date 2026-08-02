@@ -148,12 +148,31 @@ object CatchUp {
         // Incoming, unread account-wide (a dateRead stamp means it was read on some device),
         // newer than the line. Anything newer that fails this is either our own message or
         // one already read, and the watermark may safely pass it.
-        val missed = convos
-            .filter { it.unread && !it.lastFromMe && it.lastDate > watermark }
-            // Strangers, unless asked for. The watermark still passes a filtered message —
+        val fresh = convos.filter { it.unread && !it.lastFromMe && it.lastDate > watermark }
+        // A one-time code found here is held for the keyboard exactly as the socket's path does,
+        // and for the same reason: this is the path that runs while the phone is asleep, so on a
+        // phone that dozed between the code arriving and being wanted, this is the *only* thing
+        // that saw it. [Store.setLoginCode] stamps it with the message's own time, so one that
+        // is already older than the window expires immediately rather than arriving fresh.
+        //
+        // The preview text is what there is — the poll works from the conversation list, which
+        // carries the last message's body and not the message. That is enough: a code is short
+        // and services put it in the first line.
+        fresh.forEach { convo ->
+            LoginCodes.find(convo.lastText)?.let { Store.setLoginCode(app, it, convo.lastDate) }
+        }
+        val missed = fresh
+            // Strangers, unless asked for — or unless it's the code you're waiting on, which is
+            // an interruption you caused. The watermark still passes a filtered message —
             // suppressing it is a decision, not a deferral, so it must not be re-examined every
             // poll for the rest of time. See SenderFilter.
-            .filter { SenderFilter.mayAlert(app, contacts.knows(it)) }
+            .filter {
+                SenderFilter.mayAlert(
+                    app,
+                    contacts.knows(it),
+                    carriesCode = LoginCodes.looksLikeLogin(it.lastText),
+                )
+            }
         if (missed.isEmpty()) {
             Store.setLastAlertedAt(app, maxOf(watermark, seen))
             return true
