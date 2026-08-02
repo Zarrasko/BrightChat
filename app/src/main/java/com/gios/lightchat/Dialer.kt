@@ -5,6 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.telecom.TelecomManager
 import androidx.core.content.ContextCompat
 
@@ -14,8 +17,10 @@ import androidx.core.content.ContextCompat
  * **Placing the call is not the same as showing it.** `ACTION_CALL` hands the number to telecom
  * and shows nothing at all; putting the call screen up is the default dialer's job, and LightOS's
  * dialer does not do it for a call another app started, and does not act on being asked either.
- * So the call is placed and this app immediately gets out of the way — see [standAside]. Without
- * that, a call connects with the chat thread still on screen and no visible way to hang up.
+ * So the call is handed to `TelecomManager.placeCall` and this app immediately gets out of the
+ * way — see [standAside]. Without that, a call connects with the chat thread still on screen and
+ * no visible way to hang up; and with `ACTION_CALL` in place of `placeCall`, getting out of the
+ * way cancels the call activity before it has placed anything. See [call].
  *
  * **The number is placed, not typed.** `ACTION_CALL` dials straight from the tap, which needs
  * `CALL_PHONE` — the first dangerous permission this app has ever asked for, and worth being
@@ -120,14 +125,54 @@ object Dialer {
      */
     fun call(context: Context, address: String): Boolean {
         if (!callable(address) || !canCallDirectly(context)) return false
+        val telecom = context.applicationContext
+            .getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
+        // **`placeCall`, not `ACTION_CALL`, and the difference is the whole of v1.8's bug.**
+        //
+        // `ACTION_CALL` is not a direct line to telecom. It starts an *activity* in the dialer
+        // package, and that activity is what asks telecom to place the call. v1.8 removed the
+        // delay before going home, so the home launch and the call activity's launch reached
+        // ActivityManager in the same breath — home won, the call activity was never resumed,
+        // and the call it had not placed yet was never placed. The screen went home and nothing
+        // rang. The 1.8-second wait v1.7 kept "out of caution" was in fact the only thing giving
+        // that activity time to exist.
+        //
+        // `placeCall` is the API the dialer's activity would have called. It hands the number to
+        // telecom on this thread, before this function returns, so there is nothing in flight
+        // for the home launch to cut off and stepping aside immediately is safe. Same
+        // `CALL_PHONE` permission, no activity in the middle.
+        if (telecom != null) {
+            val placed = runCatching { telecom.placeCall(telUri(address), Bundle()) }.isSuccess
+            if (placed) {
+                standAside(context)
+                return true
+            }
+        }
+        // No telecom service, or it refused. Back to the intent — and back to the delay with it,
+        // because the reason for the delay comes back too: there is an activity to let start.
         return runCatching {
             context.startActivity(
                 Intent(Intent.ACTION_CALL, telUri(address)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
-            standAside(context)
+            standAsideAfter(context, INTENT_CALL_SETTLE_MS)
             true
         }.getOrDefault(false)
     }
+
+    /**
+     * Steps aside once [delayMs] has passed — the intent path only.
+     *
+     * Long enough for the dialer's call activity to be started and to have asked telecom for the
+     * call. Not needed on the [TelecomManager.placeCall] path, where the call is already placed
+     * by the time anything else runs.
+     */
+    private fun standAsideAfter(context: Context, delayMs: Long) {
+        val app = context.applicationContext
+        Handler(Looper.getMainLooper()).postDelayed({ standAside(app) }, delayMs)
+    }
+
+    /** How long the dialer's call activity needs before going home can no longer cancel it. */
+    private const val INTENT_CALL_SETTLE_MS = 1_200L
 
     /**
      * Steps aside so the call has the foreground, immediately after placing it.

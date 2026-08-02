@@ -1,21 +1,25 @@
-## LightChat v1.8 — stepping aside happens on the tap
+## LightChat v1.9 — v1.8 went home without calling
 
-**The 1.8-second wait is gone.** Press Call and LightChat leaves immediately, so the call screen
-is what you are looking at rather than a chat thread you have finished with.
+**v1.8 removed a delay that turned out to be the only thing making the call work.**
 
-The delay was inherited from a problem that no longer exists. It was there to walk out past a
-slow radio, back when the plan was to *ask* the dialer to show a call — a request about a call
-telecom has not registered yet is dropped in silence, so v1.5's ladder of three attempts at 250,
-700 and 1500ms was real work. v1.7 replaced all of that with going home, and kept the timing out
-of caution rather than for a reason. Leaving does not depend on the call existing: the intent
-that places it has already been issued, and telecom brings the in-call UI up when it is ready
-whether or not this app is still in front. All the wait bought was 1.8 seconds of looking at the
-wrong screen.
+`ACTION_CALL` is not a direct line to telecom. It starts an *activity* in the dialer package, and
+that activity is what asks telecom to place the call. v1.8 stepped aside the instant the intent
+was fired, so the home launch and the call activity's launch reached ActivityManager together —
+home won, the call activity was never resumed, and the call it had not placed yet was never
+placed. The screen went home and nothing rang.
 
-`showInCallScreen` is still asked for, once, immediately before leaving. It costs a single call
-on a dialer that ignores it, and on any other phone it is the correct route — this app runs on
-more phones than one, and "the LightOS dialer is unhelpful so always go home" would be wrong on
-all of them.
+The 1.8-second wait v1.7 kept "out of caution" was, by accident, exactly what gave that activity
+time to exist. v1.8's release notes said the delay bought nothing. That was wrong, and the way it
+was wrong is worth writing down: the delay had been introduced for one reason (letting a retry
+ladder outlast a slow radio), that reason was correctly removed, and nobody checked whether it
+had since acquired a second one.
 
-Everything else about the step aside is unchanged: `ACTION_MAIN` + `CATEGORY_HOME` rather than
-`finish()`, so the app is backgrounded and comes back with the thread exactly where it was.
+So the call now goes through `TelecomManager.placeCall` — the same API the dialer's activity
+would have called, one step earlier. It hands the number to telecom on the calling thread, before
+the function returns, so there is nothing in flight for the home launch to cut off and stepping
+aside immediately is safe. Same `CALL_PHONE` permission, no activity in the middle, and the tap
+still feels instant.
+
+The `ACTION_CALL` intent is kept as a fallback for a phone with no telecom service or one that
+refuses the call — and the delay comes back on that path only, because the reason for it comes
+back with it: there is an activity to let start.
