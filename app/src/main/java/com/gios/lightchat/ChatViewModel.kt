@@ -168,19 +168,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         observeSocket()
-        // **The handset's own contacts, folded in on construction.**
-        //
-        // The persisted index is the last merge with the server, so somebody saved on the phone
-        // since then is missing from it until the next fetch — a long time to keep showing digits
-        // for a person you have just named. Empty when the contacts permission has not been
-        // granted, in which case nothing here changes anything.
-        viewModelScope.launch {
-            val local = runCatching { AddressBookRepo(application).nameIndex() }.getOrDefault(emptyMap())
-            if (local.isEmpty()) return@launch
-            contacts = Contacts.fromMap(contacts.asMap() + local)
-            Store.setContacts(application, contacts.asMap())
-            _state.update { it.copy(contacts = contacts) }
-        }
         if (api != null) {
             refresh()
             startSocket()
@@ -317,6 +304,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val privateApi = runCatching { client.serverInfo() }.getOrNull()
                 ?.also { Store.setPrivateApi(app, it.privateApiReady) }
                 ?.privateApiReady ?: _state.value.privateApi
+            /**
+             * **The handset's own contacts, every refresh.**
+             *
+             * Outside the `contactsLoaded` guard below on purpose. That guard exists because the
+             * server's contact list is a slow call worth making once a session; the phone's
+             * address book is a local query, and it is the one that changes while the app is
+             * open — you save somebody and come straight back. Merging it only on first load
+             * would mean a contact saved a moment ago waited for a restart.
+             *
+             * Empty when the contacts permission has not been granted, which is until the Dial
+             * tab has been opened; then this is the old behaviour exactly.
+             */
+            val local = runCatching { AddressBookRepo(app).nameIndex() }.getOrDefault(emptyMap())
+            if (local.isNotEmpty()) {
+                contacts = Contacts.fromMap(contacts.asMap() + local)
+                Store.setContacts(app, contacts.asMap())
+            }
             if (!contactsLoaded) {
                 runCatching { client.contacts() }.onSuccess { raw ->
                     /**
@@ -336,7 +340,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                      * happens after opening the Dial tab — in which case this is the old
                      * behaviour exactly.
                      */
-                    val local = runCatching { AddressBookRepo(app).nameIndex() }.getOrDefault(emptyMap())
+                    // Server first, then the handset over the top: the phone wins a collision
+                    // because it is the one the user just edited.
                     contacts = Contacts.fromMap(Contacts.from(raw).asMap() + local)
                     // Persist so SocketService can name notification senders even
                     // when the app (and this ViewModel) isn't running.
