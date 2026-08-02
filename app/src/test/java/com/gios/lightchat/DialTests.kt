@@ -110,6 +110,40 @@ class AddressBookTest {
     }
 
     @Test
+    fun `people only BlueBubbles knows are folded in`() {
+        val phone = AddressBook.merge(listOf(row(1, "Alex", "608-264-6591")))
+        // Keys as Contacts.asMap stores them: last ten digits, lowercase for an email.
+        val out = AddressBook.withKnown(
+            phone,
+            mapOf(
+                "6082646591" to "Alex From The Mac",   // already on the phone; the phone wins
+                "3152122695" to "Liz",                 // only on the Mac
+                "basil@icloud.com" to "Basil",         // an email; nothing to dial
+            ),
+        )
+        assertEquals(listOf("Alex", "Liz"), out.map { it.name })
+        // The phone's row survives intact rather than being replaced by a name-only one.
+        assertEquals("608-264-6591", out[0].numbers[0].raw)
+        assertEquals(AddressBook.FROM_MESSAGES, out[1].numbers[0].label)
+    }
+
+    @Test
+    fun `synthetic ids are negative, stable and distinct`() {
+        val known = mapOf("3152122695" to "Liz", "2125550148" to "Zoe")
+        val once = AddressBook.withKnown(emptyList(), known)
+        val twice = AddressBook.withKnown(emptyList(), known)
+        assertEquals(once.map { it.id }, twice.map { it.id })
+        assertEquals(2, once.map { it.id }.toSet().size)
+        assertTrue(once.all { it.id < 0 })
+    }
+
+    @Test
+    fun `no index changes nothing`() {
+        val phone = AddressBook.merge(listOf(row(1, "Alex", "1112223333")))
+        assertEquals(phone, AddressBook.withKnown(phone, emptyMap()))
+    }
+
+    @Test
     fun `an empty query is the whole address book`() {
         val all = AddressBook.merge(listOf(row(1, "Alex", "1112223333")))
         assertEquals(all, AddressBook.search(all, ""))

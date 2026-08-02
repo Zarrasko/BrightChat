@@ -97,6 +97,9 @@ fun DialerScreen(
     }
 
     var digits by remember { mutableStateOf("") }
+    // Read once and held in state rather than read per frame: it is a preferences parse, and the
+    // two things that change it — assigning and clearing — both go through here and can say so.
+    var speed by remember { mutableStateOf(Store.speedDialAll(context)) }
     var notice by remember { mutableStateOf<String?>(null) }
     // The notice is a sentence about something that just happened; it should not still be there
     // a minute later claiming it.
@@ -128,7 +131,7 @@ fun DialerScreen(
         if (key !in '1'..'9') return@hold
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         val slot = key - '0'
-        val held = Store.speedDial(context, slot)
+        val held = speed[slot]
         if (held != null) {
             digits = ""
             ring(held.number)
@@ -141,7 +144,8 @@ fun DialerScreen(
             return@hold
         }
         Store.setSpeedDial(context, slot, top.raw, name)
-        notice = "$name on $slot"
+        speed = Store.speedDialAll(context)
+        notice = "$name on $slot — hold $slot to ring, or Clear it below"
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
@@ -206,11 +210,27 @@ fun DialerScreen(
                                 )
                             }
                         }
-                        // **Nothing until you type.** The address book in full is a list nobody
-                        // scrolls to find somebody in — that is what the pad is for — and putting
-                        // it on screen at rest means every glance at this tab starts with the
-                        // wrong three hundred people. Typing one digit is enough to make the list
-                        // worth having.
+                        // **At rest, the speed dials — and nothing else.** The address book in
+                        // full is a list nobody scrolls to find somebody in; that is what the pad
+                        // is for. What is worth showing with nothing typed is the handful of
+                        // people a held key already rings, which is also the only place they are
+                        // visible at all: a slot you cannot see is a slot you cannot change your
+                        // mind about.
+                        if (digits.isEmpty()) {
+                            items(speed.entries.sortedBy { it.key }.toList(), key = { "speed-${it.key}" }) { slot ->
+                                SpeedRow(
+                                    digit = slot.key,
+                                    name = slot.value.name,
+                                    number = slot.value.number,
+                                    onCall = { ring(slot.value.number) },
+                                    onClear = {
+                                        Store.clearSpeedDial(context, slot.key)
+                                        speed = Store.speedDialAll(context)
+                                        notice = "${slot.key} is free again"
+                                    },
+                                )
+                            }
+                        }
                         items(if (digits.isEmpty()) emptyList() else results, key = { it.id }) { contact ->
                             DialRow(
                                 title = contact.name,
@@ -250,6 +270,56 @@ fun DialerScreen(
         }
 
         ConversationNavbar(current = tab, unread = emptySet(), onSelect = onSelectTab)
+    }
+}
+
+/**
+ * One speed-dial slot: the digit, who is on it, and the way off it.
+ *
+ * Clear rather than a long-press or a swipe, and deliberately: holding the key already means
+ * "ring this", and giving the same gesture a second meaning depending on where the finger is
+ * would make the one gesture in this screen ambiguous. A word costs a few pixels on a row that
+ * only exists when the pad is empty.
+ */
+@Composable
+private fun SpeedRow(
+    digit: Int,
+    name: String,
+    number: String,
+    onCall: () -> Unit,
+    onClear: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = "$digit", style = ChatType.body, color = ChatColors.onSurfaceDim)
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            HapticText(
+                text = name,
+                style = ChatType.body,
+                color = ChatColors.onSurface,
+                onClick = onCall,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Start,
+                maxLines = 1,
+            )
+            Text(
+                text = number,
+                style = ChatType.hint,
+                color = ChatColors.onSurfaceDim,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        HapticText(
+            text = "Clear",
+            style = ChatType.hint,
+            color = ChatColors.onSurfaceDim,
+            onClick = onClear,
+        )
     }
 }
 

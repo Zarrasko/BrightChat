@@ -105,6 +105,66 @@ object AddressBook {
     }
 
     /**
+     * The phone's address book with everybody BlueBubbles knows folded in.
+     *
+     * **Two address books, and neither is complete on its own.** The phone's has landlines and
+     * people who have never texted; the BlueBubbles index is the Mac's contacts as iMessage sees
+     * them, and it holds people who exist on the account but were never saved to this handset —
+     * a number you have messaged for a year from the Mac is a stranger to the dialer otherwise.
+     * The complaint that motivates this is the honest one: somebody in the list with no name.
+     *
+     * **The phone wins every collision.** Its rows carry structure — several numbers, a label
+     * per number, the user's own choice of default — and the BlueBubbles index is one name per
+     * key with none of that. Where both know a key, taking the phone's row loses nothing;
+     * taking the other way round would throw away everything but the name.
+     *
+     * @param known the persisted BlueBubbles index, key → name, as
+     *   [com.gios.lightchat.Contacts.asMap] stores it. Its keys are already normalised the same
+     *   way [key] normalises: last ten digits for a number, lowercase for an email.
+     *
+     * Email handles are dropped. This list exists to be dialled from, and a row whose only verb
+     * cannot work is a row that lies about what it does — the same reason the address-book query
+     * reads numbers and not emails.
+     */
+    fun withKnown(phone: List<PhoneContact>, known: Map<String, String>): List<PhoneContact> {
+        if (known.isEmpty()) return phone
+        val seen = HashSet<String>()
+        for (contact in phone) for (number in contact.numbers) seen.add(number.key)
+        val extra = ArrayList<PhoneContact>()
+        for ((k, name) in known) {
+            if (k.isBlank() || k in seen) continue
+            if (k.any { !it.isDigit() }) continue   // an email, or a key that isn't a number
+            if (k.length < MIN_KEY_DIGITS) continue
+            seen.add(k)
+            extra.add(
+                PhoneContact(
+                    // Negative, and derived from the key rather than counted: these ids share a
+                    // list with real contact ids and are used as LazyColumn keys, so they have to
+                    // be unique against those and stable across reloads. A counter would
+                    // renumber everybody whenever one contact was added.
+                    id = -(k.hashCode().toLong() and 0xFFFFFFFFL) - 1L,
+                    name = name.trim().ifBlank { k },
+                    numbers = listOf(PhoneNumber(raw = k, key = k, label = FROM_MESSAGES)),
+                ),
+            )
+        }
+        if (extra.isEmpty()) return phone
+        return (phone + extra).sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+    }
+
+    /**
+     * What the subtitle says for somebody who is only in the message index.
+     *
+     * Named rather than blank, because the difference matters when you are looking at the row:
+     * this number has no entry on the phone, so Save on the contact page is the thing to do about
+     * it. A silent row would just look like a contact with a missing label.
+     */
+    const val FROM_MESSAGES = "From messages"
+
+    /** Ten digits is a whole number; a shorter key is a short code the message index picked up. */
+    private const val MIN_KEY_DIGITS = 7
+
+    /**
      * The address book filtered by what has been typed on the pad.
      *
      * **Name matches come first, then number matches**, and the split is worth the extra pass.

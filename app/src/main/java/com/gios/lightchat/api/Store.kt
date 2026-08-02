@@ -295,6 +295,23 @@ object Store {
             .apply()
     }
 
+    /**
+     * Forgets the slot on [digit].
+     *
+     * Written as the whole map rather than by removing one line, because the storage is one
+     * string: there is no key to remove, only a value to rewrite without it.
+     */
+    fun clearSpeedDial(context: Context, digit: Int) {
+        val next = speedDialAll(context).toMutableMap()
+        if (next.remove(digit) == null) return
+        prefs(context).edit()
+            .putString(
+                KEY_SPEED_DIAL,
+                next.entries.joinToString("\n") { "${it.key}\u0000${it.value.number}\u0000${it.value.name}" },
+            )
+            .apply()
+    }
+
     /** Sign out: wipe the stored password. */
     fun signOut(context: Context) {
         prefs(context).edit().clear().apply()

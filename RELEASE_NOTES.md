@@ -1,44 +1,46 @@
-## LightChat v2.1 — four things, mostly getting out of the way
+## LightChat v2.2 — both address books, and a way off a speed dial
 
-### Opening a chat no longer opens the keyboard
+### Everybody you message has a contact now
 
-Reading a thread is the common case and typing is the deliberate one; a keyboard covering half
-the messages you came to read had that backwards. Two halves to the fix, because there were two
-ways it happened. The activity now declares `stateAlwaysHidden`, which covers the window
-appearing. And the thread clears focus when it opens, which covers everything else — the compose
-field is the only focusable thing on the screen, so anything that hands focus around (coming back
-from the dialer, a notification deep link swapping the open thread under a composed screen) lands
-on it, and focus on a text field is what summons the IME.
+Two address books, and neither is complete on its own. The phone's has landlines and people who
+have never texted. The BlueBubbles index is the Mac's contacts as iMessage sees them, and it
+holds people who exist on the account but were never saved to this handset — a number you have
+messaged for a year from the Mac was a stranger to the dialer, showing up as digits with no name
+or not at all.
 
-### Save an unknown sender to contacts
+The dialer's list is now both, folded together. **The phone wins every collision**, and that is
+the whole of the merge rule: its rows carry structure — several numbers, a label per number, your
+own choice of default — while the message index is one name per key with none of that. Where both
+know a number, keeping the phone's row loses nothing; the other way round would throw away
+everything but the name.
 
-A **Save** verb on the contact page, on any member the address book cannot name. It hands the
-number to the contacts app with `ACTION_INSERT_OR_EDIT` and waits — this app does not write
-contacts and should not, since the alternative is `WRITE_CONTACTS` and reimplementing a form that
-already exists.
+Somebody who exists only in the message index gets a row reading **"From messages"** under their
+name, rather than a silent one. The difference matters when you are looking at it: that number has
+no entry on the phone, so the Save verb on their contact page is the thing to do about it, and a
+blank label would just look like a contact missing its type.
 
-`INSERT_OR_EDIT` rather than `INSERT`, which is one constant and the difference between a clean
-address book and two Alexes: a number you have been texted by is often somebody already saved
-under a different line, and `INSERT` would duplicate them without asking. Offered only where
-there is no name already and the handle is a number, since the contacts editor has nowhere
-sensible to put an Apple ID from a phone-number field.
+Email handles are dropped. This list exists to be dialled from, and a row whose only verb cannot
+work is a row that lies about what it does — the same reason the address-book query reads numbers
+and not emails.
 
-### The dialer lists nobody until you type
+The ids for those synthesised rows are negative and derived from the number rather than counted.
+They share a list with real contact ids and are used as list keys, so they have to be unique
+against those and stable across a reload; a counter would renumber everybody the moment one
+contact was added.
 
-And the "Dial" title is gone. The address book in full is a list nobody scrolls to find somebody
-in — that is what the pad is for — and having it on screen at rest meant every glance at the tab
-started with the wrong three hundred people. One digit is enough to make the list worth having.
-The title went for the same reason: on a 3.92" panel a header that only labels is a row of
-contacts given up, and the keypad says what the screen is more plainly than the word did.
+### The speed dials are visible, and can be cleared
 
-### Pinning moved to the row's long-press
+v2.0 let you put somebody on a key and gave you no way to see who was there or take them off. Both
+were the same omission: a slot you cannot see is a slot you cannot change your mind about.
 
-The text verb v2.0 put in the row shared its line with the title and the timestamp, so the title
-lost about a third of its width to a word only relevant on one tab — and a tap target that small,
-sitting inside a row that is itself clickable and swipeable, is a coin toss.
+With nothing typed, the list is now the speed dials — the digit, the name, the number, and
+**Clear**. Tapping the name rings them, which makes the resting screen useful rather than the
+blank it was in v2.1. Typing a digit replaces it with search, exactly as before.
 
-Long-press now means the useful verb for the list you are on: star elsewhere, pin on Favorites,
-where the chat is already starred and starring is the one thing it cannot do. A pinned row wears
-a `↑` prefix on its title, the same "something is true about this row" language as the `•` unread
-marker. Unstarring moved into the swipe reveal, taking Delete's place on that tab — it is the
-destructive verb and that is where the destructive verb goes.
+Clear as a word rather than a long-press or a swipe, deliberately. Holding the key already means
+"ring this", and giving that gesture a second meaning depending on where the finger happens to be
+would make the one gesture on this screen ambiguous. Assigning now says so too: "Alex on 3 — hold
+3 to ring, or Clear it below".
+
+Four more unit tests over the merge: the phone winning a collision, emails being dropped, the ids
+being negative, distinct and stable, and an empty index changing nothing.

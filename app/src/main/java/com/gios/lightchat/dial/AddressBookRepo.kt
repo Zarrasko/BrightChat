@@ -22,7 +22,10 @@ import kotlinx.coroutines.withContext
 class AddressBookRepo(private val context: Context) {
 
     suspend fun load(): List<PhoneContact> = withContext(Dispatchers.IO) {
-        AddressBook.merge(readNumbers()).take(AddressBook.MAX)
+        // Both books, phone first. See AddressBook.withKnown for why neither is enough alone.
+        AddressBook
+            .withKnown(AddressBook.merge(readNumbers()), com.gios.lightchat.api.Store.contacts(context).asMap())
+            .take(AddressBook.MAX)
     }
 
     private fun readNumbers(): List<AddressBook.Row> {

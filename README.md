@@ -5,7 +5,7 @@ talking to an always-on, self-hosted [BlueBubbles Server](https://github.com/Blu
 reached privately over [Tailscale](https://tailscale.com/). Package
 `com.gios.lightchat`.
 
-**Current version: v2.1.x.** See [Version history](#version-history).
+**Current version: v2.2.x.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -309,6 +309,7 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v1.9.x | Fixes v1.8 going home without calling: `ACTION_CALL` starts an activity that places the call, and the immediate home launch cancelled it. Uses `TelecomManager.placeCall` instead, which needs no activity |
 | v2.0.x | A dialer that is also the contacts list — T9 search over the phone's address book, press-and-hold 1–9 to speed dial. Favorites is now the front page, and starred chats can be pinned to the top of it |
 | v2.1.x | Opening a chat no longer opens the keyboard; Save an unknown sender to contacts; the dialer lists nobody until you type; pinning moved to the row's long-press |
+| v2.2.x | The contacts list is both address books — the phone's and BlueBubbles' — so nobody you message is a stranger to the dialer; the speed dials are listed at rest and can be cleared |
 
 ## Licence
 
