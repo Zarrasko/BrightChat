@@ -148,7 +148,16 @@ object CatchUp {
         // Incoming, unread account-wide (a dateRead stamp means it was read on some device),
         // newer than the line. Anything newer that fails this is either our own message or
         // one already read, and the watermark may safely pass it.
-        val fresh = convos.filter { it.unread && !it.lastFromMe && it.lastDate > watermark }
+        val fresh = convos.filter { convo ->
+            if (convo.lastDate <= watermark) return@filter false
+            val reaction = convo.lastReaction
+            // A tapback is judged on its own terms. `lastFromMe` describes the newest real
+            // *speech*, so a reaction to something I said fails it — and that is precisely
+            // the case worth being told about. (The socket sees these live; this is the path
+            // that runs when it was asleep or wedged.)
+            if (reaction != null) return@filter !reaction.fromMe
+            convo.unread && !convo.lastFromMe
+        }
         // A one-time code found here is held for the keyboard exactly as the socket's path does,
         // and for the same reason: this is the path that runs while the phone is asleep, so on a
         // phone that dozed between the code arriving and being wanted, this is the *only* thing
@@ -178,12 +187,10 @@ object CatchUp {
             return true
         }
 
-        val titled = missed.map { convo ->
-            val title = convo.displayName.ifBlank {
-                convo.participants.firstOrNull()?.let { contacts.name(it) ?: it } ?: "Message"
-            }
-            convo to title
-        }
+        // Title and body together, from the row: a group says who spoke, and a row whose
+        // newest activity is a tapback says who reacted and to what. See AlertText — the
+        // socket path phrases the same message the same way.
+        val alerts = missed.map { convo -> convo to AlertText.forConversation(convo, contacts) }
 
         if (AppForeground.active) {
             // The user is in the app; the list on screen is being refreshed anyway and an
@@ -192,7 +199,9 @@ object CatchUp {
             // that — the watermark is held just below the oldest of them, so the next poll
             // finds them again. Once read, they stop matching `unread` and the watermark
             // moves on by itself.
-            titled.forEach { (convo, title) -> PendingAlerts.add(convo.guid, title, convo.lastText, convo.lastDate) }
+            alerts.forEach { (convo, alert) ->
+                PendingAlerts.add(convo.guid, alert.title, alert.body, convo.lastDate)
+            }
             val hold = missed.minOf { it.lastDate } - 1
             Store.setLastAlertedAt(app, maxOf(watermark, minOf(seen, hold)))
             Log.d(TAG, "found ${missed.size} missed while foreground; deferred")
@@ -200,7 +209,7 @@ object CatchUp {
         }
 
         Log.d(TAG, "found ${missed.size} missed")
-        titled.forEach { (convo, title) -> Notifications.post(app, title, convo.lastText, convo.guid) }
+        alerts.forEach { (convo, alert) -> Notifications.post(app, alert.title, alert.body, convo.guid) }
         // Advanced *after* posting, not before: if this dies partway the next run retries,
         // and a retry is harmless — notification ids are per chat, so a repost replaces the
         // same row. Losing an alert is the failure that matters.

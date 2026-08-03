@@ -39,8 +39,8 @@ android {
         minSdk = 34   // Light Phone III runs Android 14 — the only target device.
         targetSdk = 35
         // CI overwrites both from the workflow run number; see .github/workflows/build.yml
-        versionCode = 9
-        versionName = "2.7.0"
+        versionCode = 10
+        versionName = "2.8.0"
 
         buildConfigField("String", "REPORT_TOKEN", "\"$reportToken\"")
         buildConfigField("String", "REPORT_REPO", "\"gi-os/light-reports\"")

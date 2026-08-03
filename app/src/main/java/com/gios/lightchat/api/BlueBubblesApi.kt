@@ -273,13 +273,20 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                     // tapback; [lastText] still gets the older real message below as a
                     // fallback. A reaction *removal* sets neither and just bumps recency.
                     val reaction = msg.reactionPreview { g -> msgByGuid[g] }
-                    byGuid[guid] = chatToConversation(chat, guid, msg.previewText, msg.date, msg.fromMe)
-                        .copy(lastReaction = reaction)
+                    byGuid[guid] =
+                        chatToConversation(chat, guid, msg.previewText, msg.date, msg.fromMe, msg.sender)
+                            .copy(lastReaction = reaction)
                     if (isSpeech) previewFinal.add(guid)
                 } else if (isSpeech && guid !in previewFinal) {
                     // Older than the row's newest message, but the first real one —
                     // upgrade the text preview while keeping the newest date / reaction.
-                    byGuid[guid] = existing.copy(lastText = msg.previewText, lastFromMe = msg.fromMe)
+                    // lastSender moves with lastText — they are one statement about one
+                    // message, and split apart the row credits the wrong person.
+                    byGuid[guid] = existing.copy(
+                        lastText = msg.previewText,
+                        lastFromMe = msg.fromMe,
+                        lastSender = msg.sender,
+                    )
                     previewFinal.add(guid)
                 }
             }
@@ -663,7 +670,9 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         lastText: String,
         lastDate: Long,
         lastFromMe: Boolean,
-    ): Conversation = Companion.chatToConversation(chat, guid, lastText, lastDate, lastFromMe)
+        lastSender: String?,
+    ): Conversation =
+        Companion.chatToConversation(chat, guid, lastText, lastDate, lastFromMe, lastSender)
 
     // ---- transport --------------------------------------------------------
 
@@ -756,6 +765,26 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
 
 
         /**
+         * A chat's participant handles.
+         *
+         * 1:1 chats (style 45) come back with an empty `participants` list, but the
+         * `chatIdentifier` is the other party's address — use that so names resolve.
+         */
+        fun chatParticipants(chat: JSONObject): List<String> {
+            val listed = chat.optJSONArray("participants")?.let { arr ->
+                (0 until arr.length()).mapNotNull {
+                    arr.getJSONObject(it).optString("address").takeIf { a -> a.isNotBlank() }
+                }
+            } ?: emptyList()
+            return listed.ifEmpty {
+                chat.optString("chatIdentifier")
+                    .takeIf { it.isNotBlank() && !it.startsWith("chat") }
+                    ?.let { listOf(it) }
+                    ?: emptyList()
+            }
+        }
+
+        /**
          * A chat object plus the message that is currently its newest, as a list row.
          *
          * In the companion because two callers build one: the full sweep, and the delta
@@ -768,28 +797,19 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
             lastText: String,
             lastDate: Long,
             lastFromMe: Boolean,
+            /** Who sent [lastText] — null when it was me. Passed rather than read off the
+             *  chat because the chat object doesn't carry it; only the message does. */
+            lastSender: String?,
         ): Conversation {
-            val participants = chat.optJSONArray("participants")?.let { arr ->
-                (0 until arr.length()).mapNotNull {
-                    arr.getJSONObject(it).optString("address").takeIf { a -> a.isNotBlank() }
-                }
-            } ?: emptyList()
-            // 1:1 chats (style 45) come back with an empty participants list, but the
-            // chatIdentifier is the other party's address — use it so names resolve.
-            val resolved = participants.ifEmpty {
-                chat.optString("chatIdentifier")
-                    .takeIf { it.isNotBlank() && !it.startsWith("chat") }
-                    ?.let { listOf(it) }
-                    ?: emptyList()
-            }
             return Conversation(
                 guid = guid,
                 displayName = chat.string("displayName"),
-                participants = resolved,
+                participants = chatParticipants(chat),
                 isGroup = chat.optInt("style") == 43, // 43 = group, 45 = one-on-one
                 lastText = lastText,
                 lastDate = lastDate,
                 lastFromMe = lastFromMe,
+                lastSender = lastSender,
             )
         }
 
@@ -802,6 +822,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                 lastText = if (speech) message.previewText else "",
                 lastDate = message.date,
                 lastFromMe = message.fromMe,
+                lastSender = if (speech) message.sender else null,
             ).copy(
                 unread = !message.isGroupEvent && !message.fromMe && message.dateRead == 0L,
             )
@@ -887,6 +908,8 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
                 message = parseMessage(data),
                 isNew = isNew,
                 chatDisplayName = chat.string("displayName"),
+                isGroup = chat.optInt("style") == 43, // 43 = group, 45 = one-on-one
+                participants = chatParticipants(chat),
                 // Stripped of `chats` to match what the sync stores: the chat object is
                 // held once in its own table, not repeated on every message of that chat.
                 raw = runCatching {

@@ -15,11 +15,17 @@ class Contacts(private val byKey: Map<String, String> = emptyMap()) {
 
     /** A conversation's human title — iMessage-style: full name for 1:1, first
      *  names for groups, explicit group name if one is set. */
-    fun title(conversation: Conversation): String = when {
-        conversation.named() -> conversation.displayName
-        conversation.participants.size == 1 -> label(conversation.participants[0], firstNameOnly = false)
-        conversation.participants.isEmpty() -> "Unknown"
-        else -> conversation.participants.joinToString(", ") { label(it, firstNameOnly = true) }
+    fun title(conversation: Conversation): String =
+        title(conversation.displayName, conversation.participants)
+
+    /** As [title], for a room held as loose fields rather than a [Conversation] — the
+     *  chat embedded in a socket event. One implementation, so a notification's title
+     *  and the list's title for the same room cannot disagree. */
+    fun title(displayName: String, participants: List<String>): String = when {
+        displayName.isNotBlank() && displayName != "null" -> displayName
+        participants.size == 1 -> label(participants[0], firstNameOnly = false)
+        participants.isEmpty() -> "Unknown"
+        else -> participants.joinToString(", ") { label(it, firstNameOnly = true) }
     }
 
     /**

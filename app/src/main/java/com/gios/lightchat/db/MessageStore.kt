@@ -168,6 +168,23 @@ class MessageStore private constructor(context: Context) {
             // which for a dormant sibling reaches years back.
             .takeLast(limit)
 
+    /**
+     * One message by guid, wherever it lives, or null.
+     *
+     * For naming what a tapback points at. Not scoped to a chat on purpose: a group
+     * iMessage has forked spans sibling rooms and a reaction can land in a different one
+     * than its target. `guid` is the back half of the primary key, so this is a scan —
+     * fine at one row per incoming reaction, and the table is trimmed per chat anyway.
+     */
+    fun messageByGuid(guid: String): ChatMessage? {
+        val db = helper.readableDatabase
+        db.query("messages", arrayOf("json"), "guid = ?", arrayOf(guid), null, null, null, "1")
+            .use { c ->
+                if (!c.moveToNext()) return null
+                return runCatching { BlueBubblesApi.parseMessage(JSONObject(c.getString(0))) }.getOrNull()
+            }
+    }
+
     /** The newest message date held for a chat, or 0. The per-thread sync's `after`. */
     fun newestDate(chatGuid: String): Long = dateEdge(chatGuid, newest = true)
 
@@ -395,6 +412,7 @@ class MessageStore private constructor(context: Context) {
             put("lastText", c.lastText)
             put("lastDate", c.lastDate)
             put("lastFromMe", c.lastFromMe)
+            put("lastSender", c.lastSender ?: JSONObject.NULL)
             put("guids", JSONArray(c.guids))
             put("unread", c.unread)
             c.lastReaction?.let { r ->
@@ -422,6 +440,10 @@ class MessageStore private constructor(context: Context) {
                 lastText = o.optString("lastText"),
                 lastDate = o.optLong("lastDate"),
                 lastFromMe = o.optBoolean("lastFromMe"),
+                // Absent on a row written before this field existed; null then, which
+                // costs a group notification its sender name until the next sweep
+                // rewrites the row. Not worth a schema bump (which drops the cache).
+                lastSender = if (o.isNull("lastSender")) null else o.optString("lastSender").ifBlank { null },
                 lastReaction = o.optJSONObject("lastReaction")?.let { r ->
                     val type = ReactionType.entries.firstOrNull { it.name == r.optString("type") }
                     if (type == null) {

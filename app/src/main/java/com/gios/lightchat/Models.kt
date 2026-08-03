@@ -43,6 +43,12 @@ data class Conversation(
     // Messages-in-iCloud syncs that to the Mac). Cleared live by opening the thread
     // here, or by a `chat-read-status-changed` socket event when read elsewhere.
     val unread: Boolean = false,
+    // Handle of whoever sent [lastText] — null when it was me, or when the row was
+    // written by a build from before this field existed. What a group notification
+    // needs and could not get: there the title is the room, so the body is the only
+    // place the sender's name can go. Set wherever [lastText] is set and never apart
+    // from it, or a row names the wrong person.
+    val lastSender: String? = null,
 ) {
     /** Human title: an explicit group name if set, otherwise the participants. Prefer
      *  `Contacts.title`, which resolves names; this is the nameless fallback. `"null"` is
@@ -342,6 +348,12 @@ data class IncomingMessage(
     val message: ChatMessage,
     val isNew: Boolean,
     val chatDisplayName: String,
+    /** Whether the room is a group (chat `style` 43). A group's alert reads differently:
+     *  the title is the room, so the body has to name the sender. */
+    val isGroup: Boolean = false,
+    /** The room's participant handles, so an *unnamed* group can still be titled by the
+     *  people in it rather than by whoever happened to text last. */
+    val participants: List<String> = emptyList(),
     /**
      * The message's own JSON, as it arrived, with the embedded `chats` array stripped.
      *
@@ -396,6 +408,7 @@ fun Conversation.advancedBy(
         lastDate = message.date,
         lastText = if (speech) message.previewText else lastText,
         lastFromMe = if (speech) message.fromMe else lastFromMe,
+        lastSender = if (speech) message.sender else lastSender,
         // Set only when the newest thing is a real tapback; a removal clears it and just
         // bumps recency.
         lastReaction = if (message.isReaction) message.reactionPreview(findTarget) else null,

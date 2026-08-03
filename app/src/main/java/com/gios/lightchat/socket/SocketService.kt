@@ -11,6 +11,7 @@ import android.net.Network
 import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
+import com.gios.lightchat.AlertText
 import com.gios.lightchat.Contacts
 import com.gios.lightchat.CatchUp
 import com.gios.lightchat.DeliveryWorker
@@ -24,6 +25,7 @@ import com.gios.lightchat.ReadStatusEvent
 import com.gios.lightchat.TypingEvent
 import com.gios.lightchat.api.BlueBubblesApi
 import com.gios.lightchat.api.Store
+import com.gios.lightchat.db.MessageStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -308,6 +310,10 @@ class SocketService : Service() {
         val alertable = isNew &&
             !incoming.message.fromMe &&
             !incoming.message.isGroupEvent &&
+            // Someone *removing* a tapback is not news. It bumps the thread in the list
+            // (which is iMessage's behaviour) but there is nothing to say about it, and
+            // AlertText deliberately has no phrasing for one.
+            !incoming.message.isReactionRemoval &&
             // A stranger doesn't interrupt unless you've asked to be interrupted — unless what
             // they sent is the code you are waiting on. The message still arrives above; only
             // the alert is gated. See SenderFilter.
@@ -321,24 +327,20 @@ class SocketService : Service() {
         // the message was never recorded anywhere. Hold it for the screen going off
         // instead — see PendingAlerts.
         if (alertable && AppForeground.active) {
-            val title = incoming.chatDisplayName.ifBlank {
-                incoming.message.sender?.let { contacts.name(it) ?: it } ?: "Message"
-            }
-            PendingAlerts.add(incoming.chatGuid, title, incoming.message.text, incoming.message.date)
+            val alert = alertText(incoming, contacts)
+            PendingAlerts.add(incoming.chatGuid, alert.title, alert.body, incoming.message.date)
         }
         // Notify only for genuinely new incoming messages the user can't see —
         // not group events (renames etc.), whose `text` is empty.
         if (alertable && !AppForeground.active) {
-            // Prefer an explicit (group) chat name; otherwise resolve the sender's
-            // address to a contact name from the persisted index, falling back to
-            // the raw address. Read fresh so it reflects the latest address book.
-            val title = incoming.chatDisplayName.ifBlank {
-                val sender = incoming.message.sender
-                sender?.let { contacts.name(it) ?: it } ?: "Message"
-            }
+            // Title, and a body that names whoever is responsible — the sender in a group,
+            // the reactor for a tapback. See AlertText; the phrasing is shared with the
+            // background poll so the same message reads the same either way.
+            val alert = alertText(incoming, contacts)
+            val title = alert.title
             // The notification is the record — it stays in LightOS's list and feeds
             // LightGlance's dot. The box is the alert, and buzzes either way.
-            Notifications.post(this, title, incoming.message.text, incoming.chatGuid)
+            Notifications.post(this, title, alert.body, incoming.chatGuid)
             // Move the watermark past it, which is what stopped this alerting twice.
             //
             // `lastAlertedAt` is meant to be the single line deciding whether a message has been
@@ -359,7 +361,7 @@ class SocketService : Service() {
             HeadsUp.show(
                 this,
                 title,
-                incoming.message.text,
+                alert.body,
                 incoming.chatGuid,
                 // Stamped already: read on another device before the event even got here.
                 alreadyRead = incoming.message.dateRead != 0L,
@@ -370,6 +372,23 @@ class SocketService : Service() {
     /** The persisted contact index. Reloaded per notification (infrequent — only
      *  background messages) so a name added while the service ran still resolves. */
     private fun contacts(): Contacts = Store.contacts(this)
+
+    /**
+     * What this message's alert says. A tapback's target is looked up in the local store —
+     * off the socket thread's own work, but it is a single indexed-ish read for the one
+     * message a reaction points at, and without it the line can only say "a message".
+     */
+    private fun alertText(incoming: com.gios.lightchat.IncomingMessage, contacts: Contacts) =
+        AlertText.forMessage(
+            message = incoming.message,
+            isGroup = incoming.isGroup,
+            chatDisplayName = incoming.chatDisplayName,
+            participants = incoming.participants,
+            contacts = contacts,
+            findTarget = { guid ->
+                runCatching { MessageStore.get(this).messageByGuid(guid) }.getOrNull()
+            },
+        )
 
     override fun onDestroy() {
         wakeReceiver?.let { runCatching { unregisterReceiver(it) } }

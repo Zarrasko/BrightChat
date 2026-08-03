@@ -1,3 +1,45 @@
+## LightChat v2.8 — Notifications say who
+
+**A group notification never told you who texted, and a tapback told you nothing at all. Both now
+name the person responsible.**
+
+### A group message names its sender
+
+In a group the notification title is the room — "Poker Night" — so there was nowhere for the
+sender's name to go, and the body was the bare message. A text from a five-person thread read as an
+anonymous line of words. The body is now `Alex: on my way`, the same shape iMessage uses.
+
+A 1:1 message is left alone: the title is already the person, so prefixing the body would only
+repeat it. An *unnamed* group is titled by its members ("Alex, Liz") and still names the sender, because
+the alternative is a three-way group looking exactly like a 1:1.
+
+### A tapback says who reacted, and to what
+
+A tapback arrives as a message whose own text is empty — the reaction is in
+`associatedMessageType`, and what it points at is a guid in `associatedMessageGuid` — so what got
+posted was a title over a blank line. Now it reads `Alex loved “see you at 6”`, which means looking
+the target message up in the local store (`messageByGuid`, deliberately not scoped to one chat: a
+forked group spans sibling rooms and a reaction can land in a different one than its target). When
+the target isn't held locally the line says "a message", which is at least honest.
+
+Two smaller consequences of getting there:
+
+- **Someone *removing* a tapback no longer buzzes.** It still bumps the thread in the list, which is
+  iMessage's behaviour, but there was never anything to say about it and it used to post an empty
+  notification.
+- **A reaction to something *you* said now survives the background poll.** The poll judged a
+  conversation row by `lastFromMe`, which describes the newest real *speech* — so a tapback on your
+  own message failed the test and was dropped. That is precisely the case worth being told about.
+
+### One place that decides the words
+
+There are three routes to an alert — the live socket, the background catch-up poll, and the
+deferred flush when the app stops — and each phrased things itself. Where they agreed they agreed by
+accident. The phrasing now lives in `AlertText`, so the same message reads the same whether the
+phone was awake when it arrived or asleep. `Conversation` gained a `lastSender` so the poll, which
+works from the list rather than from messages, has a name to use at all; rows cached by an older
+build have no sender until the next sweep rewrites them, and stay unprefixed rather than guessing.
+
 ## LightChat v2.7 — The shake asks instead of interrupting
 
 **Two changes, one of them invisible: shaking the phone no longer throws a report sheet over what
