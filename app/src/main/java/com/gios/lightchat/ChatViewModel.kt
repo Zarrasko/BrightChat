@@ -321,6 +321,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 contacts = Contacts.fromMap(contacts.asMap() + local)
                 Store.setContacts(app, contacts.asMap())
             }
+            /**
+             * **And the same book into the New Message picker.**
+             *
+             * It searched `contactList`, which was built from the server's contacts alone, so
+             * somebody saved on this phone could not be found in it — starting a conversation
+             * with them meant typing the number out in full, which is the "new messages to new
+             * contacts don't work" of it. Merged here rather than where `contactList` is first
+             * built, because that is inside the once-a-session guard and the address book is the
+             * half that changes while the app is open.
+             *
+             * De-duplicated by the same normalised key the rest of the app compares addresses
+             * with, and the phone's row wins: a number saved in both should be offered under the
+             * name you gave it here.
+             */
+            val localRecipients = runCatching { AddressBookRepo(app).recipients() }
+                .getOrDefault(emptyList())
+                .map { (name, number) -> Contact(name = name, address = number) }
+            if (localRecipients.isNotEmpty()) {
+                val localKeys = localRecipients.mapTo(HashSet()) { Contacts.key(it.address) }
+                contactList = (localRecipients + contactList.filter { Contacts.key(it.address) !in localKeys })
+                    .sortedBy { it.name.lowercase() }
+            }
             if (!contactsLoaded) {
                 runCatching { client.contacts() }.onSuccess { raw ->
                     /**

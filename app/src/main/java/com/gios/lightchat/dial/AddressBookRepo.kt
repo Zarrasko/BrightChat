@@ -39,6 +39,11 @@ class AddressBookRepo(private val context: Context) {
         AddressBook.asNameIndex(AddressBook.merge(readNumbers()))
     }
 
+    /** The address book as pickable (name, number) rows for the New Message screen. */
+    suspend fun recipients(): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        AddressBook.asRecipients(AddressBook.merge(readNumbers()))
+    }
+
     private fun readNumbers(): List<AddressBook.Row> {
         val columns = arrayOf(
             ContactsContract.CommonDataKinds.Phone.CONTACT_ID,

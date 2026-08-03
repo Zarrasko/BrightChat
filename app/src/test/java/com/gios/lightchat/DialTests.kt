@@ -163,6 +163,24 @@ class AddressBookTest {
     }
 
     @Test
+    fun `the phone book becomes pickable rows, one per number`() {
+        val phone = AddressBook.merge(
+            listOf(
+                row(1, "Kate Jacobs", "315-212-2695"),
+                row(1, "Kate Jacobs", "212-555-0148"),
+                row(2, "  ", "608-264-6591"),
+            ),
+        )
+        val out = AddressBook.asRecipients(phone)
+        // Two rows for Kate, because the picker adds a recipient by address and has to be told
+        // which line. The nameless row offers nothing over typing the number, so it is skipped.
+        assertEquals(
+            listOf("Kate Jacobs" to "315-212-2695", "Kate Jacobs" to "212-555-0148"),
+            out,
+        )
+    }
+
+    @Test
     fun `no index changes nothing`() {
         val phone = AddressBook.merge(listOf(row(1, "Alex", "1112223333")))
         assertEquals(phone, AddressBook.withKnown(phone, emptyMap()))

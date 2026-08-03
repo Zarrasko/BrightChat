@@ -105,6 +105,32 @@ object AddressBook {
     }
 
     /**
+     * The phone's address book as pickable rows: one per number, name and address.
+     *
+     * **The New Message picker searched the server's contact list alone**, which is the Mac's
+     * address book — so somebody saved on the handset could not be found in it and starting a
+     * conversation with them meant typing the number out in full. The same one-directional merge
+     * that left the conversation list showing digits, in a second place.
+     *
+     * One row per *number*, not per person, because the picker adds a recipient by address and
+     * has to be told which line. A person with a mobile and a work number is two rows, exactly
+     * as the server's list already represents them.
+     *
+     * Rows with no real name are skipped for the same reason as [asNameIndex]: they would be a
+     * row whose title and subtitle are the same digits, offering nothing over typing it.
+     */
+    fun asRecipients(contacts: List<PhoneContact>): List<Pair<String, String>> {
+        val out = ArrayList<Pair<String, String>>()
+        for (contact in contacts) {
+            val name = contact.name.trim()
+            if (name.isEmpty() || name.none { it.isLetter() }) continue
+            if (contact.numbers.any { it.label == FROM_MESSAGES }) continue
+            for (number in contact.numbers) out.add(name to number.raw)
+        }
+        return out
+    }
+
+    /**
      * The phone's address book as a handle → name index.
      *
      * **The other direction of [withKnown], and the one that was missing.** The dialer folded the

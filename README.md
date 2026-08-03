@@ -5,7 +5,7 @@ talking to an always-on, self-hosted [BlueBubbles Server](https://github.com/Blu
 reached privately over [Tailscale](https://tailscale.com/). Package
 `com.gios.lightchat`.
 
-**Current version: v2.3.x.** See [Version history](#version-history).
+**Current version: v2.4.x.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -311,6 +311,7 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v2.1.x | Opening a chat no longer opens the keyboard; Save an unknown sender to contacts; the dialer lists nobody until you type; pinning moved to the row's long-press |
 | v2.2.x | The contacts list is both address books — the phone's and BlueBubbles' — so nobody you message is a stranger to the dialer; the speed dials are listed at rest and can be cleared |
 | v2.3.x | Names saved on the phone now name people everywhere — the conversation list, the thread header and notifications read the handset's contacts as well as the server's |
+| v2.4.x | The New Message picker searches the phone's address book too, so you can start a conversation with somebody you just saved |
 
 ## Licence
 
