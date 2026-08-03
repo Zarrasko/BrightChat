@@ -1081,15 +1081,43 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * then hands off to an external app via `ACTION_VIEW`. Falls back to a share
      * chooser, then a message if nothing on the (minimal) device can handle it.
      */
+    /**
+     * Downloads [attachment] and hands the file back, for something this app can show itself.
+     *
+     * The download half of [openAttachment] without the hand-off. Split rather than parameterised
+     * because the two differ in what they do on success and in nothing else: one starts an
+     * activity, the other calls back. The cache path and the "already downloaded" check are
+     * shared through [attachmentFile] so a video watched twice is fetched once.
+     */
+    fun downloadAttachment(attachment: Attachment, onReady: (File) -> Unit) {
+        val client = api ?: return
+        _state.update { it.copy(message = "Downloading…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val dest = attachmentFile(attachment)
+                if (!dest.exists() || dest.length() == 0L) client.downloadAttachment(attachment.guid, dest)
+                _state.update { it.copy(message = null) }
+                withContext(Dispatchers.Main) { onReady(dest) }
+            } catch (t: Throwable) {
+                _state.update { it.copy(message = "Couldn't download attachment") }
+            }
+        }
+    }
+
+    /** Where an attachment lands in the cache. Shared so it is fetched once, not once per verb. */
+    private fun attachmentFile(attachment: Attachment): File {
+        val dir = File(app.cacheDir, "shared").apply { mkdirs() }
+        val safe = (attachment.transferName ?: attachment.guid)
+            .replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { attachment.guid }
+        return File(dir, safe)
+    }
+
     fun openAttachment(attachment: Attachment) {
         val client = api ?: return
         _state.update { it.copy(message = "Downloading…") }
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val dir = File(app.cacheDir, "shared").apply { mkdirs() }
-                val safe = (attachment.transferName ?: attachment.guid)
-                    .replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { attachment.guid }
-                val dest = File(dir, safe)
+                val dest = attachmentFile(attachment)
                 if (!dest.exists() || dest.length() == 0L) client.downloadAttachment(attachment.guid, dest)
                 val uri = FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", dest)
                 val mime = attachment.mimeType ?: "application/octet-stream"

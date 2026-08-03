@@ -5,7 +5,7 @@ talking to an always-on, self-hosted [BlueBubbles Server](https://github.com/Blu
 reached privately over [Tailscale](https://tailscale.com/). Package
 `com.gios.lightchat`.
 
-**Current version: v2.4.x.** See [Version history](#version-history).
+**Current version: v2.5.x.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -312,6 +312,7 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v2.2.x | The contacts list is both address books — the phone's and BlueBubbles' — so nobody you message is a stranger to the dialer; the speed dials are listed at rest and can be cleared |
 | v2.3.x | Names saved on the phone now name people everywhere — the conversation list, the thread header and notifications read the handset's contacts as well as the server's |
 | v2.4.x | The New Message picker searches the phone's address book too, so you can start a conversation with somebody you just saved |
+| v2.5.x | Videos download and play inside the thread, on a platform `VideoView` — LightOS has no video player to hand one off to |
 
 ## Licence
 

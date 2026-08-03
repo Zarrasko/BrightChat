@@ -71,6 +71,14 @@ data class Attachment(
 ) {
     val isImage: Boolean get() = mimeType?.startsWith("image/") == true
 
+    /**
+     * Playable here rather than handed to another app.
+     *
+     * The mime type only — not the file extension — because it is what the server said the file
+     * is, and a `.mov` from an iPhone arrives as `video/quicktime` whatever the name says.
+     */
+    val isVideo: Boolean get() = mimeType?.startsWith("video/") == true
+
     /** A short human type for a non-image file, e.g. "Video", "Audio", "Contact". */
     val typeLabel: String
         get() = when {

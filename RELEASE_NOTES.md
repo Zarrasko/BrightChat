@@ -1,28 +1,30 @@
-## LightChat v2.4 — starting a message to somebody you just saved
+## LightChat v2.5 — videos play in the thread
 
-**The New Message picker could not find a contact saved on the phone.** Typing their name
-returned nothing and the only way through was typing the number out in full — which is a picker
-failing at the one thing it is for.
+**A video was the one attachment the app could not show you.** Tapping it downloaded the file and
+sent it out as `ACTION_VIEW`, which is right for a PDF or a vCard and useless here: LightOS has no
+video player installed, so the chooser came back empty and the tap ended in "No app can open this
+file" after a download you had already waited for. A clip somebody sent you is the most ordinary
+thing in a message thread.
 
-Same cause as v2.3, in a second place. `contactList` was built from the BlueBubbles server's
-contacts, which is the Mac's address book; the handset's own was never read for it. v2.3 fixed
-the naming half — the conversation list, the thread header, notifications — and this is the
-picking half.
+It now downloads and plays in place, as a full-screen overlay beside the image viewer — the
+thread stays composed underneath, so closing lands exactly where you were with the scroll position
+intact.
 
-The address book is merged in on every refresh rather than where `contactList` is first built,
-because that is inside the once-a-session guard: the server's contact list is a slow call worth
-making once, and the phone's book is a local query and the half that changes while the app is
-open. You save somebody and come straight back.
+**`VideoView`, not ExoPlayer.** `VideoView` is a platform widget wrapping `MediaPlayer` and costs
+nothing to depend on. ExoPlayer is several megabytes of library for a screen that plays one local
+file with no streaming, no adaptive bitrate and no DRM — on an APK sideloaded over a Tailscale
+tunnel onto a phone whose whole premise is being small, that trade only goes one way.
 
-One row per **number**, not per person, because the picker adds a recipient by address and has to
-be told which line — a person with a mobile and a work number is two rows, exactly as the
-server's list already represents them. De-duplicated against the server's rows by the same
-normalised key the rest of the app compares addresses with, and the phone's row wins: a number
-saved in both should be offered under the name you gave it here.
+It loops and has no controls. There is no room on a 3.92" panel for a scrubber a few dozen pixels
+wide, and a clip in a message thread is seconds long — watching it twice is easier than aiming at
+a seek bar. A file the codec refuses says so in a line rather than through `MediaPlayer`'s own
+alert, which is a Material dialog on a monochrome panel; returning true from the error listener is
+what suppresses it.
 
-Rows with no real name are skipped. `merge` titles a nameless contact by its own number, so
-including them would mean a row whose name and address are the same digits — nothing over typing
-it, and the "Add …" row already covers that.
+Everything that is not a video keeps the hand-off, which was never the wrong behaviour for the
+files it was written for. The download itself is now shared between the two paths, so a video
+watched twice is fetched once, and the cache path is decided in one place rather than in each
+verb.
 
-Needs the contacts permission, asked for the first time you open the Dial tab. Without it this is
-the old behaviour exactly.
+Detected by mime type, not by file extension: it is what the server said the file is, and a
+`.mov` from an iPhone arrives as `video/quicktime` whatever the name says.

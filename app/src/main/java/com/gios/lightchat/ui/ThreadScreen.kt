@@ -105,6 +105,9 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     // lands exactly where you were, and the thread is already rendered underneath,
     // which is also what hides the delayed grayscale restore (see ColorMode).
     var viewingImage by remember(convo.guid) { mutableStateOf<Attachment?>(null) }
+    // The downloaded video being watched, if any. A File rather than the Attachment, because by
+    // the time this is set the fetch has already happened and the player only wants the bytes.
+    var viewingVideo by remember(convo.guid) { mutableStateOf<java.io.File?>(null) }
 
     val context = LocalContext.current
     val ring = rememberCaller()
@@ -292,7 +295,16 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                             },
                             loadImage = viewModel::loadImage,
                             onImageTap = { viewingImage = it },
-                            onOpenAttachment = viewModel::openAttachment,
+                            // A video is downloaded and played in the app; everything else keeps
+                            // the hand-off, which is right for a PDF or a vCard and only wrong
+                            // for the one kind of file this phone has no viewer for.
+                            onOpenAttachment = { attachment ->
+                                if (attachment.isVideo) {
+                                    viewModel.downloadAttachment(attachment) { viewingVideo = it }
+                                } else {
+                                    viewModel.openAttachment(attachment)
+                                }
+                            },
                             canReact = state.privateApi,
                             pickerOpen = reactingTo == message.guid,
                             onLongPress = { if (state.privateApi) reactingTo = message.guid },
@@ -374,6 +386,13 @@ fun ThreadScreen(viewModel: ChatViewModel) {
         // thread stays composed — and visible again the instant this leaves.
         viewingImage?.let { image ->
             ImageViewerScreen(image, viewModel::loadImage, onClose = { viewingImage = null })
+        }
+
+        // A video plays here rather than being handed to an app that isn't installed. Same
+        // overlay pattern as the image viewer: the thread stays composed underneath, so closing
+        // lands where you were.
+        viewingVideo?.let { file ->
+            VideoPlayerScreen(file, onClose = { viewingVideo = null })
         }
 
         if (picking) {
