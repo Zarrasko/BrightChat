@@ -39,8 +39,8 @@ import com.gios.lightchat.ui.SettingsScreen
 import com.gios.lightchat.ui.SetupScreen
 import com.gios.lightchat.ui.ThreadScreen
 import com.gios.lightchat.ui.theme.LightChatTheme
-import com.gios.lightchat.report.CrashLog
-import com.gios.lightchat.report.ReportOverlay
+import com.gios.light.common.report.LightReport
+import com.gios.light.common.report.ReportOverlay
 
 /** The recipient extra on an incoming share. AOSP messaging's key, and what Roll sends. */
 private const val SHARE_EXTRA_ADDRESS = "address"
@@ -96,7 +96,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // First thing, before anything else can throw: the handler chains onto whatever is
         // already installed and only writes a file, so it is safe this early.
-        CrashLog.install(this)
+        LightReport.install(
+            context = this,
+            appName = "LightChat",
+            label = "chat",
+            token = BuildConfig.REPORT_TOKEN,
+        )
         Notifications.ensureChannels(this)
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
