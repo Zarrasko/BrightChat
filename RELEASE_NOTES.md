@@ -1,30 +1,30 @@
-## LightChat v2.5 — videos play in the thread
+## LightChat v2.6 — Shake the phone to report a bug
 
-**A video was the one attachment the app could not show you.** Tapping it downloaded the file and
-sent it out as `ACTION_VIEW`, which is right for a PDF or a vCard and useless here: LightOS has no
-video player installed, so the chooser came back empty and the tap ended in "No app can open this
-file" after a download you had already waited for. A clip somebody sent you is the most ordinary
-thing in a message thread.
+**LightChat can now file its own bug reports, and you can say what went wrong in your own words.**
 
-It now downloads and plays in place, as a full-screen overlay beside the image viewer — the
-thread stays composed underneath, so closing lands exactly where you were with the scroll position
-intact.
+Until now only Roll, Notebook and Phono could do this. Every other app on the phone failed
+silently: you would notice something wrong on the subway, have nowhere to put it, and have
+forgotten it by the time you were near a computer. This is the same feature, ported.
 
-**`VideoView`, not ExoPlayer.** `VideoView` is a platform widget wrapping `MediaPlayer` and costs
-nothing to depend on. ExoPlayer is several megabytes of library for a screen that plays one local
-file with no streaming, no adaptive bitrate and no DRM — on an APK sideloaded over a Tailscale
-tunnel onto a phone whose whole premise is being small, that trade only goes one way.
+Shake the phone twice — there and back, twice — and a sheet comes up. Pick what happened from
+five chips, and add a note if you have something to add. The note is optional but it is the part
+that carries anything: "Something looks wrong" is a shrug, and what you type becomes the title of
+the issue. Under it the report carries the screen you were on, the app and firmware versions,
+free space, heap, and the stack trace if the app died the last time you had it open.
 
-It loops and has no controls. There is no room on a 3.92" panel for a scrubber a few dozen pixels
-wide, and a clip in a message thread is seconds long — watching it twice is easier than aiming at
-a seek bar. A file the codec refuses says so in a line rather than through `MediaPlayer`'s own
-alert, which is a Material dialog on a monochrome panel; returning true from the error listener is
-what suppresses it.
+Three things raise the sheet. A shake, because you noticed something. A crash last run, asked
+once on the next launch, because that is the only moment the stack trace is still worth anything.
+And a failure the app noticed by itself — those are the reports that otherwise never get filed,
+because a screen that quietly came back empty looks ordinary.
 
-Everything that is not a video keeps the hand-off, which was never the wrong behaviour for the
-files it was written for. The download itself is now shared between the two paths, so a video
-watched twice is fetched once, and the cache path is decided in one place rather than in each
-verb.
+Reports queue on disk before anything is sent, always. A phone that reports a freeze is by
+definition a phone that was just misbehaving, and a report that exists only in flight is the one
+report guaranteed to be lost. If there is no network, or this build has no reporting key, it
+waits on the phone until a build that does installs over it.
 
-Detected by mime type, not by file extension: it is what the server said the file is, and a
-`.mov` from an iPhone arrives as `video/quicktime` whatever the name says.
+The gesture is tuned to be hard to trigger by accident: it counts reversals rather than force,
+because setting the phone down hard clears any threshold a shake clears, but only a shake
+*reverses*. Walking never fires it. That arithmetic now has unit tests in every app that has the
+feature.
+
+The accelerometer only runs while you are looking at the app.

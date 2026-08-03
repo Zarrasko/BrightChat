@@ -39,6 +39,8 @@ import com.gios.lightchat.ui.SettingsScreen
 import com.gios.lightchat.ui.SetupScreen
 import com.gios.lightchat.ui.ThreadScreen
 import com.gios.lightchat.ui.theme.LightChatTheme
+import com.gios.lightchat.report.CrashLog
+import com.gios.lightchat.report.ReportOverlay
 
 /** The recipient extra on an incoming share. AOSP messaging's key, and what Roll sends. */
 private const val SHARE_EXTRA_ADDRESS = "address"
@@ -92,6 +94,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        // First thing, before anything else can throw: the handler chains onto whatever is
+        // already installed and only writes a file, so it is safe this early.
+        CrashLog.install(this)
         Notifications.ensureChannels(this)
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
@@ -105,6 +110,10 @@ class MainActivity : ComponentActivity() {
                 CompositionLocalProvider(LocalWheelBus provides wheel) {
                     LightChatApp(viewModel)
                 }
+                // Shake to report, the crash offer on next launch, and the app's own noticed
+                // failures. A sibling, not a wrapper — the sheet is its own window, so it covers
+                // the app whether or not it contains it.
+                ReportOverlay()
             }
         }
         handlePasswordExtra(intent)
