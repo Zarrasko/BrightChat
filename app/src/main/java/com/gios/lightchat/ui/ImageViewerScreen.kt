@@ -32,7 +32,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.material3.Text
 import com.gios.lightchat.Attachment
 import com.gios.lightchat.ColorMode
-import com.gios.lightchat.hw.WheelScroll
+import com.gios.light.common.hw.WheelScroll
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.delay
 import com.gios.lightchat.ui.theme.ChatColors

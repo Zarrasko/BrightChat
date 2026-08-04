@@ -54,7 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.gios.lightchat.ColorMode
 import com.gios.lightchat.Gallery
-import com.gios.lightchat.hw.WheelScroll
+import com.gios.light.common.hw.WheelScroll
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
 import java.io.File

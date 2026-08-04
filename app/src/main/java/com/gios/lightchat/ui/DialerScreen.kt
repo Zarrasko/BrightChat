@@ -43,7 +43,7 @@ import com.gios.lightchat.dial.AddressBook
 import com.gios.lightchat.dial.AddressBookRepo
 import com.gios.lightchat.dial.PhoneContact
 import com.gios.lightchat.dial.T9
-import com.gios.lightchat.hw.WheelScroll
+import com.gios.light.common.hw.WheelScroll
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
 

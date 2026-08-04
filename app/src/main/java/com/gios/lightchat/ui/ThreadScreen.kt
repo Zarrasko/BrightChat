@@ -67,7 +67,7 @@ import com.gios.lightchat.Conversation
 import com.gios.lightchat.Dialer
 import com.gios.lightchat.ReactionType
 import com.gios.lightchat.URL_REGEX
-import com.gios.lightchat.hw.WheelScroll
+import com.gios.light.common.hw.WheelScroll
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
 

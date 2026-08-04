@@ -37,7 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.Contact
-import com.gios.lightchat.hw.WheelScroll
+import com.gios.light.common.hw.WheelScroll
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
 

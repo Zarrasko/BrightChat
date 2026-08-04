@@ -40,7 +40,7 @@ android {
         targetSdk = 35
         // CI overwrites both from the workflow run number; see .github/workflows/build.yml
         versionCode = 10
-        versionName = "2.8.0"
+        versionName = "2.9.0"
 
         buildConfigField("String", "REPORT_TOKEN", "\"$reportToken\"")
         buildConfigField("String", "REPORT_REPO", "\"gi-os/light-reports\"")
@@ -114,7 +114,7 @@ android {
 dependencies {
     // Shake-to-report, and the shared hardware/type helpers. Was a vendored copy of the
     // same code under com.gios.lightchat.report until this version.
-    implementation("com.gios:light-common:1.0.1")
+    implementation("com.gios:light-common:1.1.0")
 
     val composeBom = platform("androidx.compose:compose-bom:2025.12.01")
     implementation(composeBom)

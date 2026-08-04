@@ -60,7 +60,7 @@ import com.gios.lightchat.NotebookLink
 import com.gios.lightchat.SharedLink
 import com.gios.lightchat.api.Store
 import com.gios.lightchat.elideUrl
-import com.gios.lightchat.hw.WheelScroll
+import com.gios.light.common.hw.WheelScroll
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
 import kotlinx.coroutines.flow.distinctUntilChanged

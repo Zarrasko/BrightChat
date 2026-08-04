@@ -25,10 +25,10 @@ import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.gios.lightchat.hw.LightKey
-import com.gios.lightchat.hw.LightKeys
-import com.gios.lightchat.hw.LocalWheelBus
-import com.gios.lightchat.hw.WheelBus
+import com.gios.light.common.hw.LightKey
+import com.gios.light.common.hw.LightKeys
+import com.gios.light.common.hw.LocalWheelBus
+import com.gios.light.common.hw.WheelBus
 import com.gios.lightchat.socket.AppForeground
 import com.gios.lightchat.ui.ConversationTab
 import com.gios.lightchat.ui.DialerScreen
