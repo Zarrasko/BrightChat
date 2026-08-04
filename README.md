@@ -30,9 +30,7 @@ thread, or tap **New** to start one (searches your contacts by name/number/email
 ## What this is and why
 
 Craig Eley built the original `chat` to talk to a BlueBubbles server over Tailscale, no
-Google push involved — the app holds its own socket open. This fork exists to replace
-OpenBubbles on Gio's LPIII, which was found to be both a battery hog and flaky about
-ordering messages correctly, and it adds:
+Google push involved, it adds:
 
 - **Favorites / Known / Unknown tabs.** The conversation list is three lists behind an
   icon bar: starred chats, chats with a name in the Mac's address book, and everything
