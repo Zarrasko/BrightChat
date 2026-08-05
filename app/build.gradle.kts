@@ -40,7 +40,7 @@ android {
         targetSdk = 35
         // CI overwrites both from the workflow run number; see .github/workflows/build.yml
         versionCode = 10
-        versionName = "2.8.0"
+        versionName = "2.9.0"
 
         buildConfigField("String", "REPORT_TOKEN", "\"$reportToken\"")
         buildConfigField("String", "REPORT_REPO", "\"gi-os/light-reports\"")
@@ -112,9 +112,15 @@ android {
 }
 
 dependencies {
-    // Shake-to-report, and the shared hardware/type helpers. Was a vendored copy of the
-    // same code under com.gios.lightchat.report until this version.
-    implementation("com.gios:light-common:1.0.1")
+    // Shake-to-report, the wheel, and the LightSync backup provider. The wheel arrived in
+    // the library at 1.2.0; until this version it was a vendored copy under
+    // com.gios.lightchat.hw, which is now deleted.
+    implementation("com.gios:light-common:1.2.0")
+    // What actually applies the baseline profile that ships inside light-common's AAR.
+    // Below API 31 nothing on the device reads a profile on its own — the installer only
+    // learned to on Android 12 — so without this the profile is inert bytes in the APK and
+    // the first cold start after an update is fully interpreted.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 
     val composeBom = platform("androidx.compose:compose-bom:2025.12.01")
     implementation(composeBom)

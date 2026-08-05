@@ -1,86 +1,59 @@
-## LightChat v2.8 — Notifications say who
+## LightChat v2.9 — Backups, and a smaller app
 
-**A group notification never told you who texted, and a tapback told you nothing at all. Both now
-name the person responsible.**
+**LightSync can now back this app up, the wheel code is shared with every other app instead of
+copied into this one, and the release build is shrunk harder.**
 
-### A group message names its sender
+### LightSync can back up your setup — but not your password
 
-In a group the notification title is the room — "Poker Night" — so there was nowhere for the
-sender's name to go, and the body was the bare message. A text from a five-person thread read as an
-anonymous line of words. The body is now `Alex: on my way`, the same shape iMessage uses.
+LightChat now answers LightSync. What travels is the small pile of things that exist only on this
+phone: the server URL, your pinned and favourited conversations, the speed-dial slots, the
+"notify me about unknown senders" setting, the cached contact index, and which conversations you
+have already opened a note for. Rebuilding that by hand after a wipe was an evening's work.
 
-A 1:1 message is left alone: the title is already the person, so prefixing the body would only
-repeat it. An *unnamed* group is titled by its members ("Alex, Liz") and still names the sender, because
-the alternative is a three-way group looking exactly like a 1:1.
+**The BlueBubbles password is not in the backup, and you will have to type it again after a
+restore.** This is deliberate. The password is encrypted by a key held in the phone's secure
+element, which by design cannot be copied off the device and does not survive a factory reset.
+Backing up the encrypted blob would produce a file that restores perfectly and then decrypts to
+nothing — a backup that looks like one and is not. The honest version is the one shipped here: the
+server URL comes back, the password field is empty, and Setup asks for it once. Exporting the
+password in plaintext instead was the alternative and was not worth it to save one typed field.
 
-### A tapback says who reacted, and to what
+**Your messages are not in the backup either**, and this one costs nothing. Every message the
+phone holds is a copy of something the BlueBubbles Server still has; the local database exists so
+the list opens instantly and works offline, not because it is the only copy. Backing it up would
+mean carrying megabytes to a new phone that the first sync fetches anyway — and carrying them
+stale. The one thing in this app that genuinely cannot be re-fetched is the note on a contact
+page, and that note lives in LightNotebook, which backs it up itself.
 
-A tapback arrives as a message whose own text is empty — the reaction is in
-`associatedMessageType`, and what it points at is a guid in `associatedMessageGuid` — so what got
-posted was a title over a blank line. Now it reads `Alex loved “see you at 6”`, which means looking
-the target message up in the local store (`messageByGuid`, deliberately not scoped to one chat: a
-forked group spans sibling rooms and a reaction can land in a different one than its target). When
-the target isn't held locally the line says "a message", which is at least honest.
+Downloaded photos and video are excluded for the same reason, more so: they are the biggest thing
+on disk and every one of them can be fetched again.
 
-Two smaller consequences of getting there:
+### The wheel is library code now
 
-- **Someone *removing* a tapback no longer buzzes.** It still bumps the thread in the list, which is
-  iMessage's behaviour, but there was never anything to say about it and it used to post an empty
-  notification.
-- **A reaction to something *you* said now survives the background poll.** The poll judged a
-  conversation row by `lastFromMe`, which describes the newest real *speech* — so a tapback on your
-  own message failed the test and was dropped. That is precisely the case worth being told about.
+`com.gios.lightchat.hw` is gone. The two files in it — the key recogniser and the smoothed
+scroller — are now `com.gios:light-common:1.2.0`, the same copy every other app uses. Nothing
+about scrolling changes: same 64dp notch, same two-notch guard against a stray brush of the thumb,
+same reversed direction in a thread so turning the wheel up still walks back through the
+conversation rather than away from it. That reversal is in the library specifically because this
+app needed it.
 
-### One place that decides the words
+The point of the move is that the wheel used to be a file pasted into ten repositories, and the
+copies had already drifted. A fix now lands everywhere at once.
 
-There are three routes to an alert — the live socket, the background catch-up poll, and the
-deferred flush when the app stops — and each phrased things itself. Where they agreed they agreed by
-accident. The phrasing now lives in `AlertText`, so the same message reads the same whether the
-phone was awake when it arrived or asleep. `Conversation` gained a `lastSender` so the poll, which
-works from the list rather than from messages, has a name to use at all; rows cached by an older
-build have no sender until the next sweep rewrites them, and stay unprefixed rather than guessing.
+### The release build is shrunk harder
 
-## LightChat v2.7 — The shake asks instead of interrupting
+R8 full mode is on. It merges classes, drops arguments nothing reads, and assumes a class it never
+sees allocated is never built — none of which the default mode attempts. On a phone this slow to
+cold-start that is worth having. The baseline profile that ships inside light-common is also
+actually applied now, which it was not before: below Android 12 nothing on the device reads a
+profile unless the app brings the installer with it.
 
-**Two changes, one of them invisible: shaking the phone no longer throws a report sheet over what
-you were doing, and the reporting code behind it is now a shared library rather than a copy kept
-in this app.**
+Shrinking this aggressively breaks things quietly, so the risk is worth naming. The rules added
+for it each say which mechanism they protect, and one was a real bug waiting to happen: tapbacks
+are stored in the local database by the *name* of the reaction, so R8 renaming that name would
+have made every cached tapback vanish — not on install, but on the next update, and only for
+messages received before it. Alarms, the socket service, the boot receiver and the two providers
+other apps read are pinned for the same class of reason.
 
-### The shake offers a chip, not a sheet
-
-The first version got the shape of the question wrong. A shake is a gesture the phone can
-misread — and the cost of misreading it was paid every single time, because a full-screen sheet
-landed on top of whatever you were looking at to ask about a problem that may not have existed. On
-a 3.92" panel that is a bad trade against a report that might not be real.
-
-So the offer is small, it sits out of the way, and **silence is an answer**. A shake puts a
-"SEND ERROR?" chip in the bottom corner; ignore it for four seconds and it fades. Nothing is lost
-by ignoring it: an unsent crash log stays on disk and is offered again on the next launch, and a
-failure the app noticed itself will not ask again for an hour. Only a tap opens the sheet.
-
-A crash offer stands for eight seconds rather than four. It is the one offer that cannot be
-reconstructed from nothing if you miss it.
-
-The chip is drawn in its own window rather than placed in the layout, so it lands in the same
-corner in every app regardless of how that app is built, and it cannot swallow a tap meant for
-what is underneath it.
-
-Issue titles now follow the same convention as every other app — `LightChat v2.7.x — <headline>`,
-labelled `chat` — instead of the `chat: <headline>` this app had invented.
-
-### Reporting is a library now
-
-The eight files under `com.gios.lightchat.report` are gone. They are
-`com.gios:light-common:1.0.1`, resolved from GitHub Packages and shared with every other app that
-was keeping its own copy of the same code.
-
-Nothing about this is visible on the phone. It matters because a fix to the reporter used to mean
-editing it in ten places and getting eight of them subtly wrong — which is exactly how the
-sheet-instead-of-chip mistake reached ten apps before anyone saw it once.
-
-One thing had to change shape. `BuildConfig` does not cross a library boundary, so the app hands
-its name, its triage label and its report key to `LightReport.install()` at startup rather than the
-reporter reading them out of the build. Skip that call and reporting is simply inert, which is a
-better failure than a reporter filing issues with a blank app name.
-
-Same note field, same queue-to-disk-first behaviour, same gesture tuning.
+If something does break in a way that only happens on a real build and not in debug, that is the
+suspect, and reverting `android.enableR8.fullMode` in `gradle.properties` is the one-line test.

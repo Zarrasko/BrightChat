@@ -11,7 +11,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import com.gios.lightchat.api.Store
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -25,22 +24,23 @@ import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.gios.lightchat.hw.LightKey
-import com.gios.lightchat.hw.LightKeys
-import com.gios.lightchat.hw.LocalWheelBus
-import com.gios.lightchat.hw.WheelBus
+import com.gios.light.common.hw.LightKey
+import com.gios.light.common.hw.LightKeys
+import com.gios.light.common.hw.LocalWheelBus
+import com.gios.light.common.hw.WheelBus
+import com.gios.light.common.report.LightReport
+import com.gios.light.common.report.ReportOverlay
+import com.gios.lightchat.api.Store
 import com.gios.lightchat.socket.AppForeground
 import com.gios.lightchat.ui.ConversationTab
-import com.gios.lightchat.ui.DialerScreen
 import com.gios.lightchat.ui.ConversationsScreen
-import com.gios.lightchat.ui.tabOf
+import com.gios.lightchat.ui.DialerScreen
 import com.gios.lightchat.ui.NewMessageScreen
 import com.gios.lightchat.ui.SettingsScreen
 import com.gios.lightchat.ui.SetupScreen
 import com.gios.lightchat.ui.ThreadScreen
+import com.gios.lightchat.ui.tabOf
 import com.gios.lightchat.ui.theme.LightChatTheme
-import com.gios.light.common.report.LightReport
-import com.gios.light.common.report.ReportOverlay
 
 /** The recipient extra on an incoming share. AOSP messaging's key, and what Roll sends. */
 private const val SHARE_EXTRA_ADDRESS = "address"

@@ -596,8 +596,9 @@ clears the password and returns to setup.
   handle by `imessageHandle` — a constructed guid can't lean on `newChat`'s loose
   AppleScript address resolution), sends the attachment to it (which creates the
   chat server-side), then opens the thread + refreshes.
-- **`hw/`** — the brightness wheel (`LightKeys.kt`, `Wheel.kt`), the same module the
-  sibling apps carry. `LightKeys.of` recognises a notch: `KeyEvent.keyCodeFromString` on
+- **`com.gios.light.common.hw`** — the brightness wheel, in `light-common` since 1.2.0.
+  It was `hw/LightKeys.kt` + `hw/Wheel.kt` in this repo until v2.9; the local copies are
+  deleted and the imports point at the library. `LightKeys.of` recognises a notch: `KeyEvent.keyCodeFromString` on
   Light's added `WHEEL_CCW`/`WHEEL_CW` labels first, then the raw scancodes 19/20 gated on
   the sensor's device name (`Pixart pat9126ja`) so a paired keyboard's `r`/`t` can't scroll.
   `MainActivity.dispatchKeyEvent` claims both DOWN and UP — above the view hierarchy, which
@@ -615,6 +616,14 @@ clears the password and returns to setup.
   `WheelInDialog` is not carried. `ImageViewerScreen` has no scroller to hoist, so its pan
   offset is wrapped in a hand-made `ScrollableState` — the wheel pans a zoomed photo, which
   dragging does badly here because a drag is also a tap candidate and a tap closes it.
+- **`backup/Backup.kt`** — the LightSync provider (`${applicationId}.lightsync.backup`,
+  `LightSyncBackup` from light-common). One store, `settings`, and it is a `LogicalStore`
+  rather than a `FileStore` over `shared_prefs/chat.xml`: the BlueBubbles password in that
+  file is sealed with an AndroidKeyStore key that cannot leave the phone, so it is filtered
+  out and the restored app asks for it once on Setup. `lightchat.db` is deliberately *not*
+  backed up — every row is re-fetchable from the server, and the one unrecoverable thing
+  (the contact-page note) is owned by LightNotebook, not by this app. Attachment caches live
+  under `cacheDir` and are out of scope by construction.
 - **Screens** (`ui/`) — `SetupScreen` (password entry), `ConversationsScreen`
   (list, tap title → settings, Refresh, **New**), `NewMessageScreen` (a "To" field
   that searches the contact index by name/number/email or takes a raw address,

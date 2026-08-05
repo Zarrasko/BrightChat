@@ -37,13 +37,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import com.gios.light.common.hw.WheelScroll
 import com.gios.lightchat.Dialer
 import com.gios.lightchat.api.Store
 import com.gios.lightchat.dial.AddressBook
 import com.gios.lightchat.dial.AddressBookRepo
 import com.gios.lightchat.dial.PhoneContact
 import com.gios.lightchat.dial.T9
-import com.gios.lightchat.hw.WheelScroll
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
 

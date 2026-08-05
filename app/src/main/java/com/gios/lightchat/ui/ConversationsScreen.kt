@@ -39,8 +39,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.gios.light.common.hw.WheelScroll
 import com.gios.lightchat.ChatViewModel
-import com.gios.lightchat.hw.WheelScroll
 import com.gios.lightchat.Conversation
 import com.gios.lightchat.Pins
 import com.gios.lightchat.Status

@@ -5,11 +5,12 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.ScrollableState
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -29,14 +30,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.material3.Text
+import com.gios.light.common.hw.WheelScroll
 import com.gios.lightchat.Attachment
 import com.gios.lightchat.ColorMode
-import com.gios.lightchat.hw.WheelScroll
-import java.util.concurrent.atomic.AtomicBoolean
-import kotlinx.coroutines.delay
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.delay
 
 /** How far pinch/double-tap zoom may go. The decoded bitmap is capped at 1080px
  *  on its long edge (see [com.gios.lightchat.Attachments]), so past ~4× there's

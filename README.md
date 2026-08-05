@@ -238,7 +238,7 @@ It works because the wheel arrives as an ordinary key event. Light patched
 `/system/usr/keylayout/Generic.kl` to label scancodes 19 and 20 `WHEEL_CCW`/`WHEEL_CW`,
 and nothing in `PhoneWindowManager` intercepts them, so they reach the focused window
 like any other key — which is also why an app that ignores the keycode appears to have
-a dead wheel. `hw/LightKeys.kt` resolves the labels at runtime and falls back to the raw
+a dead wheel. `LightKeys` in `light-common` resolves the labels at runtime and falls back to the raw
 scancode, gated on the sensor's device name so a paired keyboard's `r` can't scroll a
 thread.
 
@@ -250,7 +250,7 @@ nothing. The thread's list is `reverseLayout`, which reverses its scroll axis to
 the sign is flipped for that one list. Notches are frame-timed rather than applied as
 they land — the sensor fires every ~35 ms, faster than a frame — and the first notch
 after a pause is held until a second confirms it, since the wheel sits under a thumb and
-a stray brush shouldn't move the message you were reading. `hw/Wheel.kt` has the
+a stray brush shouldn't move the message you were reading. `WheelScroll` in `light-common` has the
 numbers.
 
 ## Building
