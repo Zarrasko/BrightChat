@@ -1,4 +1,4 @@
-# LightChat
+# BrightChat
 
 An **iMessage client** for the [Light Phone III](https://www.thelightphone.com/),
 talking to an always-on, self-hosted [BlueBubbles Server](https://github.com/BlueBubblesApp/bluebubbles-server)
@@ -11,7 +11,7 @@ reached privately over [Tailscale](https://tailscale.com/). Package
 >
 > This is [gi-os](https://github.com/gi-os)'s fork of
 > **[craigeley/chat](https://github.com/craigeley/chat)**. Craig Eley wrote the app;
-> this fork renames it to LightChat (`com.gios.lightchat`) to sit with the rest of the
+> this fork renames it to BrightChat (`com.gios.lightchat`) to sit with the rest of the
 > [gi-os Light Phone tools](https://github.com/gi-os/awesome-light) and adds everything
 > from [Favorites / Known / Unknown tabs](#favorites-known-unknown-tabs) onward, below.
 > Nothing here is upstream's responsibility — send bugs in these features to this repo,
@@ -50,7 +50,7 @@ Google push involved, it adds:
   [Don't miss messages while the phone sleeps](#dont-miss-messages-while-the-phone-sleeps).
 
 <p>
-<img src="docs/screenshots/thread.png" width="260" alt="A thread in LightChat on a Light Phone III">
+<img src="docs/screenshots/thread.png" width="260" alt="A thread in BrightChat on a Light Phone III">
 </p>
 
 ## Quick start
@@ -79,7 +79,7 @@ This gives the Mac a stable `https://<machine>.<tailnet>.ts.net` URL with TLS, r
 only from your own devices. `tailscale serve status` shows the URL.
 
 **3. Install the app.** Grab the newest signed APK from
-[Releases](https://github.com/gi-os/LightChat/releases) or track this repo in
+[Releases](https://github.com/gi-os/BrightChat/releases) or track this repo in
 **Obtainium**.
 
 **4. Configure it.** On first launch, enter the `https://…ts.net` URL and the
@@ -147,13 +147,13 @@ notification, just not the box.
 
 ### Don't miss messages while the phone sleeps
 
-Delivery is a socket LightChat holds open itself — there's no Google push on this phone
-— and a socket doesn't survive the phone sleeping. LightChat backs it with an
+Delivery is a socket BrightChat holds open itself — there's no Google push on this phone
+— and a socket doesn't survive the phone sleeping. BrightChat backs it with an
 `setAndAllowWhileIdle` alarm, the one kind that fires during Doze, which re-pulls the
 list and notifies for anything missed.
 
 What actually throttles that isn't Doze, it's **App Standby buckets**. The longer the
-phone goes unused without LightChat being opened, the further Android demotes it —
+phone goes unused without BrightChat being opened, the further Android demotes it —
 active → working set → frequent → rare → restricted — and each step defers its alarms
 harder. By `rare`, an alarm asking for five minutes is held for **two hours**;
 `restricted` holds it for a day — which means the exact situation the poll exists for
@@ -165,7 +165,7 @@ adb shell dumpsys deviceidle whitelist +com.gios.lightchat
 ```
 
 This puts the app in the **exempt** bucket: no alarm deferral at all, and network access
-during Doze instead of a ~10 second window per alarm. LightChat notices and polls every
+during Doze instead of a ~10 second window per alarm. BrightChat notices and polls every
 5 minutes instead of 10. Survives reboots and app updates.
 
 **Settings tells you whether it took.** The bottom of the Settings screen reads either
@@ -191,12 +191,12 @@ the list's Known tab uses — a named group, or any participant in your address 
 ### Photos from Roll
 
 [Roll](https://github.com/gi-os/LightCamera), the camera app, sends straight here: its send
-button opens your contacts, you pick a person, and LightChat opens on that thread with the
+button opens your contacts, you pick a person, and BrightChat opens on that thread with the
 photograph already sent. No chooser in between.
 
-That works because LightChat registers as an image share target and reads the recipient from
+That works because BrightChat registers as an image share target and reads the recipient from
 the share's `address` extra — the same convention the stock messaging apps use, so anything
-else that shares a photo to LightChat works too, it just lands on the conversation list and
+else that shares a photo to BrightChat works too, it just lands on the conversation list and
 waits for you to pick a thread.
 
 ### The contact page
@@ -215,7 +215,7 @@ scroll costs nothing, and one you do costs a page at a time. A chat whose thread
 been opened holds nothing at all, and the page says that rather than claiming there are no
 photographs in it.
 
-The **Note** row opens [LightNotebook](https://github.com/gi-os/LightNotebook), which keeps
+The **Note** row opens [BrightNotebook](https://github.com/gi-os/BrightNotebook), which keeps
 one note per conversation and makes it on the first tap. Nothing is read back across the
 gap — the row is a door, not a preview — and if Notebook isn't installed the row says
 so and does nothing.
@@ -231,7 +231,7 @@ reachable from here. A 1:1, which is what the note is mostly for, never moves.
 Turning the brightness wheel scrolls whatever is up: a thread, the conversation list,
 contact search on the new-message screen, a group's member list, the photo grid, and
 the setup form. Only the turns — the wheel click and the camera button belong to
-[LightControl](https://github.com/gi-os/LightControl), which owns them phone-wide and
+[BrightControl](https://github.com/gi-os/BrightControl), which owns them phone-wide and
 passes bare notches through to `com.gios.*` for exactly this.
 
 It works because the wheel arrives as an ordinary key event. Light patched
@@ -287,7 +287,7 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v0.1.5 | Replies, group management, failed-send surfacing, absolute list times |
 | v0.1.6 | Unread markers, notification deep-links, full-screen image viewer |
 | v0.5.0 | Full-colour photo viewing (lifts LightOS's grayscale while the viewer is open) |
-| v0.6.x–ci / v0.7.1–v0.7.2 | Renamed to **LightChat** (`com.gios.lightchat`, repo `gi-os/LightChat`); Favorites/Known/Unknown tabs; own photo picker with inline camera; heads-up box + buzz for incoming messages |
+| v0.6.x–ci / v0.7.1–v0.7.2 | Renamed to **BrightChat** (`com.gios.lightchat`, repo `gi-os/BrightChat`); Favorites/Known/Unknown tabs; own photo picker with inline camera; heads-up box + buzz for incoming messages |
 | v0.7.3 | Inline camera, photo picker runs in colour |
 | v0.7.4 | Heads-up overlay, mark-all-read, double-tap tapbacks, no `null` chats |
 | v0.7.5 | Fix: don't miss messages that arrive while the app is away |
@@ -296,13 +296,13 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v1.0.8 | Hardware wheel scrolls threads, the conversation list, contact search, and the photo grid |
 | v1.0.9 | README: documents what the wheel needs |
 | v1.0.10 – v1.0.13 | Unknown senders are silent by default; messages are kept on the phone and only the delta is synced; receiving photos shared from Roll |
-| v1.1.14 | A contact page for every conversation: photos, links, and a note kept in LightNotebook |
+| v1.1.14 | A contact page for every conversation: photos, links, and a note kept in BrightNotebook |
 | v1.2.x | Groups offered to Roll's send picker (`ChatsProvider`) and addressed by guid on the way back in; a login code from an unknown sender always alerts, and is served to LightKeyboard for three minutes |
 | v1.3.x | Call the person you're texting — `ACTION_DIAL` to the default calling app, from the thread header for a 1:1 and from every name on the contact page |
 | v1.4.x | Calling actually works: `ACTION_CALL` to the telecom stack (falling back to `ACTION_DIAL` if `CALL_PHONE` is refused), and the `tel:` URI no longer percent-encodes the `+` out of an E.164 number |
 | v1.5.x | The call screen is brought up after placing (`TelecomManager.showInCallScreen`, retried past the radio) instead of the call connecting in the background; Call confirms on a second tap |
 | v1.6.x | The phone app is opened outright after placing a call, since LightOS's dialer ignores `showInCallScreen` |
-| v1.7.x | Placing a call backgrounds LightChat to the home screen instead of launching the phone app, so the call screen has the foreground and hanging up doesn't land back in the thread |
+| v1.7.x | Placing a call backgrounds BrightChat to the home screen instead of launching the phone app, so the call screen has the foreground and hanging up doesn't land back in the thread |
 | v1.8.x | The step aside happens on the tap rather than 1.8 seconds later — the delay existed for a retry ladder that no longer exists |
 | v1.9.x | Fixes v1.8 going home without calling: `ACTION_CALL` starts an activity that places the call, and the immediate home launch cancelled it. Uses `TelecomManager.placeCall` instead, which needs no activity |
 | v2.0.x | A dialer that is also the contacts list — T9 search over the phone's address book, press-and-hold 1–9 to speed dial. Favorites is now the front page, and starred chats can be pinned to the top of it |

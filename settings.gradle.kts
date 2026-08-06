@@ -31,5 +31,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "LightChat"
+rootProject.name = "BrightChat"
 include(":app")
