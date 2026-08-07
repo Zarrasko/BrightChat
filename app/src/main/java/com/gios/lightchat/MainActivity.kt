@@ -186,7 +186,11 @@ class MainActivity : ComponentActivity() {
     private fun flushPendingAlerts() {
         val held = PendingAlerts.drain()
         if (held.isEmpty()) return
-        held.forEach { Notifications.post(this, it.title, it.text, it.chatGuid) }
+        // Seen entries — the thread was open, or the message arrived into the thread on
+        // screen — are not posted: a notification at screen-off about the message the
+        // user just read and answered is the noise this map exists to prevent. They are
+        // still drained and still counted below, because the watermark must pass them.
+        held.filterNot { it.seen }.forEach { Notifications.post(this, it.title, it.text, it.chatGuid) }
         // These have now been alerted for, so the catch-up's watermark may pass them. It is
         // deliberately held below anything suppressed while the app was open (see CatchUp),
         // and without moving it here the next background poll would find the same messages

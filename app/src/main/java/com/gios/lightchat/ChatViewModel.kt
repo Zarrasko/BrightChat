@@ -436,10 +436,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         conversation.guids.forEach { markReadIfPrivate(it) }
         clearUnread(conversation.guid)
         Notifications.clearChat(app, conversation.guids)
-        // Opening the thread is what "you've seen it" means, so drop any alert being held
-        // for it — otherwise leaving the app would post a notification for the message
-        // just read. See PendingAlerts.
-        PendingAlerts.clear(conversation.guids)
+        // Opening the thread is what "you've seen it" means, so mark any alert being held
+        // for it seen — otherwise leaving the app would post a notification for the message
+        // just read. Marked, not dropped, so the flush still advances the watermark past
+        // it. See PendingAlerts. And publish which thread is on screen, so the socket can
+        // make the same call about messages that arrive while the user is watching.
+        PendingAlerts.markSeen(conversation.guids)
+        AppForeground.visibleChatGuids = conversation.guids.toSet()
         // A share that arrived without a recipient was waiting for exactly this.
         flushPendingShared()
         threadJob?.cancel()
@@ -708,6 +711,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // Leave button does exactly that) must not leave its photos addressed to a
         // conversation that is no longer open.
         closeDetails()
+        AppForeground.visibleChatGuids = emptySet()
         _state.update { it.copy(open = null, messages = emptyList(), threadLoading = false) }
     }
 
@@ -1279,6 +1283,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (files.isEmpty()) return
         if (address.isBlank() && chatGuid.isBlank()) {
             pendingShared = files
+            AppForeground.visibleChatGuids = emptySet()
             _state.update {
                 it.copy(
                     open = null,
@@ -1292,6 +1297,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
             return
         }
+        AppForeground.visibleChatGuids = emptySet()
         _state.update { it.copy(composingNew = false, open = null, message = "Sending…") }
         viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch

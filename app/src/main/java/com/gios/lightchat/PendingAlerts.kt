@@ -20,21 +20,33 @@ package com.gios.lightchat
  */
 object PendingAlerts {
 
-    data class Alert(val chatGuid: String, val title: String, val text: String, val date: Long)
+    data class Alert(
+        val chatGuid: String,
+        val title: String,
+        val text: String,
+        val date: Long,
+        val seen: Boolean = false,
+    )
 
     private val byGuid = LinkedHashMap<String, Alert>()
 
     /** One entry per chat, newest wins — same shape as the notifications themselves,
      *  which are per-chat and replace each other. */
-    fun add(chatGuid: String, title: String, text: String, date: Long) = synchronized(byGuid) {
-        byGuid[chatGuid] = Alert(chatGuid, title, text, date)
-        Unit
-    }
+    fun add(chatGuid: String, title: String, text: String, date: Long, seen: Boolean = false) =
+        synchronized(byGuid) {
+            byGuid[chatGuid] = Alert(chatGuid, title, text, date, seen)
+            Unit
+        }
 
-    /** The thread was opened, so the message has been seen. [chatGuids] plural because a
-     *  forked group spans several rooms. */
-    fun clear(chatGuids: Collection<String>) = synchronized(byGuid) {
-        chatGuids.forEach { byGuid.remove(it) }
+    /**
+     * The thread was opened, so the message has been seen. Flagged rather than removed:
+     * the flush must still advance the watermark past it, because on a server with no
+     * Private API nothing ever marks it read and the next [CatchUp] would re-find it —
+     * and buzz — for a message the user already read. [chatGuids] plural because a
+     * forked group spans several rooms.
+     */
+    fun markSeen(chatGuids: Collection<String>) = synchronized(byGuid) {
+        chatGuids.forEach { guid -> byGuid[guid]?.let { byGuid[guid] = it.copy(seen = true) } }
     }
 
     fun clearAll() = synchronized(byGuid) { byGuid.clear() }

@@ -328,7 +328,17 @@ class SocketService : Service() {
         // instead — see PendingAlerts.
         if (alertable && AppForeground.active) {
             val alert = alertText(incoming, contacts)
-            PendingAlerts.add(incoming.chatGuid, alert.title, alert.body, incoming.message.date)
+            // "Foreground" alone can't tell the list from the open thread. A reply that
+            // lands in the conversation the user is *in* — the one they just texted — is
+            // being read as it arrives, and posting it when the screen goes off is a
+            // notification about the message they answered. Held anyway, marked seen, so
+            // the flush still moves the watermark past it instead of leaving it for the
+            // next poll to buzz about.
+            val onScreen = incoming.chatGuid in AppForeground.visibleChatGuids
+            PendingAlerts.add(
+                incoming.chatGuid, alert.title, alert.body, incoming.message.date,
+                seen = onScreen,
+            )
         }
         // Notify only for genuinely new incoming messages the user can't see —
         // not group events (renames etc.), whose `text` is empty.

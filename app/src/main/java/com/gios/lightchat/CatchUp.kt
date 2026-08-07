@@ -200,7 +200,11 @@ object CatchUp {
             // finds them again. Once read, they stop matching `unread` and the watermark
             // moves on by itself.
             alerts.forEach { (convo, alert) ->
-                PendingAlerts.add(convo.guid, alert.title, alert.body, convo.lastDate)
+                // Same gate as the socket path: the row on screen right now has been seen.
+                PendingAlerts.add(
+                    convo.guid, alert.title, alert.body, convo.lastDate,
+                    seen = convo.guid in AppForeground.visibleChatGuids,
+                )
             }
             val hold = missed.minOf { it.lastDate } - 1
             Store.setLastAlertedAt(app, maxOf(watermark, minOf(seen, hold)))
