@@ -1,5 +1,8 @@
 package com.gios.lightchat.ui
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,8 +27,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.gios.lightchat.CallAnnounce
 import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.Delivery
+import com.gios.lightchat.Dialer
 import com.gios.lightchat.api.Store
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatDimens
@@ -136,6 +141,85 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
         )
 
         Spacer(modifier = Modifier.height(20.dp))
+
+        // Off by default, and only shown on a phone that can place a call at all. When
+        // on, placing a call also iMessages the callee which number is ringing them —
+        // the SIM's number, not the iMessage one — so the call-back comes to this phone.
+        if (Dialer.available(context)) {
+            var callAnnounce by remember { mutableStateOf(Store.callAnnounce(context)) }
+            // The SIM's own number needs READ_PHONE_NUMBERS; asked for at the moment the
+            // toggle goes on, which is the moment the answer starts mattering. A refusal
+            // is not a dead end — the number can be typed in below, and the message has
+            // a wording for having no number at all.
+            var ownNumber by remember { mutableStateOf(CallAnnounce.ownNumber(context)) }
+            val askNumber = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission(),
+            ) { ownNumber = CallAnnounce.ownNumber(context) }
+            HapticText(
+                text = if (callAnnounce) "Announce calls: on" else "Announce calls: off",
+                style = ChatType.body,
+                color = ChatColors.onSurfaceDim,
+                textAlign = TextAlign.Center,
+                onClick = {
+                    callAnnounce = !callAnnounce
+                    Store.setCallAnnounce(context, callAnnounce)
+                    if (callAnnounce && ownNumber == null) {
+                        askNumber.launch(Manifest.permission.READ_PHONE_NUMBERS)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = if (callAnnounce) {
+                    "Calling someone also texts them: \u201c" +
+                        CallAnnounce.messageText(ownNumber) + "\u201d"
+                } else {
+                    "Calls are just calls."
+                },
+                style = ChatType.hint,
+                color = ChatColors.onSurfaceDisabled,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            )
+            if (callAnnounce) {
+                Spacer(modifier = Modifier.height(8.dp))
+                // The number the text names, editable because plenty of SIMs don't know
+                // their own number. Prefilled from the SIM when it does.
+                var editingNumber by remember { mutableStateOf(false) }
+                var draftNumber by remember { mutableStateOf(Store.myNumber(context) ?: ownNumber.orEmpty()) }
+                if (editingNumber) {
+                    BasicTextField(
+                        value = draftNumber,
+                        onValueChange = { draftNumber = it },
+                        singleLine = true,
+                        textStyle = ChatType.body.copy(color = ChatColors.onSurface, textAlign = TextAlign.Center),
+                        cursorBrush = SolidColor(ChatColors.onSurface),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = {
+                            Store.setMyNumber(context, draftNumber)
+                            ownNumber = CallAnnounce.ownNumber(context)
+                            editingNumber = false
+                        }),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    HapticText(
+                        text = ownNumber?.let { "Your number: " + CallAnnounce.prettyUs(it) }
+                            ?: "Tap to set your number",
+                        style = ChatType.hint,
+                        color = ChatColors.onSurfaceDim,
+                        textAlign = TextAlign.Center,
+                        onClick = {
+                            draftNumber = Store.myNumber(context) ?: ownNumber.orEmpty()
+                            editingNumber = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+        }
 
         HapticText(
             text = "Refresh conversations",

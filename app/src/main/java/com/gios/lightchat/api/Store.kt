@@ -24,6 +24,8 @@ object Store {
     private const val KEY_POLL_OK_AT = "poll_ok_at"   // last catch-up that reached the server
     private const val KEY_POLL_FAILS = "poll_fails"   // consecutive failures
     private const val KEY_NOTIFY_UNKNOWN = "notify_unknown" // alert for senders not in the address book
+    private const val KEY_CALL_ANNOUNCE = "call_announce" // text people the dumb-phone number when calling them
+    private const val KEY_MY_NUMBER = "my_number" // manual override for the SIM's own number
     private const val KEY_NOTED = "noted_keys"        // conversations whose note has been opened
     private const val KEY_PINS = "pinned_guids"      // starred chats held at the top, newest pin first
     private const val KEY_SPEED_DIAL = "speed_dial"   // digit -> number\u0000name
@@ -163,6 +165,30 @@ object Store {
 
     fun setNotifyUnknown(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_NOTIFY_UNKNOWN, value).apply()
+    }
+
+    /**
+     * Whether placing a call also texts the callee which number the call is coming from —
+     * see `CallAnnounce`. Off by default: texting people automatically is the kind of thing
+     * that should only ever happen because Gio asked it to.
+     */
+    fun callAnnounce(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_CALL_ANNOUNCE, false)
+
+    fun setCallAnnounce(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_CALL_ANNOUNCE, value).apply()
+    }
+
+    /**
+     * The phone's own number, typed in by hand — the fallback for a SIM whose line-1
+     * number is blank, which plenty are. Takes precedence over the SIM when set, because
+     * a number somebody typed on purpose beats one a carrier half-filled.
+     */
+    fun myNumber(context: Context): String? =
+        prefs(context).getString(KEY_MY_NUMBER, null)?.takeIf { it.isNotBlank() }
+
+    fun setMyNumber(context: Context, value: String) {
+        prefs(context).edit().putString(KEY_MY_NUMBER, value.trim()).apply()
     }
 
     /**

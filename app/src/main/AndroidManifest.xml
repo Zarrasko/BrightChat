@@ -18,6 +18,9 @@
       back to DIAL rather than going dead; see Dialer.
     -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- Reading the SIM's own number, so the call-announce text can name it. Requested
+         at the moment the toggle is switched on, never at launch. See CallAnnounce. -->
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
     <!--
       The address book, for the dialer's contacts list and its T9 search. Asked for the first
       time the Dial tab is opened, not at launch. Read-only and never leaves the phone: the

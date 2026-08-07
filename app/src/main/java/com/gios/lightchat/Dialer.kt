@@ -144,6 +144,11 @@ object Dialer {
         if (telecom != null) {
             val placed = runCatching { telecom.placeCall(telUri(address), Bundle()) }.isSuccess
             if (placed) {
+                // The call is with telecom; if the toggle is on, the callee also gets a
+                // text naming this phone's number. Here and not in the UI, so every road
+                // to a placed call — thread header, contact page, T9, speed dial — sends
+                // the same announcement. See CallAnnounce.
+                CallAnnounce.maybeAnnounce(context, address)
                 standAside(context)
                 return true
             }
@@ -154,6 +159,10 @@ object Dialer {
             context.startActivity(
                 Intent(Intent.ACTION_CALL, telUri(address)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
+            // ACTION_CALL still places the call (via the dialer's activity), so it is
+            // still announced. ACTION_DIAL in dial() is not: that only opens a keypad,
+            // and "I am calling you" about a call never dialled would be a lie.
+            CallAnnounce.maybeAnnounce(context, address)
             standAsideAfter(context, INTENT_CALL_SETTLE_MS)
             true
         }.getOrDefault(false)
