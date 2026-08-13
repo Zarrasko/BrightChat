@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
+import org.json.JSONObject
 
 /**
  * Create or edit an agent. An agent is a name plus an OpenAI-compatible endpoint
@@ -40,6 +41,31 @@ fun AgentEditScreen(viewModel: ChatViewModel) {
     var apiKey by rememberSaveable { mutableStateOf(target?.apiKey.orEmpty()) }
     var model by rememberSaveable { mutableStateOf(target?.model.orEmpty()) }
     var systemPrompt by rememberSaveable { mutableStateOf(target?.systemPrompt.orEmpty()) }
+    var scanning by rememberSaveable { mutableStateOf(false) }
+    var scanError by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // The QR scanner is a full-screen sub-mode of the editor. On a successful decode the
+    // fields are filled in place and the form comes back for review before Create/Save.
+    if (scanning) {
+        QrScanScreen(
+            onResult = { text ->
+                val fields = parseAgentQr(text)
+                if (fields == null) {
+                    scanError = "That QR code isn’t a LightChat agent."
+                } else {
+                    name = fields.name
+                    baseUrl = fields.baseUrl
+                    apiKey = fields.apiKey
+                    model = fields.model
+                    systemPrompt = fields.systemPrompt
+                    scanError = null
+                }
+                scanning = false
+            },
+            onClose = { scanning = false },
+        )
+        return
+    }
 
     Column(
         modifier = Modifier
@@ -73,6 +99,14 @@ fun AgentEditScreen(viewModel: ChatViewModel) {
 
         Spacer(modifier = Modifier.height(24.dp))
         HapticText(
+            text = "Scan QR code",
+            style = ChatType.body,
+            color = ChatColors.onSurface,
+            onClick = { scanError = null; scanning = true },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        HapticText(
             text = if (target == null) "Create" else "Save",
             style = ChatType.body,
             color = if (name.isBlank() || baseUrl.isBlank() || model.isBlank()) {
@@ -83,6 +117,15 @@ fun AgentEditScreen(viewModel: ChatViewModel) {
             onClick = { viewModel.saveAgent(name, baseUrl, apiKey, model, systemPrompt) },
             modifier = Modifier.fillMaxWidth(),
         )
+        scanError?.let { error ->
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = error,
+                style = ChatType.hint,
+                color = ChatColors.onSurfaceDisabled,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         Spacer(modifier = Modifier.height(24.dp))
     }
 }
@@ -109,4 +152,32 @@ private fun FieldInput(value: String, keyboardType: KeyboardType, onChange: (Str
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
     )
     HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
+}
+
+/**
+ * A decoded agent QR: the five editable fields. The editor fills whatever is present
+ * and leaves the rest as the user left them.
+ */
+private data class AgentQrFields(
+    val name: String,
+    val baseUrl: String,
+    val apiKey: String,
+    val model: String,
+    val systemPrompt: String,
+)
+
+/**
+ * Parses a `lightchat-agent` QR payload (JSON). Returns null when [text] isn't a
+ * LightChat agent code — a plain URL, a Wi-Fi code, or an unrelated QR.
+ */
+private fun parseAgentQr(text: String): AgentQrFields? {
+    val root = runCatching { JSONObject(text) }.getOrNull() ?: return null
+    if (root.optString("type") != "lightchat-agent") return null
+    return AgentQrFields(
+        name = root.optString("name"),
+        baseUrl = root.optString("base_url").ifBlank { root.optString("baseUrl") },
+        apiKey = root.optString("api_key").ifBlank { root.optString("apiKey") },
+        model = root.optString("model"),
+        systemPrompt = root.optString("system_prompt").ifBlank { root.optString("systemPrompt") },
+    )
 }
