@@ -2,6 +2,9 @@ package com.gios.lightchat
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Rect
 import android.util.LruCache
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.graphics.ImageBitmap
@@ -10,6 +13,7 @@ import com.gios.lightchat.api.Store
 import java.io.File
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -20,14 +24,16 @@ import org.json.JSONObject
  * A per-chat wallpaper, drawn behind the thread.
  *
  * The image is chosen once (from the same DCIM/Pictures walk the photo picker
- * uses) and then run through a *stack* of filters — each one a simple pixel
- * pass, applied in order, repeatable. On a greyscale panel the interesting ones
- * are the ones that embrace it: an ordered dither quantises the photo down to
- * pure black-and-white halftone (at a chosen cell size, so 8× reads chunky and
+ * uses), placed onto a screen-shaped canvas by a chosen [ScaleMode], and then
+ * run through a *stack* of filters — each one a simple pixel pass, applied in
+ * order, repeatable. On a greyscale panel the interesting ones are the ones
+ * that embrace it: an ordered dither quantises the photo down to pure
+ * black-and-white halftone (at a chosen cell size, so 8× reads chunky and
  * deliberate rather than like a rendering bug), and Fade pulls the whole thing
  * toward the black the app already paints, which is what keeps white text
- * readable over it. Corner blur melts the edges so the picture sits *behind*
- * the conversation instead of competing with it.
+ * readable over it. The two corner effects melt the edges — one into blur, one
+ * into the black itself — so the picture sits *behind* the conversation
+ * instead of competing with it.
  *
  * Everything is dependency-free pixel work on [Bitmap]s, same as [Attachments]:
  * no render effects, no GPU passes — this phone's panel is 1080 wide and the
@@ -35,16 +41,32 @@ import org.json.JSONObject
  */
 object ChatBackground {
 
+    /** How the photo lands on the screen-shaped canvas, before any filter runs. */
+    enum class ScaleMode(val label: String) {
+        /** Fill the screen, cropping whatever overflows. The default. */
+        FILL("Fill"),
+
+        /** The whole photo, letterboxed on black — which the corner effects and
+         *  Fade then blend into, so the bars read as intent rather than absence. */
+        FIT("Fit"),
+
+        /** Stretch to the screen's shape, aspect be damned. Sometimes the warp is the look. */
+        STRETCH("Stretch"),
+    }
+
     /** One filter application: which effect, and how hard. [amount]'s meaning is
      *  per-type — a dither cell size, a percentage — see [FilterType]. */
     data class Filter(val type: FilterType, val amount: Int)
 
     /**
-     * The four effects, with the range their [Filter.amount] moves in.
+     * The five effects, with the range their [Filter.amount] moves in.
      *
-     * [stepped] types adjust by +/- [step] between [min] and [max]; DITHER instead
-     * doubles/halves (2 → 4 → 8 → 16), because halftone cells read in octaves —
-     * the step from 7 to 8 is invisible where 4 to 8 is the whole point.
+     * Percentage types adjust by +/- [step] between [min] and [max]; DITHER instead
+     * doubles/halves, because halftone cells read in octaves — the step from 7 to 8
+     * is invisible where 4 to 8 is the whole point. Its amount is in *quarter-pixels*
+     * (4 = a 1px cell) so the ladder extends below one pixel: 0.5× and 0.25× dither
+     * at a finer grid than the canvas and settle back down to it, which reads as a
+     * softer, grayer halftone rather than hard 1px checkering.
      */
     enum class FilterType(
         val label: String,
@@ -53,8 +75,8 @@ object ChatBackground {
         val step: Int,
         val default: Int,
     ) {
-        /** Ordered Bayer dither to pure black/white, [Filter.amount] = cell size in px. */
-        DITHER("Dither", 1, 16, 0, 8),
+        /** Ordered Bayer dither to pure black/white. Amount in quarter-px: 1..64 = 0.25×..16×. */
+        DITHER("Dither", 1, 64, 0, 32),
 
         /** Plain luminance greyscale. No amount — it either is or isn't. */
         MONO("Black & white", 0, 0, 0, 0),
@@ -63,15 +85,20 @@ object ChatBackground {
          *  40 means the picture is drawn at 40% and the rest is background. */
         FADE("Opacity", 10, 90, 10, 40),
 
-        /** Blur that grows from a sharp centre out to the corners, percent strength. */
+        /** Blur that grows from a sharp centre out to the corners, percent strength.
+         *  Higher steps both blur harder and reach further in. */
         CORNER_BLUR("Corner blur", 10, 100, 10, 50),
+
+        /** The same reach, but into black instead of blur — the corners dissolve
+         *  into the background itself. Higher steps reach further in. */
+        CORNER_FADE("Corner fade", 10, 100, 10, 50),
         ;
 
         val hasAmount: Boolean get() = min != max
 
-        /** How the amount reads in a row: "8×" for a cell size, "40%" for the rest. */
+        /** How the amount reads in a row: "8×" (or "0.5×") for a cell, "40%" for the rest. */
         fun display(amount: Int): String = when (this) {
-            DITHER -> "$amount×"
+            DITHER -> if (amount >= 4) "${amount / 4}×" else "0.${if (amount == 2) "5" else "25"}×"
             MONO -> ""
             else -> "$amount%"
         }
@@ -82,7 +109,7 @@ object ChatBackground {
         }
     }
 
-    /** Processed backgrounds held decoded; keyed by guid + the exact stack, so an
+    /** Processed backgrounds held decoded; keyed by guid + the exact recipe, so an
      *  edit is a different key and the stale one just ages out. */
     private val cache = object : LruCache<String, ImageBitmap>(3) {}
 
@@ -102,24 +129,47 @@ object ChatBackground {
     fun filters(context: Context, chatGuid: String): List<Filter> {
         val json = Store.background(context, chatGuid) ?: return emptyList()
         return runCatching {
-            val array = JSONObject(json).getJSONArray("filters")
+            val obj = JSONObject(json)
+            // v1 stored a dither amount in whole pixels; v2 in quarter-pixels
+            // (so the ladder could grow steps below 1×). ×4 keeps a saved 8× an 8×.
+            val ditherScale = if (obj.optInt("v", 1) < 2) 4 else 1
+            val array = obj.getJSONArray("filters")
             (0 until array.length()).mapNotNull { i ->
                 val o = array.getJSONObject(i)
                 val type = FilterType.entries.firstOrNull { it.name == o.getString("type") }
-                type?.let { Filter(it, o.optInt("amount", it.default).coerceIn(it.min, it.max)) }
+                type?.let {
+                    val raw = o.optInt("amount", it.default)
+                    val amount = if (it == FilterType.DITHER) raw * ditherScale else raw
+                    Filter(it, amount.coerceIn(it.min, it.max))
+                }
             }
         }.getOrDefault(emptyList())
     }
 
+    /** The saved scale mode; FILL both by default and for configs from before it existed. */
+    fun scale(context: Context, chatGuid: String): ScaleMode {
+        val json = Store.background(context, chatGuid) ?: return ScaleMode.FILL
+        val name = runCatching { JSONObject(json).optString("scale") }.getOrDefault("")
+        return ScaleMode.entries.firstOrNull { it.name == name } ?: ScaleMode.FILL
+    }
+
     /** Persists [source] (copied, so a photo later deleted from DCIM keeps working)
-     *  and the stack, then bumps [version] so open screens reload. */
-    suspend fun save(context: Context, chatGuid: String, source: File, filters: List<Filter>) {
+     *  and the recipe, then bumps [version] so open screens reload. */
+    suspend fun save(
+        context: Context,
+        chatGuid: String,
+        source: File,
+        filters: List<Filter>,
+        scale: ScaleMode,
+    ) {
         withContext(Dispatchers.IO) {
             val dest = sourceFile(context, chatGuid)
             if (source.canonicalPath != dest.canonicalPath) {
                 runCatching { source.copyTo(dest, overwrite = true) }
             }
             Store.setBackground(context, chatGuid, JSONObject().apply {
+                put("v", 2)
+                put("scale", scale.name)
                 put("filters", JSONArray().apply {
                     filters.forEach {
                         put(JSONObject().apply {
@@ -142,16 +192,18 @@ object ChatBackground {
     /**
      * The finished background for [chatGuid] at roughly the screen's shape, or
      * null when the chat has none. Cached decoded; the pixel passes only run when
-     * the stack or the photo changed.
+     * the recipe or the photo changed.
      */
     suspend fun load(context: Context, chatGuid: String, aspect: Float): ImageBitmap? {
         val file = sourceFile(context, chatGuid)
         if (file.length() == 0L) return null
         val stack = filters(context, chatGuid)
-        val key = chatGuid + "|" + aspect + "|" + stack.joinToString { "${it.type.name}:${it.amount}" }
+        val mode = scale(context, chatGuid)
+        val key = chatGuid + "|" + aspect + "|" + mode.name + "|" +
+            stack.joinToString { "${it.type.name}:${it.amount}" }
         cache.get(key)?.let { return it }
         return withContext(Dispatchers.Default) {
-            val bitmap = render(file, stack, aspect, THREAD_DIM) ?: return@withContext null
+            val bitmap = render(file, stack, mode, aspect, THREAD_DIM) ?: return@withContext null
             val image = bitmap.asImageBitmap()
             cache.put(key, image)
             image
@@ -160,39 +212,76 @@ object ChatBackground {
 
     /** As [load] but small and uncached — the editor's live preview, re-run on
      *  every stack change. */
-    suspend fun preview(file: File, filters: List<Filter>, aspect: Float): ImageBitmap? =
-        withContext(Dispatchers.Default) {
-            render(file, filters, aspect, PREVIEW_DIM)?.asImageBitmap()
-        }
+    suspend fun preview(
+        file: File,
+        filters: List<Filter>,
+        scale: ScaleMode,
+        aspect: Float,
+    ): ImageBitmap? = withContext(Dispatchers.Default) {
+        render(file, filters, scale, aspect, PREVIEW_DIM)?.asImageBitmap()
+    }
 
     // ---- the pipeline ----
 
-    private fun render(file: File, filters: List<Filter>, aspect: Float, maxDim: Int): Bitmap? {
+    /**
+     * Decode, place on a screen-shaped black canvas per [mode], run the stack.
+     *
+     * The canvas comes first so every filter works in *screen* space: corner
+     * effects put their corners where the screen's corners will be, and FIT's
+     * letterbox bars are part of the image the filters see — which is exactly
+     * what lets a corner fade dissolve the photo's edge into them.
+     */
+    private fun render(
+        file: File,
+        filters: List<Filter>,
+        mode: ScaleMode,
+        aspect: Float,
+        maxDim: Int,
+    ): Bitmap? {
         val decoded = Attachments.decode(file, maxDim) ?: return null
-        var bitmap = centerCrop(decoded, aspect)
+        var bitmap = compose(decoded, mode, aspect, maxDim)
         for (filter in filters) {
             bitmap = when (filter.type) {
                 FilterType.MONO -> mono(bitmap)
                 FilterType.FADE -> fade(bitmap, filter.amount)
                 FilterType.DITHER -> dither(bitmap, filter.amount)
                 FilterType.CORNER_BLUR -> cornerBlur(bitmap, filter.amount)
+                FilterType.CORNER_FADE -> cornerFade(bitmap, filter.amount)
             }
         }
         return bitmap
     }
 
-    /** Crop to the screen's aspect before filtering, not after: corner blur has to
-     *  put its corners where the *screen's* corners will be. */
-    private fun centerCrop(src: Bitmap, aspect: Float): Bitmap {
+    /** The screen-shaped canvas, black, with [src] drawn on per [mode]. */
+    private fun compose(src: Bitmap, mode: ScaleMode, aspect: Float, maxDim: Int): Bitmap {
         if (aspect <= 0f) return src
-        val srcAspect = src.width.toFloat() / src.height
-        return if (srcAspect > aspect) {
-            val w = (src.height * aspect).toInt().coerceIn(1, src.width)
-            Bitmap.createBitmap(src, (src.width - w) / 2, 0, w, src.height)
-        } else {
-            val h = (src.width / aspect).toInt().coerceIn(1, src.height)
-            Bitmap.createBitmap(src, 0, (src.height - h) / 2, src.width, h)
+        // Portrait screen: height is the long side and gets the budget.
+        val h = if (aspect < 1f) maxDim else max(1, (maxDim / aspect).roundToInt())
+        val w = if (aspect < 1f) max(1, (maxDim * aspect).roundToInt()) else maxDim
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out) // starts all-transparent-black; the eraseColor makes it opaque
+        out.eraseColor(0xFF000000.toInt())
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+        val srcRect = Rect(0, 0, src.width, src.height)
+        val dst = when (mode) {
+            ScaleMode.STRETCH -> Rect(0, 0, w, h)
+            ScaleMode.FILL -> {
+                // Scale up to cover, centred; the overflow leaves the canvas.
+                val scale = max(w.toFloat() / src.width, h.toFloat() / src.height)
+                val dw = (src.width * scale).roundToInt()
+                val dh = (src.height * scale).roundToInt()
+                Rect((w - dw) / 2, (h - dh) / 2, (w - dw) / 2 + dw, (h - dh) / 2 + dh)
+            }
+            ScaleMode.FIT -> {
+                // Scale down to be contained, centred; the rest stays black.
+                val scale = min(w.toFloat() / src.width, h.toFloat() / src.height)
+                val dw = (src.width * scale).roundToInt()
+                val dh = (src.height * scale).roundToInt()
+                Rect((w - dw) / 2, (h - dh) / 2, (w - dw) / 2 + dw, (h - dh) / 2 + dh)
+            }
         }
+        canvas.drawBitmap(src, srcRect, dst, paint)
+        return out
     }
 
     private fun mono(src: Bitmap): Bitmap {
@@ -225,17 +314,32 @@ object ChatBackground {
     }
 
     /**
-     * Ordered Bayer dither to pure black-and-white at a [cell]-pixel halftone cell.
+     * Ordered Bayer dither to pure black-and-white. [quarters] is the cell size in
+     * quarter-pixels — 32 is an 8px halftone cell.
      *
-     * Done by working at 1/cell scale and blowing back up with no filtering, so an
-     * 8× dither is literally 8×8 blocks of solid black or white — the chunky,
-     * deliberate look — rather than a fine dither that the panel would smear.
+     * At 4 and above (whole cells) it works at 1/cell scale and blows back up with
+     * no filtering, so an 8× dither is literally 8×8 blocks of solid black or
+     * white — the chunky, deliberate look — rather than a fine dither the panel
+     * would smear. *Below* 4 it goes the other way: dither on a 2× or 4× oversized
+     * copy and settle back down bilinear, so neighbouring sub-pixel cells average —
+     * a softer, grayer halftone finer than the panel's own grid could hold.
      */
-    private fun dither(src: Bitmap, cell: Int): Bitmap {
+    private fun dither(src: Bitmap, quarters: Int): Bitmap {
+        val q = quarters.coerceIn(1, 128)
+        if (q < 4) {
+            val up = 4 / q // 2 for 0.5×, 4 for 0.25×
+            val big = Bitmap.createScaledBitmap(src, src.width * up, src.height * up, true)
+            val dithered = ditherWhole(big, 1)
+            return Bitmap.createScaledBitmap(dithered, src.width, src.height, true)
+        }
+        return ditherWhole(src, q / 4)
+    }
+
+    private fun ditherWhole(src: Bitmap, cell: Int): Bitmap {
         val c = cell.coerceIn(1, 32)
         val w = max(1, src.width / c)
         val h = max(1, src.height / c)
-        val small = Bitmap.createScaledBitmap(src, w, h, true)
+        val small = if (c == 1) src.copy(Bitmap.Config.ARGB_8888, true) else Bitmap.createScaledBitmap(src, w, h, true)
         val pixels = IntArray(w * h)
         small.getPixels(pixels, 0, w, 0, 0, w, h)
         for (y in 0 until h) {
@@ -247,16 +351,23 @@ object ChatBackground {
             }
         }
         small.setPixels(pixels, 0, w, 0, 0, w, h)
-        return Bitmap.createScaledBitmap(small, src.width, src.height, false)
+        return if (c == 1) small else Bitmap.createScaledBitmap(small, src.width, src.height, false)
     }
 
     /**
-     * Blur rising from a sharp centre to fully blurred corners.
+     * Where a corner effect begins, as the fraction of the centre-to-corner
+     * distance that stays untouched. Shared by blur and fade so "50%" means the
+     * same reach in both rows: a gentle step grazes the corners, and each step up
+     * walks the effect further in — at 100% it starts at the centre itself.
+     */
+    private fun cornerStart(strength: Int): Float = 0.9f * (1f - strength / 100f)
+
+    /**
+     * Blur rising from a sharp centre out to the corners.
      *
      * The blurred copy is the cheap classic — downscale bilinear, upscale bilinear —
-     * which at 1/16 scale is a heavy, smooth blur with no kernel code to get wrong.
-     * [amount] moves both how strong that blur is and how far toward the centre it
-     * starts reaching.
+     * which at 1/20 scale is a heavy, smooth blur with no kernel code to get wrong.
+     * [amount] moves both how strong that blur is and how far in it reaches.
      */
     private fun cornerBlur(src: Bitmap, amount: Int): Bitmap {
         val strength = amount.coerceIn(1, 100)
@@ -269,21 +380,49 @@ object ChatBackground {
             true,
         )
         val blurred = Bitmap.createScaledBitmap(small, src.width, src.height, true)
+        val soft = IntArray(src.width * src.height)
+        blurred.getPixels(soft, 0, src.width, 0, 0, src.width, src.height)
+        return cornerBlend(src, strength) { index, t, sharp ->
+            val b = soft[index]
+            val ti = (t * 256).toInt()
+            val red = ((sharp shr 16 and 0xFF) * (256 - ti) + (b shr 16 and 0xFF) * ti) shr 8
+            val green = ((sharp shr 8 and 0xFF) * (256 - ti) + (b shr 8 and 0xFF) * ti) shr 8
+            val blue = ((sharp and 0xFF) * (256 - ti) + (b and 0xFF) * ti) shr 8
+            0xFF shl 24 or (red shl 16) or (green shl 8) or blue
+        }
+    }
 
+    /** The corner gradient into black: the same mask as [cornerBlur], blending
+     *  toward the background instead of a blurred copy, so the picture's edges
+     *  simply dissolve into the black behind the thread. */
+    private fun cornerFade(src: Bitmap, amount: Int): Bitmap {
+        val strength = amount.coerceIn(1, 100)
+        return cornerBlend(src, strength) { _, t, sharp ->
+            val keep = ((1f - t) * 256).toInt()
+            val r = ((sharp shr 16 and 0xFF) * keep) shr 8
+            val g = ((sharp shr 8 and 0xFF) * keep) shr 8
+            val b = ((sharp and 0xFF) * keep) shr 8
+            0xFF shl 24 or (r shl 16) or (g shl 8) or b
+        }
+    }
+
+    /** The shared radial-mask walk: computes each pixel's eased 0..1 corner factor
+     *  and hands it (with the pixel) to [blend]. Skips the untouched centre. */
+    private inline fun cornerBlend(
+        src: Bitmap,
+        strength: Int,
+        blend: (index: Int, t: Float, pixel: Int) -> Int,
+    ): Bitmap {
         val out = src.copy(Bitmap.Config.ARGB_8888, true)
         val w = out.width
         val h = out.height
-        val sharp = IntArray(w * h)
-        val soft = IntArray(w * h)
-        out.getPixels(sharp, 0, w, 0, 0, w, h)
-        blurred.getPixels(soft, 0, w, 0, 0, w, h)
+        val pixels = IntArray(w * h)
+        out.getPixels(pixels, 0, w, 0, 0, w, h)
 
         val cx = (w - 1) / 2f
         val cy = (h - 1) / 2f
         val maxDist = sqrt(cx * cx + cy * cy)
-        // Where the blur begins, as a fraction of the way from centre to corner:
-        // gentle amounts keep most of the frame sharp, full strength reaches halfway in.
-        val start = 0.85f - 0.55f * (strength / 100f)
+        val start = cornerStart(strength)
         for (y in 0 until h) {
             val row = y * w
             val dy = (y - cy) / maxDist
@@ -293,16 +432,10 @@ object ChatBackground {
                 var t = ((d - start) / (1f - start)).coerceIn(0f, 1f)
                 t *= t // ease in, so the transition has no visible ring
                 if (t <= 0f) continue
-                val a = sharp[row + x]
-                val b = soft[row + x]
-                val ti = (t * 256).toInt()
-                val r = ((a shr 16 and 0xFF) * (256 - ti) + (b shr 16 and 0xFF) * ti) shr 8
-                val g = ((a shr 8 and 0xFF) * (256 - ti) + (b shr 8 and 0xFF) * ti) shr 8
-                val bl = ((a and 0xFF) * (256 - ti) + (b and 0xFF) * ti) shr 8
-                sharp[row + x] = 0xFF shl 24 or (r shl 16) or (g shl 8) or bl
+                pixels[row + x] = blend(row + x, t, pixels[row + x])
             }
         }
-        out.setPixels(sharp, 0, w, 0, 0, w, h)
+        out.setPixels(pixels, 0, w, 0, 0, w, h)
         return out
     }
 

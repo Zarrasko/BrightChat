@@ -5,12 +5,18 @@ opens an editor: choose a photo from the camera roll (the same DCIM walk as the 
 the system one is still useless here), then stack filters on it and watch the live preview,
 which is cropped to the screen's own shape so what you approve is what the thread draws.
 
-Four filters, stackable in any order and repeatable: **Dither** quantises the photo to pure
+The photo meets the screen one of three ways — **Fill** (crop the overflow), **Fit** (the
+whole photo, letterboxed on black), or **Stretch** — chosen on a row above the stack.
+
+Five filters, stackable in any order and repeatable: **Dither** quantises the photo to pure
 black-and-white halftone at a chosen cell size — 8× is the chunky, deliberate look this
-panel was born for; **Black & white** is a plain luminance greyscale; **Opacity** fades the
-image toward the black behind it, which is what keeps white text readable over a busy
-photograph; **Corner blur** melts the edges by a chosen amount so the picture sits behind
-the conversation instead of competing with it. Rows adjust with −/+, reorder with ↑, and
+panel was born for, and the ladder now runs below 1× to 0.5× and 0.25×, which dither finer
+than the panel's grid and settle back down as a soft gray halftone; **Black & white** is a
+plain luminance greyscale; **Opacity** fades the image toward the black behind it, which is
+what keeps white text readable over a busy photograph; **Corner blur** melts the edges into
+blur and **Corner fade** dissolves them into the black itself — both reach further toward
+the centre at higher steps, all the way in at 100%, and on a Fit background the fade is what
+turns the letterbox bars from absence into intent. Rows adjust with −/+, reorder with ↑, and
 remove with ×, and order matters — dither *then* corner blur smears the halftone, corner
 blur *then* dither re-quantises the blur back into dots. Both are legitimate looks.
 

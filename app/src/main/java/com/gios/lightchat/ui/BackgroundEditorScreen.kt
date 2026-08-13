@@ -59,9 +59,10 @@ import java.io.File
 import kotlinx.coroutines.launch
 
 /**
- * The background editor for one conversation: pick a photo, then stack filters
- * on it — dither, black & white, opacity, corner blur — reordering and repeating
- * them freely, with a live preview at the screen's own aspect so what you see is
+ * The background editor for one conversation: pick a photo, choose how it meets
+ * the screen (fill / fit / stretch), then stack filters on it — dither, black &
+ * white, opacity, corner blur, corner fade — reordering and repeating them
+ * freely, with a live preview at the screen's own aspect so what you see is
  * what the thread gets.
  *
  * Two states, one screen: with no photo chosen yet it opens straight into a
@@ -91,6 +92,8 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
             addAll(ChatBackground.filters(context, chatGuid))
         }
     }
+    // How the photo lands on the screen before the filters run.
+    var scale by remember { mutableStateOf(ChatBackground.scale(context, chatGuid)) }
     // Which filter's "add" menu is open, if any.
     var adding by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
@@ -124,9 +127,9 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
     // screen while the next one renders — a flash of empty black on every nudge would
     // read as flicker.
     var preview by remember { mutableStateOf<ImageBitmap?>(null) }
-    val stackKey = filters.joinToString { "${it.type.name}:${it.amount}" }
+    val stackKey = scale.name + filters.joinToString { "${it.type.name}:${it.amount}" }
     LaunchedEffect(chosen, stackKey) {
-        preview = ChatBackground.preview(chosen, filters.toList(), aspect) ?: preview
+        preview = ChatBackground.preview(chosen, filters.toList(), scale, aspect) ?: preview
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
@@ -143,7 +146,7 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
                         if (saving) return@HapticText
                         saving = true
                         scope.launch {
-                            ChatBackground.save(context, chatGuid, chosen, filters.toList())
+                            ChatBackground.save(context, chatGuid, chosen, filters.toList(), scale)
                             onClose()
                         }
                     },
@@ -193,7 +196,30 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             onClick = { picking = true },
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
+        // How the photo meets the screen: fill and crop, fit on black (which the
+        // corner effects then dissolve into), or stretch. One row, the chosen word lit.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Scale",
+                style = ChatType.hint,
+                color = ChatColors.onSurfaceDisabled,
+                modifier = Modifier.weight(1f),
+            )
+            ChatBackground.ScaleMode.entries.forEach { mode ->
+                Spacer(modifier = Modifier.width(16.dp))
+                HapticText(
+                    text = mode.label,
+                    style = ChatType.hint,
+                    color = if (scale == mode) ChatColors.onSurface else ChatColors.onSurfaceDim,
+                    onClick = { scale = mode },
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
         HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
 
         Column(modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
