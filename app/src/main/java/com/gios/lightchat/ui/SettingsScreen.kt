@@ -142,6 +142,35 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        // On by default. Off keeps the buzz and the shade notification but never puts
+        // the box over the screen (or wakes it) — for people who find a lit-up panel
+        // worse than waiting to check.
+        var headsUpBox by remember { mutableStateOf(Store.headsUpBox(context)) }
+        HapticText(
+            text = if (headsUpBox) "On-screen alerts: on" else "On-screen alerts: off",
+            style = ChatType.body,
+            color = ChatColors.onSurfaceDim,
+            textAlign = TextAlign.Center,
+            onClick = {
+                headsUpBox = !headsUpBox
+                Store.setHeadsUpBox(context, headsUpBox)
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = if (headsUpBox) {
+                "New messages put a box over whatever the phone is showing."
+            } else {
+                "Just the buzz and a notification. Nothing appears over the screen."
+            },
+            style = ChatType.hint,
+            color = ChatColors.onSurfaceDisabled,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
         // Off by default, and only shown on a phone that can place a call at all. When
         // on, placing a call also iMessages the callee which number is ringing them —
         // the SIM's number, not the iMessage one — so the call-back comes to this phone.

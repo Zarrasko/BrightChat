@@ -11,6 +11,7 @@ import android.os.VibrationEffect
 import android.os.VibratorManager
 import android.provider.Settings
 import android.util.Log
+import com.gios.lightchat.api.Store
 
 /**
  * The alert side of an incoming message: a buzz, and a box over whatever the phone
@@ -75,6 +76,13 @@ object HeadsUp {
      */
     fun show(context: Context, title: String, text: String, chatGuid: String, alreadyRead: Boolean) {
         buzz(context)
+        // The box is optional (Settings); the buzz above and the shade notification the
+        // caller posts are not. Checked per message rather than cached: it's one
+        // SharedPreferences read on a path that runs a few times an hour at most.
+        if (!Store.headsUpBox(context)) {
+            Log.d(TAG, "on-screen alerts off; notification only")
+            return
+        }
         if (alreadyRead) {
             Log.d(TAG, "message already read elsewhere; no box")
             return

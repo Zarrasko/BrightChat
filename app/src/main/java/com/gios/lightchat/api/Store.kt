@@ -24,6 +24,7 @@ object Store {
     private const val KEY_POLL_OK_AT = "poll_ok_at"   // last catch-up that reached the server
     private const val KEY_POLL_FAILS = "poll_fails"   // consecutive failures
     private const val KEY_NOTIFY_UNKNOWN = "notify_unknown" // alert for senders not in the address book
+    private const val KEY_HEADS_UP = "heads_up_box" // show the on-screen box for new messages
     private const val KEY_CALL_ANNOUNCE = "call_announce" // text people the dumb-phone number when calling them
     private const val KEY_MY_NUMBER = "my_number" // manual override for the SIM's own number
     private const val KEY_NOTED = "noted_keys"        // conversations whose note has been opened
@@ -165,6 +166,20 @@ object Store {
 
     fun setNotifyUnknown(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_NOTIFY_UNKNOWN, value).apply()
+    }
+
+    /**
+     * Whether an incoming message puts the box up over whatever the phone is showing
+     * (see `HeadsUp`). **On by default** — it's the app's signature move — but it can be
+     * turned off for people who find a lit-up panel worse than a missed text. The shade
+     * notification is always posted either way (it's the record, and it drives
+     * LightGlance's dot), and the buzz still happens: this only controls the display.
+     */
+    fun headsUpBox(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_HEADS_UP, true)
+
+    fun setHeadsUpBox(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_HEADS_UP, value).apply()
     }
 
     /**
