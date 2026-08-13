@@ -156,8 +156,9 @@ fun ConversationsScreen(
                         title = state.contacts.title(convo),
                         subtitle = subtitle,
                         // Deleting a chat needs the Private API (server gate); only then
-                        // do we let the row swipe to reveal Delete.
-                        canDelete = state.privateApi,
+                        // do we let the row swipe to reveal Delete. Agents always can —
+                        // they're deleted locally, no server involved.
+                        canDelete = state.privateApi || convo.isAgent,
                         onDelete = { viewModel.deleteConversation(convo) },
                         onClick = { viewModel.open(convo) },
                         onToggleFavorite = { viewModel.toggleFavorite(convo) },

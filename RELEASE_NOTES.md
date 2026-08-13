@@ -1,3 +1,11 @@
+## Agents — named AI chats with markdown
+
+A separate system from iMessage. Add an agent — a name plus any OpenAI-compatible endpoint
+(base URL, bearer key, model) — and it appears as a normal conversation in the list. Replies
+render as full markdown: headings, bold/italic, code blocks, lists, quotes, links, and inline
+images. Create one from New Message → "New agent" or Settings → Agents; swipe a row to delete.
+June's Hermes API server is one such endpoint, but so is OpenRouter, OpenAI, or a local LM Studio box.
+
 ## light-common 1.2.1 — the baseline profile arrives
 
 A one-line dependency bump, and the only reason it needs a release of its own is that the last

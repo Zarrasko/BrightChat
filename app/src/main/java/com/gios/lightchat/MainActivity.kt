@@ -32,6 +32,8 @@ import com.gios.light.common.report.LightReport
 import com.gios.light.common.report.ReportOverlay
 import com.gios.lightchat.api.Store
 import com.gios.lightchat.socket.AppForeground
+import com.gios.lightchat.ui.AgentEditScreen
+import com.gios.lightchat.ui.AgentThreadScreen
 import com.gios.lightchat.ui.ConversationTab
 import com.gios.lightchat.ui.ConversationsScreen
 import com.gios.lightchat.ui.DialerScreen
@@ -330,6 +332,14 @@ fun LightChatApp(viewModel: ChatViewModel) {
         state.composingNew -> {
             BackHandler { viewModel.cancelNewMessage() }
             NewMessageScreen(viewModel)
+        }
+        state.agentEditor -> {
+            BackHandler { viewModel.closeAgentEditor() }
+            AgentEditScreen(viewModel)
+        }
+        state.openAgent != null -> {
+            BackHandler { viewModel.closeAgent() }
+            AgentThreadScreen(viewModel)
         }
         showSettings -> {
             BackHandler { showSettings = false }

@@ -49,6 +49,10 @@ data class Conversation(
     // place the sender's name can go. Set wherever [lastText] is set and never apart
     // from it, or a row names the wrong person.
     val lastSender: String? = null,
+    // An AI agent chat (see Agent.kt) masquerading as a conversation row — a synthetic
+    // guid "agent:<id>", never a BlueBubbles chat, never sent to the server. The list
+    // renders it like any other row; open()/deleteConversation() branch on this flag.
+    val isAgent: Boolean = false,
 ) {
     /** Human title: an explicit group name if set, otherwise the participants. Prefer
      *  `Contacts.title`, which resolves names; this is the nameless fallback. `"null"` is

@@ -15,6 +15,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,6 +40,7 @@ import com.gios.lightchat.ui.theme.ChatType
 @Composable
 fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
+    val state by viewModel.state.collectAsState()
     val currentUrl = Store.baseUrl(context).orEmpty()
     var editing by remember { mutableStateOf(false) }
     var draftUrl by remember { mutableStateOf(currentUrl) }
@@ -86,6 +88,27 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+
+        Spacer(modifier = Modifier.height(36.dp))
+
+        Text(text = "Agents", style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
+        Spacer(modifier = Modifier.height(16.dp))
+        state.agents.forEach { agent ->
+            HapticText(
+                text = agent.name,
+                style = ChatType.body,
+                color = ChatColors.onSurface,
+                onClick = { viewModel.openEditAgent(agent) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        HapticText(
+            text = "Add agent",
+            style = ChatType.body,
+            color = ChatColors.onSurfaceDim,
+            onClick = { viewModel.openNewAgent() },
+            modifier = Modifier.fillMaxWidth(),
+        )
 
         Spacer(modifier = Modifier.height(36.dp))
 

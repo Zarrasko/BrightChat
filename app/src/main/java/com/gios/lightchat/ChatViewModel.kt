@@ -8,10 +8,12 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.gios.lightchat.api.AgentApi
 import com.gios.lightchat.api.ApiException
 import com.gios.lightchat.api.BlueBubblesApi
 import com.gios.lightchat.api.Store
 import com.gios.lightchat.dial.AddressBookRepo
+import com.gios.lightchat.db.AgentStore
 import com.gios.lightchat.db.MessageStore
 import com.gios.lightchat.db.Sync
 import com.gios.lightchat.socket.AppForeground
@@ -68,6 +70,14 @@ data class UiState(
     val favorites: Set<String> = emptySet(),   // starred chat guids (local, see Store.favorites)
     val pins: List<String> = emptyList(),      // starred chats held at the top, newest pin first
     val message: String? = null,               // transient status / error line
+    // Agents (separate system — see Agent.kt). Their conversations are merged into
+    // [conversations] as synthetic rows; these drive the agent thread + editor.
+    val agents: List<Agent> = emptyList(),
+    val openAgent: Agent? = null,              // the agent thread currently open
+    val agentMessages: List<AgentMessage> = emptyList(),
+    val agentSending: Boolean = false,         // a completion is in flight
+    val agentEditor: Boolean = false,          // the agent create/edit screen is open
+    val agentEditorTarget: Agent? = null,      // null → creating a new agent
 )
 
 /**
@@ -97,6 +107,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * to know what the list said; now it reads that off disk and fetches only the delta.
      */
     private val store = MessageStore.get(application)
+    private val agentStore = AgentStore.get(application)
+    private val agentApi = AgentApi()
     private var sync: Sync? = api?.let { Sync(it, store) }
 
     private val _state = MutableStateFlow(
@@ -109,7 +121,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             // the first thing drawn and there is no reason for it to be empty while a
             // network round trip decides what it should have said. Also what makes the app
             // usable with the tunnel down.
-            conversations = if (api != null) store.chats() else emptyList(),
+            agents = agentStore.agents(),
+            conversations = mergeAgents(if (api != null) store.chats() else emptyList()),
             contacts = Store.contacts(application),
         ),
     )
@@ -379,7 +392,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _state.update {
                 it.copy(
                     status = Status.Ready,
-                    conversations = convos,
+                    conversations = mergeAgents(convos),
                     contacts = contacts,
                     contactList = contactList,
                     privateApi = privateApi,
@@ -417,6 +430,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // ---- One thread -------------------------------------------------------
 
     fun open(conversation: Conversation) {
+        if (conversation.isAgent) {
+            val agent = agentStore.agent(conversation.guid.removePrefix("agent:"))
+            if (agent != null) openAgentThread(agent)
+            return
+        }
         // The in-memory cache is free and renders this frame. The on-disk one is read a
         // moment later, in the thread job — parsing fifty messages and their attachment
         // metadata is not something to do on the frame that handles the tap.
@@ -722,6 +740,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * disappears immediately; if any room fails we re-pull the list so it reappears.
      */
     fun deleteConversation(conversation: Conversation) {
+        if (conversation.isAgent) {
+            deleteAgent(conversation.guid.removePrefix("agent:"))
+            return
+        }
         if (!_state.value.privateApi) {
             _state.update { it.copy(message = "Deleting needs the Private API") }
             return
@@ -746,6 +768,118 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             loadConversations()
             // After the reload (which clears `message`), surface any failure.
             if (failed) _state.update { it.copy(message = "Couldn’t delete the conversation") }
+        }
+    }
+
+    // ---- Agents (separate system — see Agent.kt) --------------------------
+
+    /** Opens an agent's thread: messages come straight off local disk, no network. */
+    fun openAgentThread(agent: Agent) {
+        _state.update {
+            it.copy(openAgent = agent, agentMessages = agentStore.messages(agent.id), agentSending = false, message = null)
+        }
+    }
+
+    fun closeAgent() {
+        _state.update { it.copy(openAgent = null, agentMessages = emptyList(), agentSending = false) }
+    }
+
+    /** Optimistically appends the user's turn, calls the agent, appends its reply. */
+    fun sendAgentMessage(text: String) {
+        val agent = _state.value.openAgent ?: return
+        val trimmed = text.trim()
+        if (trimmed.isEmpty() || _state.value.agentSending) return
+        val now = System.currentTimeMillis()
+        val history = _state.value.agentMessages + AgentMessage(0, Role.USER, trimmed, now)
+        // Persist the user's turn immediately so it survives a failed reply.
+        agentStore.addMessage(agent.id, Role.USER, trimmed, now)
+        _state.update { it.copy(agentMessages = history, agentSending = true, message = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val reply = agentApi.complete(agent, history)
+                agentStore.addMessage(agent.id, Role.ASSISTANT, reply, System.currentTimeMillis())
+                _state.update {
+                    if (it.openAgent?.id == agent.id) {
+                        it.copy(agentMessages = agentStore.messages(agent.id), agentSending = false)
+                    } else {
+                        it.copy(agentSending = false)
+                    }
+                }
+                refreshAgentList()
+            } catch (t: Throwable) {
+                _state.update {
+                    if (it.openAgent?.id == agent.id) {
+                        it.copy(agentSending = false, message = agentErrorMessage(agent, t))
+                    } else {
+                        it.copy(agentSending = false)
+                    }
+                }
+            }
+        }
+    }
+
+    fun openNewAgent() = _state.update { it.copy(composingNew = false, agentEditor = true, agentEditorTarget = null, message = null) }
+
+    fun openEditAgent(agent: Agent) = _state.update { it.copy(agentEditor = true, agentEditorTarget = agent, message = null) }
+
+    fun closeAgentEditor() = _state.update { it.copy(agentEditor = false, agentEditorTarget = null) }
+
+    /** Creates or updates an agent, then refreshes the merged list. */
+    fun saveAgent(name: String, baseUrl: String, apiKey: String, model: String, systemPrompt: String) {
+        if (name.isBlank() || baseUrl.isBlank() || model.isBlank()) return
+        val target = _state.value.agentEditorTarget
+        val agent = Agent(
+            id = target?.id ?: java.util.UUID.randomUUID().toString(),
+            name = name.trim(),
+            baseUrl = baseUrl.trim().trimEnd('/'),
+            apiKey = apiKey.trim(),
+            model = model.trim(),
+            systemPrompt = systemPrompt,
+        )
+        agentStore.putAgent(agent)
+        _state.update { it.copy(agentEditor = false, agentEditorTarget = null) }
+        refreshAgentList()
+    }
+
+    fun deleteAgent(id: String) {
+        agentStore.deleteAgent(id)
+        if (_state.value.openAgent?.id == id) {
+            _state.update { it.copy(openAgent = null, agentMessages = emptyList()) }
+        }
+        refreshAgentList()
+    }
+
+    /** Re-merges agent conversations into the list and republishes the agent roster. */
+    private fun refreshAgentList() {
+        val imessage = _state.value.conversations.filterNot { it.isAgent }
+        _state.update { it.copy(agents = agentStore.agents(), conversations = mergeAgents(imessage)) }
+    }
+
+    /** Builds a synthetic Conversation row per agent and merges it into the list. */
+    private fun mergeAgents(imessage: List<Conversation>): List<Conversation> {
+        val roster = agentStore.agents()
+        if (roster.isEmpty()) return imessage
+        val agentRows = roster.map { a ->
+            val last = agentStore.lastMessage(a.id)
+            Conversation(
+                guid = "agent:${a.id}",
+                displayName = a.name,
+                participants = emptyList(),
+                isGroup = false,
+                lastText = agentStore.preview(a.id) ?: "New agent",
+                lastDate = last?.date ?: 0L,
+                lastFromMe = last?.role == Role.USER,
+                isAgent = true,
+            )
+        }
+        return (imessage + agentRows).sortedByDescending { it.lastDate }
+    }
+
+    private fun agentErrorMessage(agent: Agent, t: Throwable): String {
+        val code = (t as? ApiException)?.code
+        return when (code) {
+            401, 403 -> "${agent.name}: bad API key"
+            else -> "${agent.name}: couldn’t reach — ${t.message?.take(80).orEmpty()}"
         }
     }
 

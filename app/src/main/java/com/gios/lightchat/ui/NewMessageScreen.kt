@@ -117,6 +117,17 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
             modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
         )
 
+        // An agent is not a person in the address book — a separate creation path.
+        HapticText(
+            text = "New agent",
+            style = ChatType.body,
+            color = ChatColors.onSurfaceVariant,
+            textAlign = TextAlign.Start,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            onClick = { viewModel.openNewAgent() },
+        )
+        HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
+
         // "To" line: chosen recipients as removable chips, then an inline field to
         // add more. FlowRow lets chips wrap and the field flow after them, native-style.
         Row(
