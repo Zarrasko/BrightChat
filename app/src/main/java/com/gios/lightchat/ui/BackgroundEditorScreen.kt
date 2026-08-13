@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
@@ -85,6 +87,9 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
     var source by remember {
         mutableStateOf(ChatBackground.sourceFile(context, chatGuid).takeIf { it.length() > 0L })
     }
+    // A solid shade instead of a photo — exclusive with [source]; whichever was
+    // chosen last is the background.
+    var color by remember { mutableStateOf(ChatBackground.color(context, chatGuid)) }
     // The working stack. A plain state list — order is the whole point of a stack,
     // and every mutation below recomposes the preview through it.
     val filters = remember {
@@ -100,7 +105,7 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
     // Whether the photo grid is up. A flag rather than nulling [source], so backing
     // out of a re-pick returns to the editor with the stack intact instead of
     // abandoning the whole edit.
-    var picking by remember { mutableStateOf(source == null) }
+    var picking by remember { mutableStateOf(source == null && color == null) }
 
     // The thread draws the background edge to edge, so the preview crops to the
     // screen's own shape — corner blur in particular has to land where the real
@@ -112,14 +117,22 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
         BackgroundPickerGrid(
             onPick = {
                 source = it
+                color = null
+                picking = false
+            },
+            onPickColor = {
+                color = it
+                source = null
                 picking = false
             },
             // Backing out of a re-pick is not backing out of the edit.
-            onClose = { if (source != null) picking = false else onClose() },
+            onClose = { if (source != null || color != null) picking = false else onClose() },
         )
         return
     }
-    val chosen = source ?: return
+    val chosen = source
+    val chosenColor = color
+    if (chosen == null && chosenColor == null) return
     BackHandler { onClose() }
 
     // Re-rendered on every change to the stack; small (see ChatBackground.PREVIEW_DIM),
@@ -128,8 +141,12 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
     // read as flicker.
     var preview by remember { mutableStateOf<ImageBitmap?>(null) }
     val stackKey = scale.name + filters.joinToString { "${it.type.name}:${it.amount}" }
-    LaunchedEffect(chosen, stackKey) {
-        preview = ChatBackground.preview(chosen, filters.toList(), scale, aspect) ?: preview
+    LaunchedEffect(chosen, chosenColor, stackKey) {
+        preview = when {
+            chosenColor != null -> ChatBackground.previewColor(chosenColor, filters.toList(), aspect)
+            chosen != null -> ChatBackground.preview(chosen, filters.toList(), scale, aspect)
+            else -> null
+        } ?: preview
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
@@ -146,7 +163,7 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
                         if (saving) return@HapticText
                         saving = true
                         scope.launch {
-                            ChatBackground.save(context, chatGuid, chosen, filters.toList(), scale)
+                            ChatBackground.save(context, chatGuid, chosen, chosenColor, filters.toList(), scale)
                             onClose()
                         }
                     },
@@ -190,7 +207,7 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
 
         Spacer(modifier = Modifier.height(8.dp))
         HapticText(
-            text = "Choose a different photo",
+            text = "Choose a different photo or shade",
             style = ChatType.hint,
             color = ChatColors.onSurfaceDim,
             modifier = Modifier.fillMaxWidth(),
@@ -198,28 +215,31 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(12.dp))
         // How the photo meets the screen: fill and crop, fit on black (which the
-        // corner effects then dissolve into), or stretch. One row, the chosen word lit.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "Scale",
-                style = ChatType.hint,
-                color = ChatColors.onSurfaceDisabled,
-                modifier = Modifier.weight(1f),
-            )
-            ChatBackground.ScaleMode.entries.forEach { mode ->
-                Spacer(modifier = Modifier.width(16.dp))
-                HapticText(
-                    text = mode.label,
+        // corner effects then dissolve into), or stretch. One row, the chosen word
+        // lit. A solid shade has no shape to scale, so the row sits this one out.
+        if (chosenColor == null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Scale",
                     style = ChatType.hint,
-                    color = if (scale == mode) ChatColors.onSurface else ChatColors.onSurfaceDim,
-                    onClick = { scale = mode },
+                    color = ChatColors.onSurfaceDisabled,
+                    modifier = Modifier.weight(1f),
                 )
+                ChatBackground.ScaleMode.entries.forEach { mode ->
+                    Spacer(modifier = Modifier.width(16.dp))
+                    HapticText(
+                        text = mode.label,
+                        style = ChatType.hint,
+                        color = if (scale == mode) ChatColors.onSurface else ChatColors.onSurfaceDim,
+                        onClick = { scale = mode },
+                    )
+                }
             }
+            Spacer(modifier = Modifier.height(12.dp))
         }
-        Spacer(modifier = Modifier.height(12.dp))
         HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
 
         Column(modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
@@ -356,7 +376,11 @@ private fun FilterRow(
  * is tuning them honestly.
  */
 @Composable
-private fun BackgroundPickerGrid(onPick: (File) -> Unit, onClose: () -> Unit) {
+private fun BackgroundPickerGrid(
+    onPick: (File) -> Unit,
+    onPickColor: (Int) -> Unit,
+    onClose: () -> Unit,
+) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
 
@@ -390,10 +414,51 @@ private fun BackgroundPickerGrid(onPick: (File) -> Unit, onClose: () -> Unit) {
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
         ScreenHeader(
-            title = "Choose a photo",
+            title = "Choose a background",
             onBack = onClose,
             modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
         )
+
+        // A solid shade instead of a photo. Shades, not colours — the panel is
+        // greyscale, and eight honest greys beat a wheel of hues it would flatten
+        // anyway. The filters still apply: a mid-grey under an 8× dither is a
+        // halftone texture, under a corner fade a vignette.
+        Text(
+            text = "Shades",
+            style = ChatType.hint,
+            color = ChatColors.onSurfaceDisabled,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            SHADES.forEach { shade ->
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .aspectRatio(1f)
+                        .background(Color(0xFF000000.toInt() or shade))
+                        // The black swatch needs an edge or it is the screen.
+                        .border(1.dp, ChatColors.onSurfaceDisabled)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onPickColor(shade)
+                        },
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+        Text(
+            text = "Photos",
+            style = ChatType.hint,
+            color = ChatColors.onSurfaceDisabled,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+
         val loaded = photos
         when {
             !granted -> Box(
@@ -457,3 +522,7 @@ private fun BackgroundPickerGrid(onPick: (File) -> Unit, onClose: () -> Unit) {
         }
     }
 }
+
+/** The shade swatches, dark to light. Pure black is omitted — that is what "no
+ *  background" already is — and the low end starts where a shade first reads. */
+private val SHADES = listOf(0x1A1A1A, 0x333333, 0x4D4D4D, 0x666666, 0x808080, 0x999999, 0xCCCCCC, 0xFFFFFF)

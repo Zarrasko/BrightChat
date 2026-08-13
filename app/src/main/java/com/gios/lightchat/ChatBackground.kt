@@ -123,7 +123,15 @@ object ChatBackground {
         File(File(context.filesDir, "backgrounds").apply { mkdirs() }, safeName(chatGuid))
 
     fun has(context: Context, chatGuid: String): Boolean =
-        sourceFile(context, chatGuid).length() > 0L
+        sourceFile(context, chatGuid).length() > 0L || color(context, chatGuid) != null
+
+    /** The solid colour this background is, or null when it's a photo (or nothing).
+     *  A colour and a photo are exclusive: whichever was saved last is the background. */
+    fun color(context: Context, chatGuid: String): Int? {
+        val json = Store.background(context, chatGuid) ?: return null
+        val value = runCatching { JSONObject(json).optLong("color", 0L) }.getOrDefault(0L)
+        return if (value == 0L) null else value.toInt()
+    }
 
     /** The saved filter stack, oldest-applied first. Empty when none saved. */
     fun filters(context: Context, chatGuid: String): List<Filter> {
@@ -153,22 +161,28 @@ object ChatBackground {
         return ScaleMode.entries.firstOrNull { it.name == name } ?: ScaleMode.FILL
     }
 
-    /** Persists [source] (copied, so a photo later deleted from DCIM keeps working)
-     *  and the recipe, then bumps [version] so open screens reload. */
+    /**
+     * Persists the recipe and bumps [version] so open screens reload. Exactly one
+     * of [source] and [color]: a photo is copied (so one later deleted from DCIM
+     * keeps working), a colour replaces any photo and reclaims its file.
+     */
     suspend fun save(
         context: Context,
         chatGuid: String,
-        source: File,
+        source: File?,
+        color: Int?,
         filters: List<Filter>,
         scale: ScaleMode,
     ) {
         withContext(Dispatchers.IO) {
             val dest = sourceFile(context, chatGuid)
-            if (source.canonicalPath != dest.canonicalPath) {
+            if (source != null && source.canonicalPath != dest.canonicalPath) {
                 runCatching { source.copyTo(dest, overwrite = true) }
             }
+            if (source == null) dest.delete()
             Store.setBackground(context, chatGuid, JSONObject().apply {
                 put("v", 2)
+                if (color != null) put("color", color.toLong())
                 put("scale", scale.name)
                 put("filters", JSONArray().apply {
                     filters.forEach {
@@ -196,19 +210,30 @@ object ChatBackground {
      */
     suspend fun load(context: Context, chatGuid: String, aspect: Float): ImageBitmap? {
         val file = sourceFile(context, chatGuid)
-        if (file.length() == 0L) return null
+        val color = color(context, chatGuid)
+        if (color == null && file.length() == 0L) return null
         val stack = filters(context, chatGuid)
         val mode = scale(context, chatGuid)
-        val key = chatGuid + "|" + aspect + "|" + mode.name + "|" +
+        val key = chatGuid + "|" + aspect + "|" + mode.name + "|" + color + "|" +
             stack.joinToString { "${it.type.name}:${it.amount}" }
         cache.get(key)?.let { return it }
         return withContext(Dispatchers.Default) {
-            val bitmap = render(file, stack, mode, aspect, THREAD_DIM) ?: return@withContext null
+            val bitmap = if (color != null) {
+                renderColor(color, stack, aspect, THREAD_DIM)
+            } else {
+                render(file, stack, mode, aspect, THREAD_DIM)
+            } ?: return@withContext null
             val image = bitmap.asImageBitmap()
             cache.put(key, image)
             image
         }
     }
+
+    /** As [load]'s colour path but small and uncached — the editor's live preview. */
+    suspend fun previewColor(color: Int, filters: List<Filter>, aspect: Float): ImageBitmap? =
+        withContext(Dispatchers.Default) {
+            renderColor(color, filters, aspect, PREVIEW_DIM)?.asImageBitmap()
+        }
 
     /** As [load] but small and uncached — the editor's live preview, re-run on
      *  every stack change. */
@@ -239,7 +264,22 @@ object ChatBackground {
         maxDim: Int,
     ): Bitmap? {
         val decoded = Attachments.decode(file, maxDim) ?: return null
-        var bitmap = compose(decoded, mode, aspect, maxDim)
+        return runStack(compose(decoded, mode, aspect, maxDim), filters)
+    }
+
+    /** A flat colour at the screen's shape, run through the same stack — dither on
+     *  a mid-grey is a halftone *texture*, corner fade a vignette; the filters are
+     *  what make a colour background more than a colour. */
+    private fun renderColor(color: Int, filters: List<Filter>, aspect: Float, maxDim: Int): Bitmap {
+        val h = if (aspect < 1f) maxDim else max(1, (maxDim / aspect).roundToInt())
+        val w = if (aspect < 1f) max(1, (maxDim * aspect).roundToInt()) else maxDim
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        out.eraseColor(0xFF000000.toInt() or color)
+        return runStack(out, filters)
+    }
+
+    private fun runStack(start: Bitmap, filters: List<Filter>): Bitmap {
+        var bitmap = start
         for (filter in filters) {
             bitmap = when (filter.type) {
                 FilterType.MONO -> mono(bitmap)

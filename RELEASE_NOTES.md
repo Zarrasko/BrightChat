@@ -5,6 +5,11 @@ opens an editor: choose a photo from the camera roll (the same DCIM walk as the 
 the system one is still useless here), then stack filters on it and watch the live preview,
 which is cropped to the screen's own shape so what you approve is what the thread draws.
 
+A background doesn't have to be a photo: the picker opens with a row of eight shade
+swatches, dark grey to white, and a shade goes through the same filter stack — a mid-grey
+under an 8× dither is a halftone texture, under a corner fade a vignette. Shades, not
+colours, because the panel would flatten a hue to one anyway.
+
 The photo meets the screen one of three ways — **Fill** (crop the overflow), **Fit** (the
 whole photo, letterboxed on black), or **Stretch** — chosen on a row above the stack.
 
