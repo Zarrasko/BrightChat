@@ -790,9 +790,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || _state.value.agentSending) return
         val now = System.currentTimeMillis()
-        val history = _state.value.agentMessages + AgentMessage(0, Role.USER, trimmed, now)
-        // Persist the user's turn immediately so it survives a failed reply.
-        agentStore.addMessage(agent.id, Role.USER, trimmed, now)
+        // Persist the user's turn immediately so it survives a failed reply — and take
+        // the row id the insert returns. The optimistic copy used to carry id 0, and only
+        // a successful reply reloads the thread from the store, so after a failed reply
+        // the id-0 row stayed in state; the next send appended a second id-0 row and the
+        // LazyColumn's key-uniqueness check crashed the app (light-reports#19).
+        val rowId = agentStore.addMessage(agent.id, Role.USER, trimmed, now)
+        val history = _state.value.agentMessages + AgentMessage(rowId, Role.USER, trimmed, now)
         _state.update { it.copy(agentMessages = history, agentSending = true, message = null) }
         viewModelScope.launch(Dispatchers.IO) {
             try {

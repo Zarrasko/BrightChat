@@ -16,7 +16,7 @@ install or update it directly. Don't have BrightMarket yet? Get it, and browse
 every Bright app, at
 **[gi-os.github.io/brightmarket-index/browse.html](https://gi-os.github.io/brightmarket-index/browse.html)**.
 
-**Current version: v2.5.x.** See [Version history](#version-history).
+**Current version: v2.13.x.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -322,6 +322,14 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v2.3.x | Names saved on the phone now name people everywhere — the conversation list, the thread header and notifications read the handset's contacts as well as the server's |
 | v2.4.x | The New Message picker searches the phone's address book too, so you can start a conversation with somebody you just saved |
 | v2.5.x | Videos download and play inside the thread, on a platform `VideoView` — LightOS has no video player to hand one off to |
+| v2.6.x | Shake the phone to report a bug, and say what went wrong |
+| v2.7.x | Reporting moves to the shared `light-common` library |
+| v2.8.x | Notifications name who texted, and who reacted |
+| v2.9.x | light-common 1.2.0, LightSync backup, R8 full mode |
+| v2.10.x | Announce calls — text people which number you're calling from; no more notification for the chat you were just in |
+| v2.11.x | On-screen alerts can be turned off; **Agents** — named AI chats with full markdown, plus QR-code agent setup |
+| v2.12.x | Per-chat backgrounds with a stackable filter editor (dither, B&W, opacity, corner blur/fade, shade swatches) |
+| v2.13.x | Fix: a failed agent reply left an id-0 row in the thread, and the next send crashed the list (light-reports#19) |
 
 ## Licence
 
