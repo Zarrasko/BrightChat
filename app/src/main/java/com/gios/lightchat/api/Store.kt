@@ -32,6 +32,7 @@ object Store {
     private const val KEY_SPEED_DIAL = "speed_dial"   // digit -> number\u0000name
     private const val KEY_CODE = "login_code"         // the newest one-time code seen
     private const val KEY_CODE_AT = "login_code_at"   // when the message carrying it arrived
+    private const val KEY_BG_PREFIX = "chat_bg:"      // per-chat background filter stack, JSON
 
     /** The configured BlueBubbles Server URL, or null if setup hasn't run yet. */
     fun baseUrl(context: Context): String? =
@@ -102,6 +103,22 @@ object Store {
 
     fun setFavorites(context: Context, guids: Set<String>) {
         prefs(context).edit().putString(KEY_FAVORITES, guids.joinToString("\n")).apply()
+    }
+
+    /**
+     * The per-chat background's filter stack, as JSON — see
+     * [com.gios.lightchat.ChatBackground], which owns the shape (and the image
+     * file itself, under filesDir). Local like favorites: BlueBubbles has no
+     * concept of a chat wallpaper, and a background is a per-phone choice anyway.
+     */
+    fun background(context: Context, chatGuid: String): String? =
+        prefs(context).getString(KEY_BG_PREFIX + chatGuid, null)
+
+    /** Stores the stack, or clears it when [json] is null (the background was removed). */
+    fun setBackground(context: Context, chatGuid: String, json: String?) {
+        prefs(context).edit().apply {
+            if (json == null) remove(KEY_BG_PREFIX + chatGuid) else putString(KEY_BG_PREFIX + chatGuid, json)
+        }.apply()
     }
 
     /**

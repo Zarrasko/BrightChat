@@ -1,3 +1,25 @@
+## Chat backgrounds, with a filter stack
+
+A conversation can now have a wallpaper. On the chat's details page, "Set a background"
+opens an editor: choose a photo from the camera roll (the same DCIM walk as the picker —
+the system one is still useless here), then stack filters on it and watch the live preview,
+which is cropped to the screen's own shape so what you approve is what the thread draws.
+
+Four filters, stackable in any order and repeatable: **Dither** quantises the photo to pure
+black-and-white halftone at a chosen cell size — 8× is the chunky, deliberate look this
+panel was born for; **Black & white** is a plain luminance greyscale; **Opacity** fades the
+image toward the black behind it, which is what keeps white text readable over a busy
+photograph; **Corner blur** melts the edges by a chosen amount so the picture sits behind
+the conversation instead of competing with it. Rows adjust with −/+, reorder with ↑, and
+remove with ×, and order matters — dither *then* corner blur smears the halftone, corner
+blur *then* dither re-quantises the blur back into dots. Both are legitimate looks.
+
+All of it is dependency-free pixel work, computed once per save and cached; the thread pays
+a file-existence check when a chat has no background, which is every chat until you decide
+otherwise. Backgrounds are per-phone (BlueBubbles has no wallpaper concept) and the photo is
+copied, so one later deleted from the camera roll keeps working. Remove lives next to
+Change on the details page, behind the usual second-tap confirm.
+
 ## Agents — named AI chats with markdown
 
 A separate system from iMessage. Add an agent — a name plus any OpenAI-compatible endpoint

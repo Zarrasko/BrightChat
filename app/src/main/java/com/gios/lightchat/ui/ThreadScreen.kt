@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
@@ -61,6 +62,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import com.gios.light.common.hw.WheelScroll
 import com.gios.lightchat.Attachment
+import com.gios.lightchat.ChatBackground
 import com.gios.lightchat.ChatMessage
 import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.Contacts
@@ -209,7 +211,29 @@ fun ThreadScreen(viewModel: ChatViewModel) {
         }
     }
 
+    // The chat's background, if one has been set (see ChatBackground): the finished,
+    // filtered image, drawn edge to edge behind the thread. Keyed on the version so
+    // saving an edit on the details page shows up here without reopening the chat.
+    // Null — the common case — costs one file-existence check and draws nothing.
+    val bgVersion = ChatBackground.version.intValue
+    val configuration = LocalConfiguration.current
+    val background by produceState<ImageBitmap?>(null, convo.guid, bgVersion) {
+        value = ChatBackground.load(
+            context,
+            convo.guid,
+            configuration.screenWidthDp.toFloat() / configuration.screenHeightDp,
+        )
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
+        background?.let {
+            Image(
+                bitmap = it,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+            )
+        }
         Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 20.dp)) {
             ScreenHeader(
                 title = state.contacts.title(convo),

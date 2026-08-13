@@ -3,6 +3,7 @@ package com.gios.lightchat.ui
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,6 +27,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -52,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.gios.light.common.hw.WheelScroll
 import com.gios.lightchat.Attachment
+import com.gios.lightchat.ChatBackground
 import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.Contacts
 import com.gios.lightchat.DetailsState
@@ -112,6 +115,11 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
     var confirming by remember { mutableStateOf<String?>(null) }
     // The photo being looked at full-screen, if any.
     var viewing by remember(convo.guid) { mutableStateOf<Attachment?>(null) }
+    // The background editor, drawn as an overlay like the photo viewer.
+    var editingBackground by remember(convo.guid) { mutableStateOf(false) }
+    // Reading the version in composition is what re-asks after a save or a remove.
+    val bgVersion = ChatBackground.version.intValue
+    val hasBackground = remember(convo.guid, bgVersion) { ChatBackground.has(context, convo.guid) }
     // A one-line complaint from this screen (a link with nothing to open it). Drawn beside
     // the ViewModel's own, at the foot of the page.
     var notice by remember(convo.guid) { mutableStateOf<String?>(null) }
@@ -346,6 +354,47 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                 }
 
+                item(key = "background") {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Spacer(modifier = Modifier.height(24.dp))
+                        SectionLabel("Background")
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // The same door shape as the note row: one verb that opens the
+                            // editor, which owns everything else (the photo, the filters).
+                            HapticText(
+                                text = if (hasBackground) "Change background" else "Set a background",
+                                style = ChatType.body,
+                                color = ChatColors.onSurface,
+                                textAlign = TextAlign.Start,
+                                modifier = Modifier.weight(1f).padding(vertical = 8.dp),
+                                onClick = {
+                                    editingBackground = true
+                                    confirming = null
+                                },
+                            )
+                            if (hasBackground) {
+                                Spacer(modifier = Modifier.width(12.dp))
+                                HapticText(
+                                    text = if (confirming == BG_REMOVE) "Remove?" else "Remove",
+                                    style = ChatType.hint,
+                                    color = if (confirming == BG_REMOVE) ChatColors.onSurface else ChatColors.onSurfaceDim,
+                                    onClick = {
+                                        if (confirming == BG_REMOVE) {
+                                            confirming = null
+                                            ChatBackground.remove(context, convo.guid)
+                                        } else {
+                                            confirming = BG_REMOVE
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+
                 item(key = "photos-label") {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Spacer(modifier = Modifier.height(24.dp))
@@ -472,6 +521,17 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
         viewing?.let { attachment ->
             ImageViewerScreen(attachment, viewModel::loadImage, onClose = { viewing = null })
         }
+
+        // The background editor, same overlay bargain as the viewer: the details page
+        // (and its scroll) stays composed underneath. Surface rather than a painted Box
+        // so taps can't fall through to the rows behind it. The editor registers its own
+        // BackHandlers after this one, so Back walks out of the editor first.
+        if (editingBackground) {
+            BackHandler { editingBackground = false }
+            Surface(modifier = Modifier.fillMaxSize(), color = ChatColors.background) {
+                BackgroundEditorScreen(convo.guid, onClose = { editingBackground = false })
+            }
+        }
     }
 }
 
@@ -486,6 +546,9 @@ private val PHOTO_GUTTER = 1.dp
 // Escaped rather than a literal NUL byte: an actual 0x00 in the source made
 // git and grep treat this whole file as binary, so it never showed in a diff.
 private const val LEAVE = "\u0000leave"
+
+/** Sentinel for the background row's two-tap Remove, sharing the same slot. */
+private const val BG_REMOVE = "\u0000background"
 
 /** A section heading, plus the gap under it. */
 @Composable
