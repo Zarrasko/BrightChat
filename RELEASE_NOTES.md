@@ -1,3 +1,18 @@
+## BrightChat v2.14 — frame the crop, peek at the times
+
+**Backgrounds: drag the Fill crop.** In the background editor's Fill mode the preview *is*
+the crop, so it now drags: slide the photo through its overflow and pick the exact spot the
+screen keeps. The framing is saved with the recipe. Also fixed: swapping the photo under an
+existing filter stack actually swaps it — the render cache was keyed on the recipe alone, so
+a replaced photo kept serving the old image.
+
+**Slide the thread for times.** Timestamps aren't drawn in a thread — a column of them is
+exactly the clutter this app exists to not have — but "when did this arrive" is a fair
+question. So, iMessage's answer: drag the thread left and every visible message's time
+slides in from the right edge (delivery time for your own turns once the server has
+reported one, arrival for the rest); let go and it springs back. The reveal is read only at
+draw time, so the drag moves every row without recomposing any of them.
+
 ## BrightChat v2.13 — a failed agent reply no longer crashes the next send
 
 **Texting an agent that never answered could close the app on your next message.**
