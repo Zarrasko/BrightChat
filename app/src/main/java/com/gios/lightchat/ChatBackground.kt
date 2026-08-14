@@ -154,6 +154,22 @@ object ChatBackground {
         }.getOrDefault(emptyList())
     }
 
+    /** Where the FILL crop sits in the photo's slack, each axis 0..1 (0.5 = centred —
+     *  the default, and what configs from before panning existed read as). */
+    fun offset(context: Context, chatGuid: String): Pair<Float, Float> {
+        val json = Store.background(context, chatGuid) ?: return 0.5f to 0.5f
+        return runCatching {
+            val o = JSONObject(json)
+            o.optDouble("ox", 0.5).toFloat().coerceIn(0f, 1f) to
+                o.optDouble("oy", 0.5).toFloat().coerceIn(0f, 1f)
+        }.getOrDefault(0.5f to 0.5f)
+    }
+
+    /** The photo's decoded shape (EXIF-upright), for the editor's drag math. */
+    suspend fun sourceSize(file: File): Pair<Int, Int>? = withContext(Dispatchers.IO) {
+        Attachments.decode(file, 64)?.let { it.width to it.height }
+    }
+
     /** The saved scale mode; FILL both by default and for configs from before it existed. */
     fun scale(context: Context, chatGuid: String): ScaleMode {
         val json = Store.background(context, chatGuid) ?: return ScaleMode.FILL
@@ -173,6 +189,8 @@ object ChatBackground {
         color: Int?,
         filters: List<Filter>,
         scale: ScaleMode,
+        ox: Float = 0.5f,
+        oy: Float = 0.5f,
     ) {
         withContext(Dispatchers.IO) {
             val dest = sourceFile(context, chatGuid)
@@ -184,6 +202,8 @@ object ChatBackground {
                 put("v", 2)
                 if (color != null) put("color", color.toLong())
                 put("scale", scale.name)
+                put("ox", ox.toDouble())
+                put("oy", oy.toDouble())
                 put("filters", JSONArray().apply {
                     filters.forEach {
                         put(JSONObject().apply {
@@ -214,14 +234,18 @@ object ChatBackground {
         if (color == null && file.length() == 0L) return null
         val stack = filters(context, chatGuid)
         val mode = scale(context, chatGuid)
+        val (ox, oy) = offset(context, chatGuid)
+        // The file's identity is part of the key: the same recipe over a *replaced*
+        // photo must not serve the old photo from the cache.
         val key = chatGuid + "|" + aspect + "|" + mode.name + "|" + color + "|" +
+            ox + "," + oy + "|" + file.lastModified() + ":" + file.length() + "|" +
             stack.joinToString { "${it.type.name}:${it.amount}" }
         cache.get(key)?.let { return it }
         return withContext(Dispatchers.Default) {
             val bitmap = if (color != null) {
                 renderColor(color, stack, aspect, THREAD_DIM)
             } else {
-                render(file, stack, mode, aspect, THREAD_DIM)
+                render(file, stack, mode, aspect, THREAD_DIM, ox, oy)
             } ?: return@withContext null
             val image = bitmap.asImageBitmap()
             cache.put(key, image)
@@ -242,8 +266,10 @@ object ChatBackground {
         filters: List<Filter>,
         scale: ScaleMode,
         aspect: Float,
+        ox: Float = 0.5f,
+        oy: Float = 0.5f,
     ): ImageBitmap? = withContext(Dispatchers.Default) {
-        render(file, filters, scale, aspect, PREVIEW_DIM)?.asImageBitmap()
+        render(file, filters, scale, aspect, PREVIEW_DIM, ox, oy)?.asImageBitmap()
     }
 
     // ---- the pipeline ----
@@ -262,9 +288,11 @@ object ChatBackground {
         mode: ScaleMode,
         aspect: Float,
         maxDim: Int,
+        ox: Float = 0.5f,
+        oy: Float = 0.5f,
     ): Bitmap? {
         val decoded = Attachments.decode(file, maxDim) ?: return null
-        return runStack(compose(decoded, mode, aspect, maxDim), filters)
+        return runStack(compose(decoded, mode, aspect, maxDim, ox, oy), filters)
     }
 
     /** A flat colour at the screen's shape, run through the same stack — dither on
@@ -292,8 +320,17 @@ object ChatBackground {
         return bitmap
     }
 
-    /** The screen-shaped canvas, black, with [src] drawn on per [mode]. */
-    private fun compose(src: Bitmap, mode: ScaleMode, aspect: Float, maxDim: Int): Bitmap {
+    /** The screen-shaped canvas, black, with [src] drawn on per [mode]. [ox]/[oy]
+     *  slide the FILL crop through its slack — 0 shows the photo's leading edge,
+     *  1 its trailing one, 0.5 the centre. Only FILL has slack to spend them on. */
+    private fun compose(
+        src: Bitmap,
+        mode: ScaleMode,
+        aspect: Float,
+        maxDim: Int,
+        ox: Float = 0.5f,
+        oy: Float = 0.5f,
+    ): Bitmap {
         if (aspect <= 0f) return src
         // Portrait screen: height is the long side and gets the budget.
         val h = if (aspect < 1f) maxDim else max(1, (maxDim / aspect).roundToInt())
@@ -306,11 +343,14 @@ object ChatBackground {
         val dst = when (mode) {
             ScaleMode.STRETCH -> Rect(0, 0, w, h)
             ScaleMode.FILL -> {
-                // Scale up to cover, centred; the overflow leaves the canvas.
+                // Scale up to cover; the offsets pick which slice of the overflow
+                // stays on the canvas.
                 val scale = max(w.toFloat() / src.width, h.toFloat() / src.height)
                 val dw = (src.width * scale).roundToInt()
                 val dh = (src.height * scale).roundToInt()
-                Rect((w - dw) / 2, (h - dh) / 2, (w - dw) / 2 + dw, (h - dh) / 2 + dh)
+                val left = (-(dw - w) * ox.coerceIn(0f, 1f)).roundToInt()
+                val top = (-(dh - h) * oy.coerceIn(0f, 1f)).roundToInt()
+                Rect(left, top, left + dw, top + dh)
             }
             ScaleMode.FIT -> {
                 // Scale down to be contained, centred; the rest stays black.

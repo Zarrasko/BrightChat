@@ -8,6 +8,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -99,6 +101,10 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
     }
     // How the photo lands on the screen before the filters run.
     var scale by remember { mutableStateOf(ChatBackground.scale(context, chatGuid)) }
+    // Where the FILL crop sits in the photo's slack (0..1 each axis, 0.5 centred).
+    val savedOffset = remember { ChatBackground.offset(context, chatGuid) }
+    var ox by remember { mutableStateOf(savedOffset.first) }
+    var oy by remember { mutableStateOf(savedOffset.second) }
     // Which filter's "add" menu is open, if any.
     var adding by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
@@ -118,6 +124,9 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
             onPick = {
                 source = it
                 color = null
+                // A new photo has its own composition; the old crop meant nothing in it.
+                ox = 0.5f
+                oy = 0.5f
                 picking = false
             },
             onPickColor = {
@@ -141,12 +150,19 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
     // read as flicker.
     var preview by remember { mutableStateOf<ImageBitmap?>(null) }
     val stackKey = scale.name + filters.joinToString { "${it.type.name}:${it.amount}" }
-    LaunchedEffect(chosen, chosenColor, stackKey) {
+    // Quantized to 1% steps: a drag should re-render as it moves, but keying on the
+    // raw floats would restart the render for every pixel of it.
+    val offsetKey = ((ox * 100).toInt() * 101) + (oy * 100).toInt()
+    LaunchedEffect(chosen, chosenColor, stackKey, offsetKey) {
         preview = when {
             chosenColor != null -> ChatBackground.previewColor(chosenColor, filters.toList(), aspect)
-            chosen != null -> ChatBackground.preview(chosen, filters.toList(), scale, aspect)
+            chosen != null -> ChatBackground.preview(chosen, filters.toList(), scale, aspect, ox, oy)
             else -> null
         } ?: preview
+    }
+    // The photo's upright shape, for turning drag pixels into crop fractions.
+    val sourceSize by produceState<Pair<Int, Int>?>(null, chosen) {
+        value = chosen?.let { ChatBackground.sourceSize(it) }
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
@@ -163,7 +179,7 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
                         if (saving) return@HapticText
                         saving = true
                         scope.launch {
-                            ChatBackground.save(context, chatGuid, chosen, chosenColor, filters.toList(), scale)
+                            ChatBackground.save(context, chatGuid, chosen, chosenColor, filters.toList(), scale, ox, oy)
                             onClose()
                         }
                     },
@@ -178,7 +194,32 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
                 .fillMaxWidth(0.62f)
                 .align(Alignment.CenterHorizontally)
                 .aspectRatio(aspect)
-                .background(ChatColors.onSurfaceDisabled.copy(alpha = 0.12f)),
+                .background(ChatColors.onSurfaceDisabled.copy(alpha = 0.12f))
+                // In Fill mode the preview *is* the crop, so dragging it picks the
+                // spot: the finger moves the photo through its slack, one axis at
+                // most (cover-scaling leaves overflow on only one). Keyed on what
+                // the math needs, so a mode/photo change rebuilds the handler.
+                .pointerInput(scale, chosenColor, sourceSize) {
+                    val src = sourceSize ?: return@pointerInput
+                    val sw = src.first
+                    val sh = src.second
+                    if (scale != ChatBackground.ScaleMode.FILL || chosenColor != null) return@pointerInput
+                    detectDragGestures { change, drag ->
+                        change.consume()
+                        val boxW = size.width.toFloat()
+                        val boxH = size.height.toFloat()
+                        if (boxW <= 0f || boxH <= 0f) return@detectDragGestures
+                        val srcAspect = sw.toFloat() / sh
+                        if (srcAspect > boxW / boxH) {
+                            // Wider than the screen: horizontal slack.
+                            val slack = boxH * srcAspect - boxW
+                            if (slack > 1f) ox = (ox - drag.x / slack).coerceIn(0f, 1f)
+                        } else {
+                            val slack = boxW / srcAspect - boxH
+                            if (slack > 1f) oy = (oy - drag.y / slack).coerceIn(0f, 1f)
+                        }
+                    }
+                },
         ) {
             preview?.let {
                 Image(
@@ -237,6 +278,14 @@ fun BackgroundEditorScreen(chatGuid: String, onClose: () -> Unit) {
                         onClick = { scale = mode },
                     )
                 }
+            }
+            if (scale == ChatBackground.ScaleMode.FILL) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Drag the preview to frame the crop",
+                    style = ChatType.hint,
+                    color = ChatColors.onSurfaceDisabled,
+                )
             }
             Spacer(modifier = Modifier.height(12.dp))
         }

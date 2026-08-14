@@ -5,8 +5,10 @@ package com.gios.lightchat.ui
 import android.content.Context
 import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -38,15 +40,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
@@ -61,6 +67,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import com.gios.light.common.hw.WheelScroll
+import kotlinx.coroutines.launch
 import com.gios.lightchat.Attachment
 import com.gios.lightchat.ChatBackground
 import com.gios.lightchat.ChatMessage
@@ -298,9 +305,39 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                 LaunchedEffect(nearOldest, convo.guid) {
                     if (nearOldest) viewModel.loadOlder()
                 }
+                /**
+                 * **Slide the thread left to peek at every message's time.**
+                 *
+                 * Times aren't drawn by default — a column of timestamps is exactly the
+                 * clutter this app exists to not have — but "when did this arrive" is a
+                 * fair question, so iMessage's answer: drag left, the turns shift over,
+                 * and each row's time slides in from the right edge; let go and it all
+                 * springs back. Held as an [Animatable] and read only inside
+                 * graphicsLayer blocks, so a drag moves every visible row without
+                 * recomposing a single one.
+                 */
+                val timeReveal = remember(convo.guid) { Animatable(0f) }
+                val maxRevealPx = with(LocalDensity.current) { TIME_REVEAL_WIDTH.toPx() }
+                val revealScope = rememberCoroutineScope()
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .pointerInput(convo.guid) {
+                            detectHorizontalDragGestures(
+                                onDragEnd = { revealScope.launch { timeReveal.animateTo(0f) } },
+                                onDragCancel = { revealScope.launch { timeReveal.animateTo(0f) } },
+                            ) { change, dragAmount ->
+                                // Leftward drag (negative) opens; the clamp keeps a rightward
+                                // one from pushing the thread off the other side.
+                                val target = (timeReveal.value - dragAmount).coerceIn(0f, maxRevealPx)
+                                if (target != timeReveal.value) {
+                                    change.consume()
+                                    revealScope.launch { timeReveal.snapTo(target) }
+                                }
+                            }
+                        },
                     reverseLayout = true,
                     contentPadding = PaddingValues(top = 8.dp, bottom = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -311,6 +348,8 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                             message,
                             convo,
                             state.contacts,
+                            reveal = { timeReveal.value },
+                            maxRevealPx = maxRevealPx,
                             showLabel = message.guid in labeled,
                             showReceipt = message.guid == receiptGuid,
                             // The quoted original when this message is an inline reply.
@@ -524,6 +563,10 @@ fun ComposeBar(
  *  capping the width leaves an empty gutter on the opposite side as the cue. */
 private const val MESSAGE_MAX_WIDTH = 0.8f
 
+/** How far the time-peek slides the thread — enough for "12:44 PM" in the hint
+ *  style, and little enough that the turns stay readable while it's open. */
+private val TIME_REVEAL_WIDTH = 76.dp
+
 /** A dim sender label (only when needed), then the text — no bubbles, just a
  *  width-capped column hugging its side. */
 @Composable
@@ -531,6 +574,9 @@ private fun MessageRow(
     message: ChatMessage,
     convo: Conversation,
     contacts: Contacts,
+    /** The time-peek offset in px, read at draw time only (see the thread's Animatable). */
+    reveal: () -> Float,
+    maxRevealPx: Float,
     showLabel: Boolean,
     showReceipt: Boolean,
     replyQuote: String?,
@@ -560,10 +606,38 @@ private fun MessageRow(
         convo.participants.size == 1 -> contacts.sender(convo.participants[0])
         else -> null
     }
+    // This message's moment, shown only while the thread is slid over: delivery
+    // time for your own turns once the server has reported one, arrival for the
+    // rest. Same wording as the conversation list, so time never reads two ways.
+    val context = LocalContext.current
+    val timeLine = remember(message.guid, message.dateDelivered) {
+        val ts = if (message.fromMe && message.dateDelivered > 0) message.dateDelivered else message.date
+        listTime(context, ts)
+    }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        if (timeLine.isNotEmpty()) {
+            Text(
+                text = timeLine,
+                style = ChatType.hint,
+                color = ChatColors.onSurfaceDim,
+                maxLines = 1,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .graphicsLayer {
+                        // Off the right edge until the drag brings it in; fading with the
+                        // slide keeps a half-open peek from reading as overlap.
+                        val r = reveal()
+                        translationX = maxRevealPx - r
+                        alpha = (r / maxRevealPx).coerceIn(0f, 1f)
+                    },
+            )
+        }
     // The name label sits above the turn (not inside the content column) so the
     // gutter reaction lines up with the message's first line, not the label.
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer { translationX = -reveal() },
         horizontalAlignment = if (message.fromMe) Alignment.End else Alignment.Start,
     ) {
         if (label != null) {
@@ -607,6 +681,7 @@ private fun MessageRow(
                 Text(text = line, style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
             }
         }
+    }
     }
 }
 
