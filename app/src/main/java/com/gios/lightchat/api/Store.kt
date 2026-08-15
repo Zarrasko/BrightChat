@@ -16,6 +16,7 @@ object Store {
     private const val PREFS = "chat"
     private const val KEY_PASSWORD = "bb_password" // encrypted
     private const val KEY_CONTACTS = "contacts"    // normalized key → name, JSON
+    private const val KEY_NICKNAMES = "nicknames"  // chat guid → nickname, JSON (local override)
     private const val KEY_BASE_URL = "base_url"    // the server URL, set at setup
     private const val KEY_PRIVATE_API = "private_api" // server's Private API live?
     private const val KEY_FAVORITES = "favorites"     // starred chat guids, newline-joined
@@ -78,6 +79,36 @@ object Store {
             obj.keys().forEach { map[it] = obj.getString(it) }
             Contacts.fromMap(map)
         }.getOrDefault(Contacts())
+    }
+
+    /**
+     * Local per-phone nicknames that override a conversation's display name, keyed by
+     * primary chat guid. Persisted separately from the server's name (which re-syncs and
+     * would clobber an override), and separately from [favorites]/[pins] because this maps
+     * a guid to a string. JSON like [contacts]; a guid never needs normalizing.
+     */
+    fun nicknames(context: Context): Map<String, String> {
+        val json = prefs(context).getString(KEY_NICKNAMES, null) ?: return emptyMap()
+        return runCatching {
+            val obj = JSONObject(json)
+            val map = HashMap<String, String>(obj.length())
+            obj.keys().forEach { map[it] = obj.getString(it) }
+            map
+        }.getOrDefault(emptyMap())
+    }
+
+    /** The nickname for [guid], or null when none is set (blank counts as none). */
+    fun nickname(context: Context, guid: String): String? =
+        nicknames(context)[guid]?.takeIf { it.isNotBlank() }
+
+    /** Sets the nickname for [guid]; a blank [value] clears it. */
+    fun setNickname(context: Context, guid: String, value: String) {
+        val name = value.trim()
+        val next = nicknames(context).toMutableMap()
+        if (name.isBlank()) next.remove(guid) else next[guid] = name
+        val obj = JSONObject()
+        for ((k, v) in next) obj.put(k, v)
+        prefs(context).edit().putString(KEY_NICKNAMES, obj.toString()).apply()
     }
 
     /** Whether the server's Private API is live (tapbacks available). Cached from

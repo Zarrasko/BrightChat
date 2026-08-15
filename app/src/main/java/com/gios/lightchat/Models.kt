@@ -53,17 +53,20 @@ data class Conversation(
     // guid "agent:<id>", never a BlueBubbles chat, never sent to the server. The list
     // renders it like any other row; open()/deleteConversation() branch on this flag.
     val isAgent: Boolean = false,
+    // Local per-phone nickname overriding the display name (see Store.nicknames).
+    val nickname: String? = null,
 ) {
     /** Human title: an explicit group name if set, otherwise the participants. Prefer
      *  `Contacts.title`, which resolves names; this is the nameless fallback. `"null"` is
      *  guarded because BlueBubbles sends a JSON null for an unnamed chat and org.json
-     *  stringifies that (see `JSONObject.string`). */
+     *  stringifies that (see `JSONObject.string`). A local [nickname] wins over all of it. */
     val title: String
-        get() = when {
-            displayName.isNotBlank() && displayName != "null" -> displayName
-            participants.isNotEmpty() -> participants.joinToString(", ")
-            else -> "Unknown"
-        }
+        get() = nickname?.takeIf { it.isNotBlank() }
+            ?: when {
+                displayName.isNotBlank() && displayName != "null" -> displayName
+                participants.isNotEmpty() -> participants.joinToString(", ")
+                else -> "Unknown"
+            }
 }
 
 /**

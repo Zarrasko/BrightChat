@@ -14,9 +14,10 @@ class Contacts(private val byKey: Map<String, String> = emptyMap()) {
     fun name(address: String): String? = byKey[key(address)]?.takeIf { it != "null" }
 
     /** A conversation's human title — iMessage-style: full name for 1:1, first
-     *  names for groups, explicit group name if one is set. */
+     *  names for groups, explicit group name if one is set. A local nickname
+     *  overrides all of it. */
     fun title(conversation: Conversation): String =
-        title(conversation.displayName, conversation.participants)
+        title(conversation.nickname ?: conversation.displayName, conversation.participants)
 
     /** As [title], for a room held as loose fields rather than a [Conversation] — the
      *  chat embedded in a socket event. One implementation, so a notification's title

@@ -108,6 +108,8 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
 
     var editingName by remember { mutableStateOf(false) }
     var draftName by remember { mutableStateOf(convo.displayName) }
+    var editingNickname by remember { mutableStateOf(false) }
+    var draftNickname by remember { mutableStateOf(convo.nickname.orEmpty()) }
     var addingTo by remember { mutableStateOf(false) }
     var addQuery by remember { mutableStateOf("") }
     // The address whose Remove (or "leave") is one tap from firing; any other
@@ -248,6 +250,46 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+
+                item(key = "nickname") {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Spacer(modifier = Modifier.height(24.dp))
+                        SectionLabel("Nickname")
+                        if (editingNickname) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                BasicTextField(
+                                    value = draftNickname,
+                                    onValueChange = { draftNickname = it },
+                                    singleLine = true,
+                                    textStyle = ChatType.body.copy(color = ChatColors.onSurface),
+                                    cursorBrush = SolidColor(ChatColors.onSurface),
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(onDone = {
+                                        viewModel.setNickname(convo.guid, draftNickname)
+                                        editingNickname = false
+                                    }),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
+                            }
+                        } else {
+                            val nick = convo.nickname
+                            HapticText(
+                                text = nick?.takeIf { it.isNotBlank() } ?: "Tap to set",
+                                style = ChatType.body,
+                                color = if (nick.isNullOrBlank()) ChatColors.onSurfaceDim else ChatColors.onSurface,
+                                textAlign = TextAlign.Start,
+                                maxLines = 1,
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    draftNickname = nick.orEmpty()
+                                    editingNickname = true
+                                },
+                            )
                         }
                     }
                 }

@@ -695,6 +695,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         Store.setPins(app, next)
     }
 
+    /** Sets (or clears, when [name] is blank) a conversation's local nickname. */
+    fun setNickname(guid: String, name: String) {
+        Store.setNickname(app, guid, name)
+        val nick = name.trim().ifBlank { null }
+        _state.update { s ->
+            s.copy(
+                open = s.open?.takeIf { it.guid == guid }?.copy(nickname = nick),
+                conversations = s.conversations.map { c ->
+                    if (c.guid == guid) c.copy(nickname = nick) else c
+                },
+            )
+        }
+    }
+
     fun toggleFavorite(conversation: Conversation) {
         // The write is deliberately *after* the update, not inside it: update's lambda
         // re-runs on CAS contention (a socket event landing at the same moment), which
@@ -861,8 +875,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Builds a synthetic Conversation row per agent and merges it into the list. */
     private fun mergeAgents(imessage: List<Conversation>): List<Conversation> {
+        // Local nicknames override the server display name (see Store.nicknames).
+        val nicknames = Store.nicknames(app)
+        val named = imessage.map { it.copy(nickname = nicknames[it.guid]) }
         val roster = agentStore.agents()
-        if (roster.isEmpty()) return imessage
+        if (roster.isEmpty()) return named
         val agentRows = roster.map { a ->
             val last = agentStore.lastMessage(a.id)
             Conversation(
@@ -876,7 +893,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 isAgent = true,
             )
         }
-        return (imessage + agentRows).sortedByDescending { it.lastDate }
+        return (named + agentRows).sortedByDescending { it.lastDate }
     }
 
     private fun agentErrorMessage(agent: Agent, t: Throwable): String {
