@@ -16,7 +16,7 @@ install or update it directly. Don't have BrightMarket yet? Get it, and browse
 every Bright app, at
 **[gi-os.github.io/brightmarket-index/browse.html](https://gi-os.github.io/brightmarket-index/browse.html)**.
 
-**Current version: v2.13.x.** See [Version history](#version-history).
+**Current version: v2.16.x.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -330,6 +330,9 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v2.11.x | On-screen alerts can be turned off; **Agents** — named AI chats with full markdown, plus QR-code agent setup |
 | v2.12.x | Per-chat backgrounds with a stackable filter editor (dither, B&W, opacity, corner blur/fade, shade swatches) |
 | v2.13.x | Fix: a failed agent reply left an id-0 row in the thread, and the next send crashed the list (light-reports#19) |
+| v2.14.x | Draggable Fill crop in the background editor, photo-swap cache fix, slide the thread left to peek at message times |
+| v2.15.x | Local nicknames: rename any conversation on-device, including the self-chat |
+| v2.16.x | Fix: sending several photos could leave two thread rows under one message guid and crash the list (light-reports#21) |
 
 ## Licence
 

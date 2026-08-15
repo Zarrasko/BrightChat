@@ -1814,14 +1814,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) { runCatching { client.markRead(chatGuid) } }
     }
 
-    private fun mergeRaw(list: List<ChatMessage>, m: ChatMessage): List<ChatMessage> {
-        // Match by guid, or — for the socket echo of our own send — by the tempGuid the
-        // server echoes back, since the optimistic bubble still carries it as its guid.
-        // Without the latter the echo (real guid) would render as a second row until the
-        // HTTP send call returns and swaps the temp guid in.
-        val idx = list.indexOfFirst { it.guid == m.guid || (m.tempGuid != null && it.guid == m.tempGuid) }
-        return if (idx >= 0) list.toMutableList().also { it[idx] = m } else list + m
-    }
+    /** Match by guid, or — for the socket echo of our own send — by the tempGuid the
+     *  server echoes back, since the optimistic bubble still carries it as its guid.
+     *  Without the latter the echo (real guid) would render as a second row until the
+     *  HTTP send call returns and swaps the temp guid in. See [mergeIntoThread], which
+     *  is where the rule that no two rows may share a guid lives. */
+    private fun mergeRaw(list: List<ChatMessage>, m: ChatMessage): List<ChatMessage> =
+        mergeIntoThread(list, m)
 
     /** Looks up a message by guid in whatever's cached (the open thread, or any
      *  previously-opened thread), so a live tapback can describe its target. Null
