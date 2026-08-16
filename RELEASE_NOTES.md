@@ -1,25 +1,34 @@
-## BrightChat v2.16 — sending a batch of photos no longer closes the app
+## BrightChat v2.17 — Newsletter: one message, many chats
 
-**Send several photos at once and the app could die the moment they landed.**
+**A new destination under New Message: Newsletter.**
 
-A send puts its bubble up before the server has heard about it: an optimistic row keyed by a
-client `tempGuid`, so the photo is in the thread while it uploads. The real message then
-arrives three separate ways — the HTTP send returns it, the socket announces it as a new
-message, and the socket updates it again for each delivery and read stamp — and the thread
-folds all of those onto the one row by matching either the real guid or the tempGuid the
-optimistic row is still keyed by.
+You build named *batches* — a batch is a list of recipients, mixed freely from your group chats
+and from your contacts — and then write one message, photos and all, to a batch. It goes out to
+every recipient in it.
 
-Photos are big and the upload blocks, so with several queued there was a long window where
-the socket's announcement arrived *before* the send returned. The announcement carried the
-real guid but nothing to match the optimistic row on, so it was appended as its own row: now
-the optimistic row and the real row were both in the thread. The next update for that message
-matched the optimistic row by tempGuid — it comes first in the list — and wrote the real
-message over it. Two rows, one guid. Compose will not draw a list with a repeated key, so the
-thread threw `Key "…" was already used` on the next frame and the app closed itself.
+**Separately, one thread each, and that is the whole feature.** This is not a group chat. Each
+recipient receives their own message in their own conversation, sees nobody else on the list,
+and replies to you alone. A group chat would have been one API call and a completely different
+thing to have built.
 
-The merge now writes the matched row *and* drops any other row already carrying that guid, so
-one message can only ever occupy one row however its three answers are ordered. That rule is
-now the point of the function rather than a property of the order things happened to arrive
-in, and it is unit-tested against the interleavings a batch of photos produces.
+**Groups and people are stored differently on purpose.** A group can only be addressed by the
+guid of a room that already exists on the server, because a group has no handle; a person is
+addressed by handle, whose 1:1 guid can be constructed, which is what lets a batch include
+somebody this phone has never messaged. Keeping the two apart is what stops a group in a batch
+from quietly delivering to one of its members instead of the room.
 
-Fixes [light-reports#21] — sending many photos closed the app.
+**Sending is sequential, with a pause between recipients.** Not politeness — the AppleScript
+path drives Messages.app on the Mac through an Apple Event, and firing forty of those back to
+back is how that path starts dropping messages while still reporting them sent. A broadcast to
+forty costs about twelve extra seconds; a recipient who silently never hears from you costs
+more. Text goes first and the photos follow, so that a connection dying halfway through a
+recipient still lands the words.
+
+**One unreachable number does not stop the batch.** Failures are collected per recipient rather
+than aborting the run, and the outcome line names who did not get it — so "who missed this" is
+answerable without opening thirty-nine threads.
+
+**Send asks once.** The composer lists every recipient rather than counting them in a header,
+and the first tap on Send arms it while the second sends; editing the message or the photos
+disarms it again. A broadcast has no undo, and it can go to the wrong forty people exactly as
+easily as the right ones.

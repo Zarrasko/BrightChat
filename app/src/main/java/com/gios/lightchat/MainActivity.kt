@@ -38,6 +38,9 @@ import com.gios.lightchat.ui.ConversationTab
 import com.gios.lightchat.ui.ConversationsScreen
 import com.gios.lightchat.ui.DialerScreen
 import com.gios.lightchat.ui.NewMessageScreen
+import com.gios.lightchat.ui.NewsletterComposeScreen
+import com.gios.lightchat.ui.NewsletterEditScreen
+import com.gios.lightchat.ui.NewsletterScreen
 import com.gios.lightchat.ui.SettingsScreen
 import com.gios.lightchat.ui.SetupScreen
 import com.gios.lightchat.ui.ThreadScreen
@@ -328,6 +331,23 @@ fun LightChatApp(viewModel: ChatViewModel) {
             // A rejected password sends us back here; make sure settings is dismissed.
             showSettings = false
             SetupScreen(viewModel)
+        }
+        // Newsletter, innermost first: the editor and the composer are both opened *from* the
+        // batch list, so they have to be matched before it or opening either would still draw
+        // the list underneath them.
+        state.newsletterEditor != null -> {
+            val batch = state.newsletterEditor!!
+            BackHandler { viewModel.closeNewsletterEditor() }
+            NewsletterEditScreen(viewModel, batch)
+        }
+        state.newsletterCompose != null -> {
+            val batch = state.newsletterCompose!!
+            BackHandler { viewModel.closeNewsletterCompose() }
+            NewsletterComposeScreen(viewModel, batch)
+        }
+        state.newsletterList -> {
+            BackHandler { viewModel.closeNewsletters() }
+            NewsletterScreen(viewModel)
         }
         state.composingNew -> {
             BackHandler { viewModel.cancelNewMessage() }
