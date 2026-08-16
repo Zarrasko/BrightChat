@@ -126,6 +126,16 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
             onClick = { viewModel.openNewAgent() },
         )
+        // Nor is a newsletter batch: it addresses many threads at once rather than opening one,
+        // so it cannot be a recipient in the "To" field below — it is its own destination.
+        HapticText(
+            text = "Newsletter",
+            style = ChatType.body,
+            color = ChatColors.onSurfaceVariant,
+            textAlign = TextAlign.Start,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            onClick = { viewModel.openNewsletters() },
+        )
         HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
 
         // "To" line: chosen recipients as removable chips, then an inline field to

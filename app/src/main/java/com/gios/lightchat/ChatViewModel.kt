@@ -78,6 +78,14 @@ data class UiState(
     val agentSending: Boolean = false,         // a completion is in flight
     val agentEditor: Boolean = false,          // the agent create/edit screen is open
     val agentEditorTarget: Agent? = null,      // null → creating a new agent
+    // Newsletter (see Newsletter.kt) — named recipient batches one message broadcasts to.
+    // Three nullable/boolean screens rather than one enum, matching how the agent screens
+    // above are routed, so `LightChatApp`'s `when` reads the same way for both features.
+    val newsletters: List<NewsletterBatch> = emptyList(),
+    val newsletterList: Boolean = false,       // the batch list is open
+    val newsletterEditor: NewsletterBatch? = null,   // the batch being edited
+    val newsletterCompose: NewsletterBatch? = null,  // the batch being written to
+    val newsletterProgress: NewsletterProgress? = null, // a broadcast in flight, or its outcome
 )
 
 /**
@@ -124,6 +132,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             agents = agentStore.agents(),
             conversations = mergeAgents(if (api != null) store.chats() else emptyList()),
             contacts = Store.contacts(application),
+            newsletters = Store.newsletters(application),
         ),
     )
     val state: StateFlow<UiState> = _state
@@ -1577,6 +1586,302 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             } catch (t: Throwable) {
                 _state.update { it.copy(message = t.message ?: "Couldn’t start the message") }
             }
+        }
+    }
+
+    // ---- Newsletter -------------------------------------------------------
+
+    /**
+     * How long to wait between recipients of a broadcast.
+     *
+     * Not politeness — it is the AppleScript path. Each send drives Messages.app on the Mac
+     * through an Apple Event, and firing forty of them back to back is how that path starts
+     * dropping them silently: the script returns success, the message never leaves. A pause
+     * costs a broadcast to forty people about twelve seconds, which is nothing next to a
+     * recipient who never hears from you and never finds out.
+     */
+    private val newsletterGapMs = 300L
+
+    /** The broadcast currently in flight, if any. One at a time — see [sendNewsletter]. */
+    private var newsletterJob: Job? = null
+
+    fun openNewsletters() = _state.update {
+        it.copy(composingNew = false, newsletterList = true, newsletterProgress = null, message = null)
+    }
+
+    fun closeNewsletters() = _state.update {
+        it.copy(newsletterList = false, newsletterEditor = null, newsletterCompose = null)
+    }
+
+    /** Opens the editor on a brand-new, empty batch. Not written to disk until it is
+     *  saved — an abandoned "New batch" should leave nothing behind. */
+    fun newNewsletterBatch() = _state.update {
+        it.copy(
+            newsletterEditor = NewsletterBatch(id = newTempGuid("nl"), name = ""),
+            newsletterProgress = null,
+        )
+    }
+
+    fun editNewsletterBatch(batch: NewsletterBatch) = _state.update {
+        it.copy(newsletterEditor = batch, newsletterProgress = null)
+    }
+
+    fun closeNewsletterEditor() = _state.update { it.copy(newsletterEditor = null) }
+
+    /**
+     * Writes [batch] back, replacing the entry with its id or appending it if it is new.
+     *
+     * A batch with no name is stored with a blank one and *rendered* as [NewsletterBatch.UNTITLED]
+     * rather than being given that name here: naming it on save would mean a user who later types
+     * a real name is editing a placeholder they never wrote, and a batch that came back from disk
+     * would look like one they had named.
+     */
+    fun saveNewsletterBatch(batch: NewsletterBatch) {
+        val next = _state.value.newsletters.toMutableList()
+        val at = next.indexOfFirst { it.id == batch.id }
+        if (at >= 0) next[at] = batch else next += batch
+        Store.setNewsletters(app, next)
+        _state.update { it.copy(newsletters = next, newsletterEditor = null) }
+    }
+
+    fun deleteNewsletterBatch(id: String) {
+        val next = _state.value.newsletters.filterNot { it.id == id }
+        Store.setNewsletters(app, next)
+        _state.update {
+            it.copy(
+                newsletters = next,
+                newsletterEditor = null,
+                // A batch deleted while it was the one being written to would leave the compose
+                // screen addressed to nothing.
+                newsletterCompose = it.newsletterCompose?.takeIf { c -> c.id != id },
+            )
+        }
+    }
+
+    /**
+     * Opens the composer on [batch].
+     *
+     * A *finished* broadcast's outcome is dropped — it belonged to whatever was written last and
+     * has been read. An *unfinished* one is kept, because backing out of a send and opening
+     * another batch does not stop the first one, and clearing it here is precisely what would
+     * let the user start a second broadcast on top of a running one.
+     */
+    fun openNewsletterCompose(batch: NewsletterBatch) = _state.update {
+        it.copy(
+            newsletterCompose = batch,
+            newsletterProgress = it.newsletterProgress?.takeIf { p -> !p.done },
+            message = null,
+        )
+    }
+
+    fun closeNewsletterCompose() = _state.update { it.copy(newsletterCompose = null) }
+
+    /** Dismisses a finished broadcast's outcome line. No-op while one is still running —
+     *  the progress line is the only thing on screen saying the send is still happening. */
+    fun clearNewsletterProgress() = _state.update {
+        if (it.newsletterProgress?.done == true) it.copy(newsletterProgress = null) else it
+    }
+
+    /**
+     * The conversation to send a [NewsletterTarget] into.
+     *
+     * A **chat** target is looked up: the live list first (its `guids` carry every room of a
+     * forked group, which is what makes an AppleScript send survive a dead fork), then the
+     * on-disk store for a chat that has fallen out of the sweep window. Nothing is constructed
+     * for it — a group's guid cannot be derived from anything.
+     *
+     * A **contact** target's 1:1 guid *is* its handle, so it is constructed when no thread
+     * exists yet — the same trick [sendNewImage] uses, and what lets a batch include somebody
+     * this phone has never messaged.
+     */
+    private fun newsletterConversation(target: NewsletterTarget): Conversation? {
+        val convos = _state.value.conversations
+        if (target.isChat) {
+            return convos.firstOrNull { !it.isAgent && target.id in it.guids } ?: store.chat(target.id)
+        }
+        val handle = imessageHandle(target.id)
+        val guid = "iMessage;-;$handle"
+        return convos.firstOrNull { !it.isAgent && !it.isGroup && guid in it.guids }
+            ?: store.chat(guid)
+            ?: Conversation(
+                guid = guid,
+                displayName = "",
+                participants = listOf(handle),
+                isGroup = false,
+                lastText = "",
+                lastDate = 0L,
+                lastFromMe = false,
+            )
+    }
+
+    /**
+     * Sends one message — [text] and/or [files] — separately to every recipient of [batch].
+     *
+     * **Separately is the feature.** There is no group here: each recipient gets their own
+     * message in their own thread, sees no other recipient, and replies to you alone. A group
+     * chat would have been one API call and a completely different product.
+     *
+     * Sequential, on one IO coroutine, for the same reason [sendImageFiles] is: iMessage has no
+     * batch send, and racing N of them at the server is how the AppleScript path starts dropping
+     * messages that it reports as sent. The trade is wall-clock — see [newsletterGapMs].
+     *
+     * **Text first, then the photos.** A partial failure is the case that decides this: if the
+     * connection dies halfway through a recipient, the words are the part that had to land. A
+     * recipient whose text delivered but whose photos did not is therefore *not* a failure — it
+     * is [NewsletterProgress.partial], reported separately, because re-running the whole batch
+     * double-sends the text to everyone who succeeded and is the wrong answer for them.
+     *
+     * Failures are collected per recipient rather than aborting the run — one unreachable number
+     * in a batch of forty must not stop the other thirty-nine — and named in the outcome line, so
+     * "who didn't get it" is answerable without opening every thread.
+     *
+     * **One broadcast at a time.** [newsletterJob] refuses a second while one is in flight: two
+     * loops would interleave into the single [UiState.newsletterProgress] and each would report
+     * the other's counters, and the screen gate alone can't prevent it (backing out of a send and
+     * opening another batch leaves a live Send bar in front of a running broadcast).
+     */
+    fun sendNewsletter(batch: NewsletterBatch, text: String, files: List<File>) {
+        val body = text.trim()
+        val targets = batch.targets
+        val label = batch.name.ifBlank { NewsletterBatch.UNTITLED }
+        val total = targets.size
+
+        /** The whole broadcast failed before it began. Reported through the progress line, not
+         *  `state.message`: no newsletter screen renders that field, so it would be invisible
+         *  here and then turn up floating on the conversation list — the same bug "Mark all as
+         *  read" was written around. */
+        fun stillborn(reason: String) = _state.update {
+            it.copy(
+                newsletterProgress = NewsletterProgress(
+                    batchId = batch.id, batchName = label, sent = 0, total = total,
+                    done = true, error = reason,
+                ),
+                message = null,
+            )
+        }
+
+        if (newsletterJob?.isActive == true) {
+            stillborn("Another batch is still sending")
+            return
+        }
+        if (targets.isEmpty()) {
+            stillborn("That batch has no recipients")
+            return
+        }
+        if (body.isEmpty() && files.isEmpty()) return
+
+        _state.update {
+            it.copy(
+                newsletterProgress = NewsletterProgress(
+                    batchId = batch.id, batchName = label, sent = 0, total = total,
+                ),
+                message = null,
+            )
+        }
+        newsletterJob = viewModelScope.launch(Dispatchers.IO) {
+            val client = api
+            if (client == null) {
+                stillborn("Not signed in to the server")
+                return@launch
+            }
+            // Read every photo once, up front, rather than once per recipient: a batch of twenty
+            // is twenty re-reads of the same file off the same disk otherwise. **An unreadable
+            // one aborts the whole broadcast** rather than being skipped — a photo attached
+            // minutes ago can be evicted from the cache before Send is tapped, and silently
+            // dropping it would send forty people a message missing the picture it was about,
+            // or (for a photos-only broadcast) send forty people nothing at all and report
+            // "Sent to 40".
+            val photos = ArrayList<PickedImage>(files.size)
+            for (file in files) {
+                val bytes = runCatching { file.readBytes() }.getOrNull()
+                if (bytes == null || bytes.isEmpty()) {
+                    stillborn("Couldn’t read ${file.name} — nothing was sent")
+                    return@launch
+                }
+                photos += PickedImage(bytes, mimeForExtension(file.extension), file.name)
+            }
+
+            val method = sendMethod()
+            val failed = ArrayList<String>()   // got nothing
+            val partial = ArrayList<String>()  // got the words, not the photos
+            var sent = 0
+
+            fun publish(done: Boolean) {
+                val snapshot = NewsletterProgress(
+                    batchId = batch.id,
+                    batchName = label,
+                    sent = sent,
+                    total = total,
+                    failed = failed.toList(),
+                    partial = partial.toList(),
+                    done = done,
+                )
+                // Written whole rather than as a copy() of whatever is in state: this coroutine
+                // owns every field of it, and `update` re-runs its block on CAS contention.
+                _state.update { it.copy(newsletterProgress = snapshot) }
+            }
+
+            for ((index, target) in targets.withIndex()) {
+                if (index > 0) delay(newsletterGapMs)
+                val convo = newsletterConversation(target)
+                if (convo == null) {
+                    failed += target.label
+                    publish(done = false)
+                    continue
+                }
+                // The room that delivered the first thing is reused for the rest, so a forked
+                // group's photos land in the same room as its text instead of each one
+                // re-probing the dead siblings (see sendAcrossRooms / lastGoodRoom).
+                var room: String? = null
+                val textOk = body.isEmpty() || runCatching {
+                    val echo = sendAcrossRooms(convo.guid, sendTargets(convo, method)) { g ->
+                        client.send(g, body, newTempGuid(), method, null).also { room = g }
+                    }
+                    bumpConversation(convo.guid, echo.previewText, echo.date, fromMe = true)
+                }.isSuccess
+
+                // Not attempted when the text failed: that chat is unreachable, and every photo
+                // would be another doomed upload holding up the rest of the batch.
+                var photosOk = true
+                if (textOk) {
+                    for (photo in photos) {
+                        val ok = runCatching {
+                            val target1 = room
+                            val echo = if (target1 != null) {
+                                client.sendAttachment(
+                                    target1, photo.bytes, photo.name, photo.mime, newTempGuid(), method,
+                                )
+                            } else {
+                                sendAcrossRooms(convo.guid, sendTargets(convo, method)) { g ->
+                                    client.sendAttachment(
+                                        g, photo.bytes, photo.name, photo.mime, newTempGuid(), method,
+                                    ).also { room = g }
+                                }
+                            }
+                            bumpConversation(convo.guid, echo.previewText, echo.date, fromMe = true)
+                        }.isSuccess
+                        if (!ok) { photosOk = false; break }
+                    }
+                }
+
+                when {
+                    !textOk -> failed += target.label
+                    // A photos-only broadcast whose photos failed delivered nothing at all,
+                    // whatever the (vacuously true) text result says.
+                    !photosOk && body.isEmpty() -> failed += target.label
+                    !photosOk -> { sent++; partial += target.label }
+                    else -> sent++
+                }
+                // The thread's cached messages no longer include what just went out; drop it so
+                // opening that chat re-fetches rather than showing a thread the broadcast is
+                // missing from. Also on a partial — some of it landed.
+                if (textOk) messageCache.remove(convo.guid)
+                publish(done = false)
+            }
+            publish(done = true)
+            // Pull the broadcast's own echoes into the list. Without this the rows it just
+            // touched carry the optimistic bump and nothing else until the next refresh.
+            refresh()
         }
     }
 

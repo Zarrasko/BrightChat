@@ -39,8 +39,8 @@ android {
         minSdk = 34   // Light Phone III runs Android 14 — the only target device.
         targetSdk = 35
         // CI overwrites both from the workflow run number; see .github/workflows/build.yml
-        versionCode = 12
-        versionName = "2.16.0"
+        versionCode = 13
+        versionName = "2.17.0"
 
         buildConfigField("String", "REPORT_TOKEN", "\"$reportToken\"")
         buildConfigField("String", "REPORT_REPO", "\"gi-os/light-reports\"")
@@ -163,4 +163,11 @@ dependencies {
     // imports precisely so it can be tested on the JVM — the parser decides what gets pinned
     // to the keyboard's suggestion strip, and being wrong there is silent.
     testImplementation("junit:junit:4.13.2")
+    // A real org.json on the *unit test* classpath only. The platform provides org.json at
+    // runtime, so the app never bundles it (it is even excluded from socket.io above) — but the
+    // android.jar unit tests compile against is the stub one, whose every method throws
+    // "Stub!". Anything parsing JSON is therefore untestable without this, which is why
+    // NewsletterJson had no test until it got one. Not `implementation`: adding it there would
+    // put a second copy of these classes in the APK and fail the build on duplicates.
+    testImplementation("org.json:json:20240303")
 }

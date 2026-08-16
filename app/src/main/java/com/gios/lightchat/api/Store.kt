@@ -2,6 +2,8 @@ package com.gios.lightchat.api
 
 import android.content.Context
 import com.gios.lightchat.Contacts
+import com.gios.lightchat.NewsletterBatch
+import com.gios.lightchat.NewsletterJson
 import org.json.JSONObject
 
 /**
@@ -34,6 +36,7 @@ object Store {
     private const val KEY_CODE = "login_code"         // the newest one-time code seen
     private const val KEY_CODE_AT = "login_code_at"   // when the message carrying it arrived
     private const val KEY_BG_PREFIX = "chat_bg:"      // per-chat background filter stack, JSON
+    private const val KEY_NEWSLETTERS = "newsletters" // named broadcast batches, JSON
 
     /** The configured BlueBubbles Server URL, or null if setup hasn't run yet. */
     fun baseUrl(context: Context): String? =
@@ -399,6 +402,21 @@ object Store {
                 next.entries.joinToString("\n") { "${it.key}\u0000${it.value.number}\u0000${it.value.name}" },
             )
             .apply()
+    }
+
+    /**
+     * The newsletter batches — named recipient sets one message broadcasts to.
+     *
+     * Local by construction: BlueBubbles has no concept of a mailing list, so there is nothing
+     * on the server to sync with. Same reasoning as [favorites], and the same consequence —
+     * they live and die with this install (LightSync carries them, since they are in this
+     * preference file and are not the encrypted password).
+     */
+    fun newsletters(context: Context): List<NewsletterBatch> =
+        NewsletterJson.decode(prefs(context).getString(KEY_NEWSLETTERS, null))
+
+    fun setNewsletters(context: Context, value: List<NewsletterBatch>) {
+        prefs(context).edit().putString(KEY_NEWSLETTERS, NewsletterJson.encode(value)).apply()
     }
 
     /** Sign out: wipe the stored password. */

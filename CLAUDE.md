@@ -353,6 +353,36 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   tapback surfaced as its own "Loved …" thread. We collapse them: see
   `BlueBubblesApi.conversations` + `groupIdentity` and `Conversation.guids` below.
 
+  **Newsletter (done):** named recipient *batches* one message broadcasts to, reached from
+  New Message → "Newsletter" (`Newsletter.kt`, `ui/NewsletterScreen.kt`,
+  `ui/NewsletterEditScreen.kt`, `ui/NewsletterComposeScreen.kt`,
+  `ChatViewModel.sendNewsletter`). A batch is a name plus a list of `NewsletterTarget`s, and
+  **the target's two shapes are load-bearing**: a *chat* target is a guid, which is the only way
+  to address a **group** (a group has no handle, so `iMessage;-;<x>` — by definition a two-person
+  chat — would deliver to one member instead of the room); a *contact* target is a handle, whose
+  1:1 guid is *constructed*, which is what lets a batch include somebody with no thread on this
+  phone yet. Same split, same reason, as `receiveShared`. Labels are captured at add time rather
+  than resolved at send time, so a batch still reads as the people you picked after a chat falls
+  out of the sweep window. Persisted as JSON in `Store.newsletters` (JSON, not the newline-joined
+  form `favorites`/`pins` use — a user-typed *name* is in the payload, and delimiter tricks that
+  are safe for guids are not safe for that); local by construction, since BlueBubbles has no
+  mailing-list concept. **Sending is N separate sends, not a group** — each recipient gets their
+  own message in their own thread and sees no other recipient — sequential on one IO coroutine
+  with a 300ms gap, because the AppleScript path drives an Apple Event per send and firing forty
+  back to back is how it starts dropping messages it reports as sent. Text first, then the
+  photos, so a mid-recipient failure still lands the words; the room that delivered the text is
+  reused for its photos rather than re-probing a forked group's dead siblings. A failing
+  recipient is collected (`NewsletterProgress.failed`, labels) rather than aborting the run, and
+  named in the outcome line. Photos are *attached* in the composer rather than fired on pick (the
+  thread's behaviour would send to everybody on the tap), and **Send arms on the first tap and
+  fires on the second** — any edit disarms it — because a broadcast has no undo. The composer
+  rolls its own compose bar rather than reusing `ComposeBar`: that one empties its field on Send
+  (which would discard the message on the arming tap) and is inert on an empty field (a broadcast
+  may legitimately be photos with no words). `NewsletterJson` is unit-tested, which needed a real
+  `org.json` on the *test* classpath — the android.jar unit tests compile against is the stub one
+  whose methods all throw "Stub!" (`testImplementation("org.json:json:…")`, never
+  `implementation`, which would duplicate the platform's classes in the APK).
+
 Note: messaging yourself (note-to-self) legitimately shows each message twice —
 iMessage stores a sent *and* a received row (two GUIDs). Normal chats don't; the
 socket echo of your own sends dedupes by GUID.
