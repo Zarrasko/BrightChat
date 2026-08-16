@@ -21,6 +21,43 @@ package com.gios.lightchat
  * No Android imports on purpose — this is the part worth testing, and it is tested in
  * `ThreadMergeTest`.
  */
+/** The guid prefix a not-yet-acknowledged send carries — see `ChatViewModel.newTempGuid`. */
+internal const val PENDING_PREFIX = "temp-"
+
+/**
+ * Replacing the thread with a freshly-fetched page **without throwing away sends still in
+ * flight.**
+ *
+ * A fetch — opening the thread, the delta sync landing, scrolling back a page — comes from the
+ * store, and the store only knows about messages the server has acknowledged. Assigning its
+ * result straight over the thread therefore deletes every optimistic row currently uploading,
+ * which is what made a batch of photos disappear mid-send: the bubbles vanished, and the send's
+ * own reconcile then had no row left to swap the real message into, so the photo did not come
+ * back until a later socket event or a reopen. Scrolling up while photos upload (which is what
+ * you do while waiting) triggers it every time, through `loadOlder`.
+ *
+ * So a pending row survives the replacement — unless the fetch already contains the real message
+ * it was standing in for, which is recognised by the server echoing our `tempGuid` back on it.
+ * Without that second half the same photo would sit in the thread twice, once as the optimistic
+ * row and once as the real one, under two different guids (so no crash, just a phantom).
+ *
+ * Pending rows go at the end because they are the newest thing in the thread by definition —
+ * `foldReactions` re-sorts by date anyway, and they carry `System.currentTimeMillis()`.
+ */
+internal fun replaceKeepingPending(
+    current: List<ChatMessage>,
+    fetched: List<ChatMessage>,
+): List<ChatMessage> {
+    val pending = current.filter { it.guid.startsWith(PENDING_PREFIX) }
+    if (pending.isEmpty()) return fetched
+    val acknowledged = HashSet<String>(fetched.size * 2)
+    for (m in fetched) {
+        acknowledged.add(m.guid)
+        m.tempGuid?.let(acknowledged::add)
+    }
+    return fetched + pending.filterNot { it.guid in acknowledged }
+}
+
 internal fun mergeIntoThread(list: List<ChatMessage>, incoming: ChatMessage): List<ChatMessage> {
     val idx = list.indexOfFirst {
         it.guid == incoming.guid || (incoming.tempGuid != null && it.guid == incoming.tempGuid)

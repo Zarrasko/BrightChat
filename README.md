@@ -16,7 +16,7 @@ install or update it directly. Don't have BrightMarket yet? Get it, and browse
 every Bright app, at
 **[gi-os.github.io/brightmarket-index/browse.html](https://gi-os.github.io/brightmarket-index/browse.html)**.
 
-**Current version: v2.16.x.** See [Version history](#version-history).
+**Current version: v2.18.x.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -333,6 +333,8 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v2.14.x | Draggable Fill crop in the background editor, photo-swap cache fix, slide the thread left to peek at message times |
 | v2.15.x | Local nicknames: rename any conversation on-device, including the self-chat |
 | v2.16.x | Fix: sending several photos could leave two thread rows under one message guid and crash the list (light-reports#21) |
+| v2.17.x | **Newsletter** — named batches of chats and contacts that one message, photos and all, goes out to separately |
+| v2.18.x | Fix: photos still uploading lost their bubble when a fetch landed, and never came back (light-reports#22) |
 
 ## Licence
 

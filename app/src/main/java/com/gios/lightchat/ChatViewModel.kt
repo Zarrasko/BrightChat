@@ -20,6 +20,7 @@ import com.gios.lightchat.socket.AppForeground
 import com.gios.lightchat.socket.SocketBus
 import com.gios.lightchat.socket.SocketService
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -164,7 +165,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // cached messages instantly while a fresh fetch refreshes in the background —
     // no "Loading…" flash. Snapshotted on close so live updates persist. Holds the
     // *raw* list (reaction messages included) so reopening re-folds correctly.
-    private val messageCache = HashMap<String, List<ChatMessage>>()
+    //
+    // Concurrent, because it is written from IO (every fetch that lands, every send that
+    // invalidates a thread) and read from the main thread (opening a chat, naming a tapback's
+    // target). A plain HashMap structurally modified from two threads can corrupt its own
+    // buckets, which fails as a wrong answer or a hang rather than as an exception.
+    private val messageCache = ConcurrentHashMap<String, List<ChatMessage>>()
 
     // Per-conversation (keyed by primary guid) the forked-group room guid that last
     // delivered, so AppleScript sends retry it first instead of re-probing a dead room
@@ -174,6 +180,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // The open thread's raw messages — the single source for what's shown. State's
     // `messages` is always foldReactions(openRaw); every open-thread mutation goes
     // through updateOpenThread so tapbacks stay folded onto their targets.
+    //
+    // **Main thread only** — see [onThreadThread]. It is a plain field doing read-modify-write,
+    // and it used to be touched from IO as well (photo sends, every landing fetch); two of those
+    // interleaving silently dropped whichever change lost the race, which is how a photo still
+    // uploading lost its bubble and then never came back.
     private var openRaw: List<ChatMessage> = emptyList()
 
     // Per-conversation (primary guid → lastDate at the time) unread markers cleared
@@ -293,10 +304,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val msgs = runCatching { syncer.thread(conversation) }.getOrNull().orEmpty()
             if (msgs.isEmpty()) return@launch
             messageCache[conversation.guid] = msgs
-            if (_state.value.open?.guid == conversation.guid) {
-                openRaw = msgs
-                _state.update { it.copy(messages = foldReactions(msgs), threadLoading = false) }
-            }
+            publishFetched(conversation.guid, msgs)
         }
     }
 
@@ -448,11 +456,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // moment later, in the thread job — parsing fifty messages and their attachment
         // metadata is not something to do on the frame that handles the tap.
         val cached = messageCache[conversation.guid]
-        openRaw = cached ?: emptyList()
+        // On the thread that owns openRaw, so that opening a chat can't interleave with a send
+        // or a landing fetch and leave the two disagreeing about which conversation is on
+        // screen. `open` is called from IO in four places (a notification tap during a load, and
+        // the three send-then-open paths), which is what made this reachable.
+        onThreadThread { openThread(conversation, cached) }
+    }
+
+    /** Lands the user in [conversation], showing [cached] if there is any, and kicks off the
+     *  fetch. The state reset is one update, so no frame can show the new thread's title over
+     *  the old one's messages. Runs on the thread that owns [openRaw] — see [open]. */
+    private fun openThread(conversation: Conversation, cached: List<ChatMessage>?) {
+        openRaw = (cached ?: emptyList()).distinctBy { it.guid }
+        val folded = foldReactions(openRaw)
         _state.update {
             it.copy(
                 open = conversation,
-                messages = cached?.let(::foldReactions) ?: emptyList(),
+                messages = folded,
                 threadLoading = cached == null,
                 loadingOlder = false,
                 historyExhausted = false,
@@ -481,10 +501,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 // screen before the network is touched.
                 if (cached == null) {
                     val onDisk = store.messages(conversation.guids, limit = MessageStore.PAGE)
-                    if (onDisk.isNotEmpty() && _state.value.open?.guid == conversation.guid) {
-                        openRaw = onDisk
-                        _state.update { it.copy(messages = foldReactions(onDisk), threadLoading = false) }
-                    }
+                    if (onDisk.isNotEmpty()) publishFetched(conversation.guid, onDisk)
                 }
                 // Raw — reactions included; merged across a forked group's sibling rooms
                 // (usually just one guid) and re-sorted by date in foldReactions. Sync
@@ -494,10 +511,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 // forked group can't sink the whole thread.
                 val msgs = syncer.thread(conversation)
                 messageCache[conversation.guid] = msgs
-                if (_state.value.open?.guid == conversation.guid) {
-                    openRaw = msgs
-                    _state.update { it.copy(messages = foldReactions(msgs), threadLoading = false) }
-                }
+                publishFetched(conversation.guid, msgs)
             } catch (t: Throwable) {
                 _state.update { if (it.open?.guid == conversation.guid) it.copy(threadLoading = false) else it }
                 handleError(t)
@@ -547,10 +561,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             messageCache[conversation.guid] = older
-            openRaw = older
-            _state.update {
-                it.copy(messages = foldReactions(older), loadingOlder = false, threadWindow = window)
-            }
+            // Keeps in-flight sends: a page of history is fetched precisely while you are
+            // waiting for photos to upload, and it used to wipe every bubble that was still
+            // going up. See replaceKeepingPending.
+            publishFetched(conversation.guid, older, clearLoading = false)
+            _state.update { it.copy(loadingOlder = false, threadWindow = window) }
         }
     }
 
@@ -740,8 +755,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         Store.setPins(app, _state.value.pins)
     }
 
-    fun closeThread() {
-        // Snapshot the raw list (incl. live updates) so reopening is instant.
+    fun closeThread() = onThreadThread {
+        // Snapshot the raw list (incl. live updates) so reopening is instant. On the thread
+        // that owns openRaw, or the snapshot can be of a list a landing fetch was midway
+        // through replacing — which cached one conversation's messages under another's guid.
         _state.value.open?.let {
             messageCache[it.guid] = openRaw
             finishTyping(it.guid) // don't leave a typing bubble up after leaving
@@ -779,7 +796,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 open = s.open?.takeUnless { it.guid == conversation.guid },
             )
         }
-        if (_state.value.open == null) { openRaw = emptyList(); threadJob?.cancel() }
+        onThreadThread { if (_state.value.open == null) { openRaw = emptyList(); threadJob?.cancel() } }
         messageCache.remove(conversation.guid)
         viewModelScope.launch(Dispatchers.IO) { runCatching { store.deleteChat(conversation.guids) } }
         messageCache.remove(conversation.guid)
@@ -919,12 +936,64 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * send/echo can't clobber a thread the user has since navigated away from.
      */
     private fun updateOpenThread(convoGuid: String, transform: (List<ChatMessage>) -> List<ChatMessage>) {
-        // Membership, not equality: an incoming message may arrive on any of a forked
-        // group's sibling rooms, all of which belong to the same open thread.
-        if (_state.value.open?.guids?.contains(convoGuid) != true) return
-        openRaw = transform(openRaw)
+        onThreadThread {
+            // Membership, not equality: an incoming message may arrive on any of a forked
+            // group's sibling rooms, all of which belong to the same open thread.
+            if (_state.value.open?.guids?.contains(convoGuid) != true) return@onThreadThread
+            setOpenRaw(transform(openRaw))
+        }
+    }
+
+    /**
+     * Publishes a freshly-fetched page as the open thread's messages, keeping any send still in
+     * flight (see [replaceKeepingPending]) — but only if [convoGuid] is still open.
+     *
+     * The guard used to sit at the call site, a plain `if` around a bare assignment on the IO
+     * thread. Both halves were wrong: the check and the write were not atomic, so opening
+     * another chat in between published *this* chat's messages into *that* chat's thread (and
+     * `closeThread` then cached them under its guid); and the assignment clobbered whatever the
+     * socket or a send had put there. Doing it here, on the one thread that owns [openRaw],
+     * makes the check mean something.
+     */
+    private fun publishFetched(convoGuid: String, fetched: List<ChatMessage>, clearLoading: Boolean = true) {
+        onThreadThread {
+            if (_state.value.open?.guid != convoGuid) return@onThreadThread
+            setOpenRaw(replaceKeepingPending(openRaw, fetched))
+            if (clearLoading) _state.update { it.copy(threadLoading = false) }
+        }
+    }
+
+    /**
+     * The single writer of [openRaw] and of `state.messages`.
+     *
+     * **The de-duplication is the crash fix, not tidiness.** The thread's `LazyColumn` is keyed
+     * on the message guid and throws `Key "…" was already used` on a repeat — it takes the app
+     * down mid-draw, which is light-reports#21 and #22. Until now that could not happen only
+     * because every writer independently guaranteed it (`mergeIntoThread` drops rivals,
+     * `reconcileEcho` de-duplicates, the store's cross-room read de-duplicates); the invariant
+     * was emergent, held in five places at once, and the sixth writer to be added would have
+     * reopened the crash silently. Enforcing it at the render boundary makes a duplicate key
+     * unrepresentable instead of unlikely.
+     */
+    private fun setOpenRaw(next: List<ChatMessage>) {
+        openRaw = next.distinctBy { it.guid }
         val folded = foldReactions(openRaw)
         _state.update { it.copy(messages = folded) }
+    }
+
+    /**
+     * Runs [block] on the thread that owns [openRaw].
+     *
+     * [openRaw] is a plain field doing read-modify-write, and it used to be touched from both
+     * the main thread (the socket collector, the text send's optimistic row) and IO (the photo
+     * sends, every fetch). Two of those interleaving is a lost update, and lost updates here are
+     * not cosmetic: a batch of photos would drop a bubble that was still uploading, and the
+     * reconcile that followed had nothing left to swap the real message into. `Main.immediate`
+     * so a call already on the main thread runs inline — the transforms are microseconds, and
+     * every slow part (the upload, the fetch) is outside them.
+     */
+    private fun onThreadThread(block: () -> Unit) {
+        viewModelScope.launch(Dispatchers.Main.immediate) { block() }
     }
 
     /**

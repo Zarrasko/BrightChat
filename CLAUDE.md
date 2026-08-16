@@ -353,6 +353,26 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   tapback surfaced as its own "Loved …" thread. We collapse them: see
   `BlueBubblesApi.conversations` + `groupIdentity` and `Conversation.guids` below.
 
+  **The open thread is main-thread-confined (done, light-reports#22).** `openRaw` is a plain
+  field doing read-modify-write, and it used to be touched from the main thread (the socket
+  collector, text sends, tapbacks) *and* from IO (photo sends, and every fetch that landed —
+  `open`'s thread job, `reopenThread`, `loadOlder`, all of which assigned it directly and
+  bypassed `updateOpenThread`). Two of those interleaving is a lost update, and the symptoms were
+  a photo still uploading losing its bubble (whose reconcile then had nothing to swap into, so it
+  never came back), the same photo drawn twice under two different guids, and — because `open` is
+  called from IO in four places — one conversation's messages published into another's thread and
+  then cached under its guid by `closeThread`. Everything now goes through `onThreadThread`
+  (`Dispatchers.Main.immediate`, so a call already on main runs inline); `setOpenRaw` is the only
+  writer of `openRaw` and of `state.messages`, `publishFetched` is the only way a fetch lands (it
+  re-checks which chat is open *on that thread*, so the check is no longer a non-atomic
+  check-then-write), and `messageCache` is a `ConcurrentHashMap`. **A fetch keeps in-flight
+  sends** — `replaceKeepingPending` in `ThreadMerge.kt` — dropping a pending row only when the
+  fetched page carries the real message for it (matched on the `tempGuid` the server echoes
+  back), since a store-backed page cannot know about a send the server has not acknowledged yet.
+  **`setOpenRaw` de-duplicates by guid**, which is the thread `LazyColumn`'s key: that invariant
+  used to be emergent, guaranteed independently by `mergeIntoThread`, `reconcileEcho` and the
+  store's cross-room read, and the next writer added would have silently reopened #21/#22.
+  Enforcing it at the render boundary makes a duplicate key unrepresentable.
   **Newsletter (done):** named recipient *batches* one message broadcasts to, reached from
   New Message → "Newsletter" (`Newsletter.kt`, `ui/NewsletterScreen.kt`,
   `ui/NewsletterEditScreen.kt`, `ui/NewsletterComposeScreen.kt`,

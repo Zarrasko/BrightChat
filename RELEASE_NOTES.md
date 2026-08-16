@@ -1,34 +1,34 @@
-## BrightChat v2.17 — Newsletter: one message, many chats
+## BrightChat v2.18 — photos still uploading no longer lose their bubble
 
-**A new destination under New Message: Newsletter.**
+**Send a few photos, scroll up to read while they go, and the ones still uploading
+disappeared from the thread — sometimes for good.**
 
-You build named *batches* — a batch is a list of recipients, mixed freely from your group chats
-and from your contacts — and then write one message, photos and all, to a batch. It goes out to
-every recipient in it.
+A send puts its bubble up before the server has heard about it: an optimistic row under a
+client `tempGuid`, swapped for the real message when the send returns. Everything else that
+writes the thread — opening it, the delta sync landing, scrolling back a page — replaces the
+whole list with what came out of the local store, and the store only knows about messages the
+server has already acknowledged. So a fetch landing mid-upload deleted every optimistic row,
+and the send's own reconcile then had no row left to swap into: the photo did not come back
+until a later socket event, or until the thread was reopened. Scrolling up while photos upload
+is exactly what you do while waiting, and that is what triggers the page fetch.
 
-**Separately, one thread each, and that is the whole feature.** This is not a group chat. Each
-recipient receives their own message in their own conversation, sees nobody else on the list,
-and replies to you alone. A group chat would have been one API call and a completely different
-thing to have built.
+A fetch now keeps sends that are still in flight, and drops them only once the page actually
+contains the real message they were standing in for — recognised by the server echoing our own
+`tempGuid` back. Without that second half the same photo would have sat in the thread twice.
 
-**Groups and people are stored differently on purpose.** A group can only be addressed by the
-guid of a room that already exists on the server, because a group has no handle; a person is
-addressed by handle, whose 1:1 guid can be constructed, which is what lets a batch include
-somebody this phone has never messaged. Keeping the two apart is what stops a group in a batch
-from quietly delivering to one of its members instead of the room.
+**Underneath it was a race, and it explains the rest of the family.** The open thread's message
+list was a plain field read and written from two threads at once: the main thread for the live
+socket and text sends, a background thread for photo sends and every fetch. Two of those
+overlapping silently discarded whichever change lost — a dropped bubble, a photo drawn twice
+under two different guids, and (when a chat was opened from a background thread) one
+conversation's messages published into another conversation's thread and then cached under its
+name. All of it now goes through one place on one thread, so those interleavings cannot happen
+rather than being unlikely.
 
-**Sending is sequential, with a pause between recipients.** Not politeness — the AppleScript
-path drives Messages.app on the Mac through an Apple Event, and firing forty of those back to
-back is how that path starts dropping messages while still reporting them sent. A broadcast to
-forty costs about twelve extra seconds; a recipient who silently never hears from you costs
-more. Text goes first and the photos follow, so that a connection dying halfway through a
-recipient still lands the words.
+**The crash guard moved to where it cannot be forgotten.** One row per message guid is what
+keeps the thread's list from throwing `Key "…" was already used` and taking the app down. That
+held only because five separate writers each guaranteed it independently; the sixth would have
+reopened the crash silently. It is now enforced at the single point where the thread's messages
+are published.
 
-**One unreachable number does not stop the batch.** Failures are collected per recipient rather
-than aborting the run, and the outcome line names who did not get it — so "who missed this" is
-answerable without opening thirty-nine threads.
-
-**Send asks once.** The composer lists every recipient rather than counting them in a header,
-and the first tap on Send arms it while the second sends; editing the message or the photos
-disarms it again. A broadcast has no undo, and it can go to the wrong forty people exactly as
-easily as the right ones.
+Fixes [light-reports#22] — it closed itself while sending photos.

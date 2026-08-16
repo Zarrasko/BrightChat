@@ -67,6 +67,47 @@ class ThreadMergeTest {
         assertEquals(5L, out.last().dateDelivered)
     }
 
+    /**
+     * light-reports#22. A fetch lands while photos are still uploading — opening the thread, the
+     * delta sync, or (most easily) scrolling up to read while you wait, which fires `loadOlder`.
+     * The fetched page comes from the store and cannot know about a send the server has not
+     * acknowledged, so assigning it straight over the thread deleted every optimistic row: the
+     * bubbles vanished, and the send's own reconcile then had no row left to swap the real
+     * message into.
+     */
+    @Test
+    fun `a landing fetch keeps sends that are still in flight`() {
+        val current = listOf(message("OLD"), message("temp-1-2", text = "[Photo]"))
+        val fetched = listOf(message("OLD"), message("NEWER"))
+        val out = replaceKeepingPending(current, fetched)
+        assertEquals(listOf("OLD", "NEWER", "temp-1-2"), out.map { it.guid })
+    }
+
+    /** …but not once the real message is in the page, or the same photo would sit in the
+     *  thread twice under two different guids. The server echoes our tempGuid back on it. */
+    @Test
+    fun `a pending row the fetch has already acknowledged is dropped`() {
+        val current = listOf(message("temp-1-2", text = "[Photo]"), message("temp-3-4"))
+        val fetched = listOf(message("REAL", tempGuid = "temp-1-2"))
+        val out = replaceKeepingPending(current, fetched)
+        assertEquals(listOf("REAL", "temp-3-4"), out.map { it.guid })
+    }
+
+    @Test
+    fun `a fetch with nothing in flight is taken as-is`() {
+        val fetched = listOf(message("A"), message("B"))
+        assertEquals(fetched, replaceKeepingPending(listOf(message("A")), fetched))
+        assertEquals(fetched, replaceKeepingPending(emptyList(), fetched))
+    }
+
+    /** A pending row that is somehow also in the page by its own guid isn't duplicated. */
+    @Test
+    fun `replacement never repeats a guid`() {
+        val current = listOf(message("temp-1-2"))
+        val out = replaceKeepingPending(current, listOf(message("temp-1-2"), message("X")))
+        assertEquals(out.map { it.guid }.distinct(), out.map { it.guid })
+    }
+
     @Test
     fun `several photos in flight keep one row each`() {
         var list = listOf<ChatMessage>()
