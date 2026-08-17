@@ -540,6 +540,44 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         mimeType: String,
         tempGuid: String,
         method: String = "apple-script",
+    ): ChatMessage = sendAttachment(chatGuid, filename, mimeType, tempGuid, method, bytes.size.toLong()) {
+        it.write(bytes)
+    }
+
+    /**
+     * The same send, streaming the file straight off disk.
+     *
+     * A photo off this phone is a couple of megabytes and holding it in a `ByteArray`
+     * costs nothing worth counting. A video is not: a minute of 1080p is on the order
+     * of 100MB, and `File.readBytes()` on one asks for a single contiguous allocation
+     * of that size on a phone whose heap is a fraction of it. So video sends hand over
+     * the [File] and the body is copied through a small buffer instead — the socket is
+     * already in chunked mode, so nothing downstream had to change.
+     */
+    fun sendAttachment(
+        chatGuid: String,
+        file: File,
+        filename: String,
+        mimeType: String,
+        tempGuid: String,
+        method: String = "apple-script",
+    ): ChatMessage = sendAttachment(chatGuid, filename, mimeType, tempGuid, method, file.length()) { out ->
+        file.inputStream().use { it.copyTo(out, DEFAULT_BUFFER_SIZE) }
+    }
+
+    /**
+     * Shared body of the two sends above: everything except how the bytes get onto the
+     * wire, which [writeBody] supplies. [contentLength] is used only to pick a timeout
+     * — see below.
+     */
+    private fun sendAttachment(
+        chatGuid: String,
+        filename: String,
+        mimeType: String,
+        tempGuid: String,
+        method: String,
+        contentLength: Long,
+        writeBody: (java.io.OutputStream) -> Unit,
     ): ChatMessage {
         val safeFile = filename.replace("\"", "").ifBlank { "image.jpg" }
         val boundary = "chatBoundary" + tempGuid.filter { it.isLetterOrDigit() }
@@ -563,7 +601,14 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         val conn = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15_000
-            readTimeout = 60_000
+            // Scaled to the payload, because this timeout is on the *response* and the
+            // server only answers once it has taken the whole upload and handed it to
+            // Messages. A fixed 60s is fine for a photo and is a guaranteed failure on a
+            // clip over a slow link — and a timeout here doesn't cancel the send, it just
+            // stops us hearing about it, so the message arrives and the app says it
+            // didn't. Roughly a minute per 10MB, floored at the old value.
+            readTimeout = (60_000L + contentLength / 10_000_000L * 60_000L)
+                .coerceAtMost(MAX_UPLOAD_TIMEOUT_MS).toInt()
             doOutput = true
             setRequestProperty("Accept", "application/json")
             setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
@@ -572,7 +617,7 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
         return try {
             conn.outputStream.use { out ->
                 out.write(preamble.toByteArray(Charsets.UTF_8))
-                out.write(bytes)
+                writeBody(out)
                 out.write(epilogue.toByteArray(Charsets.UTF_8))
             }
             val code = conn.responseCode
@@ -740,6 +785,14 @@ class BlueBubblesApi(private val baseUrl: String, private val password: String) 
      * calls use — the socket emits the same message-object shape.
      */
     companion object {
+        /**
+         * Ceiling on the upload response timeout. Ten minutes is longer than any send
+         * this app permits (see the size cap in ChatViewModel) should ever take, and
+         * short enough that a genuinely wedged connection still ends in an error
+         * rather than a spinner nobody can clear.
+         */
+        private const val MAX_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000L
+
         /** The server rejects anything larger (`limit: "numeric|min:1|max:1000"`). */
         const val MAX_QUERY_LIMIT = 1000
 

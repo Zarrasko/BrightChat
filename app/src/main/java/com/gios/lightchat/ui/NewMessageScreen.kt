@@ -99,6 +99,9 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
                 if (only != null && first != null) viewModel.sendNewImage(only.address, first)
             },
             onClose = { picking = false },
+            // A new 1:1 can open on a clip; sendNewImage streams it rather than
+            // reading it into memory the way the still path does.
+            allowVideo = true,
         )
         return
     }

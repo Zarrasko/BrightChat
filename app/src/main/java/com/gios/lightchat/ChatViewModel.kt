@@ -1383,20 +1383,79 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Sends photos chosen in [com.gios.lightchat.ui.PhotoPickerScreen], as separate
-     * attachments, in the order they were picked. One coroutine rather than one per
-     * photo: iMessage has no concept of a batch, so these are N sends, and letting
-     * them race would land them out of order in the thread.
+     * Sends photos and videos chosen in [com.gios.lightchat.ui.PhotoPickerScreen], as
+     * separate attachments, in the order they were picked. One coroutine rather than
+     * one per file: iMessage has no concept of a batch, so these are N sends, and
+     * letting them race would land them out of order in the thread.
      */
     fun sendImageFiles(files: List<File>) {
         val convo = _state.value.open ?: return
         if (files.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             for (file in files) {
-                sendPicked(convo, readPickedImage(file) ?: continue)
+                if (isVideoFile(file)) {
+                    sendPickedVideo(convo, file)
+                } else {
+                    sendPicked(convo, readPickedImage(file) ?: continue)
+                }
             }
         }
     }
+
+    /**
+     * Sends one picked clip.
+     *
+     * Deliberately not [sendPicked] with a bigger byte array. Two things differ and
+     * both matter on this phone:
+     *
+     * - **The bytes never enter the heap.** The optimistic bubble for a photo works by
+     *   seeding the image cache with the file's contents so the normal loader draws it
+     *   with no round trip. There is nothing to seed for a clip — the thread renders a
+     *   video as a tappable file row, not inline — so the file is handed to the API as
+     *   a [File] and streamed. Reading a 100MB recording into a `ByteArray` to send it
+     *   is how this would OOM.
+     * - **It can be refused before anything is sent.** Over [MAX_VIDEO_BYTES] we say so
+     *   and stop, rather than starting an upload that will spend minutes failing.
+     *
+     * The optimistic row still goes up, so a long upload isn't a dead screen; it
+     * carries the clip's name and reconciles against the echo exactly as a photo does.
+     */
+    private fun sendPickedVideo(convo: Conversation, file: File) {
+        val length = runCatching { file.length() }.getOrDefault(0L)
+        if (length <= 0L) {
+            _state.update { it.copy(message = "Couldn’t read that video") }
+            return
+        }
+        if (length > MAX_VIDEO_BYTES) {
+            _state.update { it.copy(message = "That video is too large to send (${length / 1_000_000}MB)") }
+            return
+        }
+        val mime = mimeForExtension(file.extension)
+        val tempGuid = newTempGuid()
+        val optimistic = ChatMessage(
+            guid = tempGuid,
+            text = ChatMessage.ATTACHMENT_PLACEHOLDER,
+            date = System.currentTimeMillis(),
+            fromMe = true,
+            sender = null,
+            attachments = listOf(Attachment(tempGuid, mime, file.name, width = 0, height = 0)),
+        )
+        updateOpenThread(convo.guid) { it + optimistic }
+        _state.update { it.copy(message = null) }
+        // Blocking, deliberately: sendImageFiles loops over this on one IO coroutine so
+        // several files land in the thread in the order they were picked. It also means
+        // a big clip holds up the ones behind it, which is the correct trade — the
+        // alternative is a parallel upload competing for the same tunnel.
+        performSend(convo, tempGuid, "Couldn’t send video") { client, g, method ->
+            client.sendAttachment(g, file, file.name, mime, tempGuid, method)
+        }
+    }
+
+    /** Whether a picked file is a clip rather than a still. The extension, not the
+     *  file's contents — the picker only ever hands us paths [Gallery] itself matched
+     *  on extension, so re-sniffing would be answering a question already settled. */
+    private fun isVideoFile(file: File): Boolean =
+        file.extension.lowercase() in setOf("mov", "mp4", "m4v", "3gp")
 
     /**
      * Shared body of the image sends. Mirrors [sendMessage]: an optimistic bubble goes
@@ -1447,8 +1506,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         "heic" -> "image/heic"
         "heif" -> "image/heif"
         "bmp" -> "image/bmp"
+        // `video/quicktime` for .mov and not `video/mp4`, even though the two containers
+        // are near enough the same thing: it is what an iPhone sends and what Messages
+        // on the other end expects to be handed back, and the mime is what the receiving
+        // client branches on (see Attachment.isVideo).
+        "mov" -> "video/quicktime"
+        "mp4", "m4v" -> "video/mp4"
+        "3gp" -> "video/3gpp"
         else -> "image/jpeg"
     }
+
+    /**
+     * The largest clip this app will attempt.
+     *
+     * Not a limit iMessage imposes — the ceiling there is around 100MB and varies with
+     * how the message is routed — but the point at which the send stops being worth
+     * starting: over this it will take minutes on a phone tunnelling through Tailscale
+     * to a Mac, with no progress to show for it, and is as likely to be rejected at the
+     * far end as delivered. Refusing up front with the size named is the honest answer.
+     */
+    private val MAX_VIDEO_BYTES = 100L * 1024 * 1024
 
     /**
      * Sends a picked image as the first message of a *new* 1:1. There's no chat
@@ -1464,18 +1541,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(composingNew = false, message = "Sending…") }
         viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
-            val img = readPickedImage(file) ?: return@launch
+            val video = isVideoFile(file)
+            // A clip is streamed off disk rather than read into a ByteArray, for the
+            // reason given on sendPickedVideo; a still keeps the existing read, which
+            // also validates that the file is there before a chat gets created for it.
+            val img = if (video) null else (readPickedImage(file) ?: return@launch)
+            if (video && file.length() > MAX_VIDEO_BYTES) {
+                _state.update { it.copy(message = "That video is too large to send") }
+                return@launch
+            }
             val handle = imessageHandle(addr)
             val guid = "iMessage;-;$handle"
             try {
-                client.sendAttachment(guid, img.bytes, img.name, img.mime, newTempGuid(), sendMethod())
+                if (img != null) {
+                    client.sendAttachment(guid, img.bytes, img.name, img.mime, newTempGuid(), sendMethod())
+                } else {
+                    client.sendAttachment(
+                        guid, file, file.name, mimeForExtension(file.extension),
+                        newTempGuid(), sendMethod(),
+                    )
+                }
                 messageCache.remove(guid)
                 val convo = Conversation(
                     guid = guid,
                     displayName = "",
                     participants = listOf(handle),
                     isGroup = false,
-                    lastText = "[Photo]",
+                    lastText = if (video) "[Video]" else "[Photo]",
                     lastDate = System.currentTimeMillis(),
                     lastFromMe = true,
                 )
@@ -1483,7 +1575,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 open(convo)   // land in the new thread (fetch pulls the sent image)
                 refresh()     // and pull it into the conversation list
             } catch (t: Throwable) {
-                _state.update { it.copy(message = t.message ?: "Couldn’t send image") }
+                val fallback = if (video) "Couldn’t send video" else "Couldn’t send image"
+                _state.update { it.copy(message = t.message ?: fallback) }
             }
         }
     }
@@ -1543,10 +1636,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val guid = chatGuid.ifBlank { "iMessage;-;$handle" }
             var sent = 0
             for (file in files) {
-                val img = readPickedImage(file) ?: continue
-                val ok = runCatching {
-                    client.sendAttachment(guid, img.bytes, img.name, img.mime, newTempGuid(), sendMethod())
-                }.isSuccess
+                // A clip streams off disk. Roll records video now, so a share reaching
+                // this loop can be one — and readPickedImage on a 100MB recording is a
+                // single allocation this phone will not give us.
+                val ok = if (isVideoFile(file)) {
+                    file.length() in 1..MAX_VIDEO_BYTES && runCatching {
+                        client.sendAttachment(
+                            guid, file, file.name, mimeForExtension(file.extension),
+                            newTempGuid(), sendMethod(),
+                        )
+                    }.isSuccess
+                } else {
+                    val img = readPickedImage(file)
+                    img != null && runCatching {
+                        client.sendAttachment(guid, img.bytes, img.name, img.mime, newTempGuid(), sendMethod())
+                    }.isSuccess
+                }
                 if (ok) sent++
                 // The copy in our cache has served its purpose either way; leaving it means
                 // every shared photo stays on the phone twice.

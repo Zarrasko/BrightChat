@@ -471,6 +471,8 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                         viewModel.sendImageFiles(files)
                     },
                     onClose = { picking = false },
+                    // The one place a clip can go: a single open thread, one upload.
+                    allowVideo = true,
                 )
             }
         }

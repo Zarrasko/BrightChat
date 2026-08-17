@@ -70,40 +70,57 @@ import java.io.File
  *
  * Multi-select plus an explicit Send is also what stops the old failure mode where
  * one stray tap on the picker sent a photo to somebody.
+ *
+ * [allowVideo] adds clips to the grid, each with its running time in the corner. It is
+ * off for the newsletter composer, which sends the same file once per recipient and
+ * would turn one clip into twenty uploads, and on everywhere a send goes to a single
+ * thread. The distinction is here rather than filtered by the caller because the
+ * permission asked for depends on it.
  */
 @Composable
 fun PhotoPickerScreen(
     onSend: (List<File>) -> Unit,
     onClose: () -> Unit,
+    allowVideo: Boolean = false,
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
 
+    // The grants this screen needs: images always, video only when it will show any.
+    // Asking for READ_MEDIA_VIDEO regardless would put a permission in the dialog that
+    // the newsletter picker never uses.
+    val needed = remember(allowVideo) {
+        if (allowVideo) Gallery.permissions else arrayOf(Gallery.permission)
+    }
     var granted by remember {
         mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Gallery.permission) ==
-                PackageManager.PERMISSION_GRANTED,
+            // All of them, not any: with only IMAGES the grid would silently be missing
+            // every clip, which reads as "my videos aren't on the phone" rather than as
+            // a permission the user declined.
+            needed.all {
+                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+            },
         )
     }
     var asked by remember { mutableStateOf(false) }
     val askPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted = it }
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result -> granted = needed.all { result[it] == true } }
     LaunchedEffect(Unit) {
-        if (!granted && !asked) { asked = true; askPermission.launch(Gallery.permission) }
+        if (!granted && !asked) { asked = true; askPermission.launch(needed) }
     }
 
     // Bumped to force a rescan — after the camera returns, mostly.
     var reload by remember { mutableIntStateOf(0) }
     // null while the scan is running, so an empty grid isn't reported as "no photos"
     // for the frame or two the walk takes.
-    val photos by produceState<List<Gallery.Photo>?>(null, granted, reload) {
+    val photos by produceState<List<Gallery.Photo>?>(null, granted, reload, allowVideo) {
         // Cleared first: produceState remembers its state unkeyed, so on a re-run
         // (permission granted, or a rescan after the camera) `value` would still hold
         // the previous result — an empty list from the ungranted pass reads as "no
         // photos" for the whole time the walk takes.
         value = null
-        value = if (granted) Gallery.scan() else emptyList()
+        value = if (granted) Gallery.scan(videos = allowVideo) else emptyList()
     }
 
     // Paths, not indices: the list is rescanned under us. Ordered, because the
@@ -165,7 +182,9 @@ fun PhotoPickerScreen(
             )
             Spacer(modifier = Modifier.weight(1f))
             Text(
-                text = "Photos",
+                // "Media" once clips are in the grid — calling a screen that lists
+                // videos "Photos" is the kind of small lie that makes people not look.
+                text = if (allowVideo) "Media" else "Photos",
                 style = ChatType.body,
                 color = ChatColors.onSurfaceVariant,
             )
@@ -196,7 +215,11 @@ fun PhotoPickerScreen(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "LightChat needs access to all photos to\nread the camera roll.",
+                        text = if (allowVideo) {
+                            "LightChat needs access to all photos and\nvideos to read the camera roll."
+                        } else {
+                            "LightChat needs access to all photos to\nread the camera roll."
+                        },
                         style = ChatType.body,
                         color = ChatColors.onSurfaceDisabled,
                         textAlign = TextAlign.Center,
@@ -211,7 +234,10 @@ fun PhotoPickerScreen(
                 }
             }
             loaded == null -> Centered("", Modifier.weight(1f))
-            loaded.isEmpty() -> Centered("No photos in DCIM or Pictures.", Modifier.weight(1f))
+            loaded.isEmpty() -> Centered(
+                if (allowVideo) "Nothing in DCIM or Pictures." else "No photos in DCIM or Pictures.",
+                Modifier.weight(1f),
+            )
             else -> LazyVerticalGrid(
                 state = gridState,
                 columns = GridCells.Fixed(COLUMNS),
@@ -267,12 +293,17 @@ fun PhotoPickerScreen(
 
 /** One grid cell. Selection is a white outline plus the pick number — no tint or
  *  checkmark, because the panel is greyscale and an outline is the one thing that
- *  reads over an arbitrary photo. */
+ *  reads over an arbitrary photo. A clip additionally carries its running time. */
 @Composable
 private fun PhotoCell(photo: Gallery.Photo, ordinal: Int?, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
+    // The duration is a side effect of pulling the poster frame (Gallery reads both
+    // from one retriever), so it is only knowable after the thumbnail resolves — hence
+    // read from the same produceState rather than from the Photo.
+    var duration by remember(photo.key) { mutableStateOf<String?>(null) }
     val thumb by produceState<ImageBitmap?>(null, photo.key) {
         value = Gallery.thumbnail(photo)
+        duration = Gallery.durationLabel(photo)
     }
     Box(
         modifier = Modifier
@@ -300,6 +331,22 @@ private fun PhotoCell(photo: Gallery.Photo, ordinal: Int?, onClick: () -> Unit) 
                 color = ChatColors.onSurface,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
+                    .background(ChatColors.background)
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
+            )
+        }
+        if (photo.isVideo) {
+            // Bottom-left, diagonally clear of the pick number. The running time is the
+            // marker rather than a play triangle: it says the same thing and also says
+            // how long, which is what decides whether a clip is worth sending over this
+            // phone's connection. Shown as "·" until the frame resolves, so the cell
+            // doesn't reflow when the duration arrives a moment later.
+            Text(
+                text = duration ?: "·",
+                style = ChatType.hint,
+                color = ChatColors.onSurface,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
                     .background(ChatColors.background)
                     .padding(horizontal = 5.dp, vertical = 1.dp),
             )

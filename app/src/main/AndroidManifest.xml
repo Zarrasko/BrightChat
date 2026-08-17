@@ -31,8 +31,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- The photo picker reads DCIM and Pictures directly, because MediaStore (which
-         the system picker uses) is never current on LightOS. See Gallery. -->
+         the system picker uses) is never current on LightOS. See Gallery. VIDEO is a
+         separate grant from IMAGES and is what lets a clip be picked and sent; without
+         it the grid shows stills only. Both are requested in one prompt. -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Not required: the app is a messaging client first, and a build of LightOS with
          no camera should still install it. CameraScreen says so if there's no camera. -->

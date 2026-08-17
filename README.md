@@ -55,6 +55,11 @@ Google push involved, it adds:
   current on LightOS, so photos you just took were never offered. This one reads DCIM
   and Pictures directly. Multi-select, an inline camera, and the whole thing runs in
   colour — with the grayscale grant, picking and framing a photo aren't guesswork.
+- **Videos send as well as receive.** Clips sit in the same grid as the photos, each
+  showing how long it runs, and go out as normal iMessage attachments. The file is
+  streamed off disk rather than read into memory, so the size of a recording is the
+  connection's problem and not the phone's; anything over 100MB is refused up front
+  instead of failing slowly. Playback of what arrives was already there.
 - **The brightness wheel scrolls.** Threads, the conversation list, contact search, the
   photo grid — see [The wheel](#the-wheel).
 - **Background delivery that survives sleep.** See
@@ -335,6 +340,7 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v2.16.x | Fix: sending several photos could leave two thread rows under one message guid and crash the list (light-reports#21) |
 | v2.17.x | **Newsletter** — named batches of chats and contacts that one message, photos and all, goes out to separately |
 | v2.18.x | Fix: photos still uploading lost their bubble when a fetch landed, and never came back (light-reports#22) |
+| v2.19.x | **Send video** — clips appear in the picker with their running time and stream straight off disk, so a recording never has to fit in memory |
 
 ## Licence
 
