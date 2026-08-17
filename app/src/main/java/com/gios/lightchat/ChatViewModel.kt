@@ -1328,6 +1328,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun downloadAttachment(attachment: Attachment, onReady: (File) -> Unit) {
         val client = api ?: return
+        // An optimistic row carries the send's temp guid, which the server has never
+        // heard of — asking it to stream that back returns a 404 and the user is told
+        // the download failed for a file that is still on its way *up*. Only video
+        // reaches this path from an outgoing row (a photo renders inline from the local
+        // cache), so this is new with sending clips.
+        if (attachment.guid.startsWith("temp-")) {
+            _state.update { it.copy(message = "Still sending — it'll play once it's sent") }
+            return
+        }
         _state.update { it.copy(message = "Downloading…") }
         viewModelScope.launch(Dispatchers.IO) {
             try {
