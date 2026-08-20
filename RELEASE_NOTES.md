@@ -1,3 +1,56 @@
+## BrightChat v2.21 — a voice memo you can read
+
+**Whisper transcription. Open a sound somebody sent, press WORDS, and read what was said.**
+
+Useful for the thing a voice memo is worst at: a name you did not catch, a street, a number, an
+address rattled off at speed. The words appear under the transport, because listening is what you
+came to do and reading is what you do when listening was not enough.
+
+### It runs on a server, not on the phone
+
+Whisper on-device means `whisper.cpp` through the NDK plus a model file. The smallest useful model
+quantises to about thirty megabytes — most of an APK sideloaded onto a phone whose whole premise is
+being small — and the tiny model is the one that mishears exactly the names you were trying to
+catch. Against that, this phone is already talking to a machine over Tailscale to get its messages
+at all. So the machine with the CPU does the work and the phone sends it a file.
+
+**Point it at whatever you have.** Settings takes a URL, an optional key and a model name, and the
+endpoint is OpenAI's `/v1/audio/transcriptions` — which is a *shape* rather than a vendor.
+`whisper.cpp`'s own server, `faster-whisper-server`, LM Studio and OpenAI itself all answer the same
+request. That is the same reasoning the agent settings are built on, and the reason nothing ships in
+the APK.
+
+A URL and not a switch, because there is nothing to switch on: transcription exists exactly to the
+extent that you have pointed it somewhere. Blank is the honest off, and the WORDS key is not there
+when it is blank.
+
+### The details that matter
+
+- **The file is streamed, not assembled.** Multipart by hand over `HttpURLConnection`, same as every
+  other client here — and a ten-minute recording is twenty-six megabytes, which is not a
+  `ByteArray` this phone will hand out.
+- **Four-minute read timeout.** A few minutes of audio on a CPU-only server genuinely takes a
+  minute, and the usual timeout gives up in the middle of the answer.
+- **Transcripts are cached** against the attachment's guid, so a memo opened twice is transcribed
+  once. Against a paid endpoint that is the difference between a feature and a bill. Keyed on the
+  guid and not the file, because the file is a cache entry that can be evicted while the words are
+  still worth keeping.
+- **The server's own words on failure.** "The transcription server refused the key" is more use than
+  "transcription failed", so an error message in the response is preferred to a generic one.
+
+Both `/v1`-suffixed and bare URLs work, because both are what people paste — OpenAI's documentation
+gives one and a local server is the other, and doubling the version segment is a 404 that reads as
+the feature being broken. There is a test for it.
+
+- 86 tests, up from 80.
+
+### On text-to-speech
+
+This is speech-to-text: sound in, words out. Reading messages *aloud* is a different feature and is
+not in this release — say the word and it can be built alongside.
+
+---
+
 ## BrightChat v2.20 — audio clips, and somewhere to listen to them
 
 **A sound somebody sends you plays here now, and you can send one.**

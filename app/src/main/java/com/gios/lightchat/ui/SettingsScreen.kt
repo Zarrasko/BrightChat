@@ -273,6 +273,71 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
             Spacer(modifier = Modifier.height(20.dp))
         }
 
+        // ------------------------------------------------------------ transcription
+        //
+        // A URL and nothing else, because there is nothing to switch on: no model ships in this
+        // app, so transcription exists exactly to the extent that this points at a server. Anything
+        // answering OpenAI's `/v1/audio/transcriptions` will do — whisper.cpp's own server, a
+        // faster-whisper box, LM Studio, or OpenAI itself.
+        var whisperUrl by remember { mutableStateOf(Store.whisperUrl(context).orEmpty()) }
+        var whisperKey by remember { mutableStateOf(Store.whisperKey(context)) }
+        var whisperModel by remember { mutableStateOf(Store.whisperModel(context)) }
+        var editingWhisper by remember { mutableStateOf(false) }
+
+        HapticText(
+            text = if (whisperUrl.isBlank()) {
+                "Transcription: off"
+            } else {
+                "Transcription: $whisperModel"
+            },
+            style = ChatType.body,
+            color = if (whisperUrl.isBlank()) ChatColors.onSurfaceDim else ChatColors.onSurface,
+            onClick = { editingWhisper = !editingWhisper },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = if (whisperUrl.isBlank()) {
+                "Point this at a Whisper server and a voice memo can be read as well as heard."
+            } else {
+                whisperUrl
+            },
+            style = ChatType.hint,
+            color = ChatColors.onSurfaceDisabled,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        )
+        if (editingWhisper) {
+            Spacer(modifier = Modifier.height(10.dp))
+            WhisperField(
+                value = whisperUrl,
+                hint = "https://your-server:9000",
+                onDone = {
+                    Store.setWhisperUrl(context, it)
+                    whisperUrl = Store.whisperUrl(context).orEmpty()
+                },
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            WhisperField(
+                value = whisperKey,
+                hint = "API key, if it needs one",
+                onDone = {
+                    Store.setWhisperKey(context, it)
+                    whisperKey = Store.whisperKey(context)
+                },
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            WhisperField(
+                value = whisperModel,
+                hint = "whisper-1",
+                onDone = {
+                    Store.setWhisperModel(context, it)
+                    whisperModel = Store.whisperModel(context)
+                },
+            )
+        }
+
+        Spacer(modifier = Modifier.height(36.dp))
+
         HapticText(
             text = "Refresh conversations",
             style = ChatType.body,
@@ -343,4 +408,38 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(16.dp))
     }
+}
+
+/**
+ * One line of the transcription setup.
+ *
+ * Three near-identical fields rather than one screen, because they are three unrelated strings and
+ * a form on this panel is worse than three lines. Each commits on Done, so nothing is half-saved if
+ * you leave.
+ */
+@Composable
+private fun WhisperField(value: String, hint: String, onDone: (String) -> Unit) {
+    var draft by remember(value) { mutableStateOf(value) }
+    BasicTextField(
+        value = draft,
+        onValueChange = { draft = it },
+        singleLine = true,
+        textStyle = ChatType.body.copy(color = ChatColors.onSurface, textAlign = TextAlign.Center),
+        cursorBrush = SolidColor(ChatColors.onSurface),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { onDone(draft) }),
+        decorationBox = { inner ->
+            if (draft.isEmpty()) {
+                Text(
+                    hint,
+                    style = ChatType.hint,
+                    color = ChatColors.onSurfaceDisabled,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            inner()
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
 }

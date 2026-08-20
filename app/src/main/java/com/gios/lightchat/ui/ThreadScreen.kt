@@ -116,7 +116,8 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     var viewingImage by remember(convo.guid) { mutableStateOf<Attachment?>(null) }
     // The downloaded sound being listened to, with the name it arrived under. A File rather than
     // the Attachment for the same reason the video is: by the time it plays, the bytes are local.
-    var listeningTo by remember(convo.guid) { mutableStateOf<Pair<java.io.File, String?>?>(null) }
+    var listeningTo by remember(convo.guid) { mutableStateOf<Listening?>(null) }
+    var transcript by remember(convo.guid) { mutableStateOf<String?>(null) }
     // The downloaded video being watched, if any. A File rather than the Attachment, because by
     // the time this is set the fetch has already happened and the player only wants the bytes.
     var viewingVideo by remember(convo.guid) { mutableStateOf<java.io.File?>(null) }
@@ -371,7 +372,11 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                                     // a voice memo to ACTION_VIEW ends in "No app can open this
                                     // file" after a download you have already waited for.
                                     viewModel.downloadAttachment(attachment) {
-                                        listeningTo = it to attachment.transferName
+                                        listeningTo = Listening(
+                                            file = it,
+                                            name = attachment.transferName,
+                                            attachment = attachment,
+                                        )
                                     }
                                 } else if (attachment.isVideo) {
                                     viewModel.downloadAttachment(attachment) { viewingVideo = it }
@@ -465,8 +470,24 @@ fun ThreadScreen(viewModel: ChatViewModel) {
         // A video plays here rather than being handed to an app that isn't installed. Same
         // overlay pattern as the image viewer: the thread stays composed underneath, so closing
         // lands where you were.
-        listeningTo?.let { (file, name) ->
-            AudioPlayerScreen(file, name, onClose = { listeningTo = null })
+        listeningTo?.let { listening ->
+            // Any transcript already fetched for this attachment is shown without asking again;
+            // transcription is slow and, against a paid endpoint, billed.
+            val cached = transcript
+                ?: com.gios.lightchat.api.Store.transcript(context, listening.attachment.guid)
+            AudioPlayerScreen(
+                file = listening.file,
+                name = listening.name,
+                transcript = cached,
+                canTranscribe = com.gios.lightchat.api.Store.canTranscribe(context),
+                onTranscribe = {
+                    viewModel.transcribe(listening.attachment, listening.file) { transcript = it }
+                },
+                onClose = {
+                    listeningTo = null
+                    transcript = null
+                },
+            )
         }
 
         viewingVideo?.let { file ->
@@ -951,3 +972,16 @@ private fun AttachmentFile(attachment: Attachment, textAlign: TextAlign, onOpen:
  * this and a thread fetches a page nobody was going to read.
  */
 private const val OLDER_TRIGGER_DISTANCE = 3
+
+/**
+ * A sound being listened to: the local file, the name it arrived under, and the attachment it came
+ * from.
+ *
+ * The attachment as well as the file, because a transcript is remembered against the attachment's
+ * guid — the file is a cache entry that can be evicted while the words are still worth keeping.
+ */
+private data class Listening(
+    val file: java.io.File,
+    val name: String?,
+    val attachment: Attachment,
+)

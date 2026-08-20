@@ -37,6 +37,10 @@ object Store {
     private const val KEY_CODE_AT = "login_code_at"   // when the message carrying it arrived
     private const val KEY_BG_PREFIX = "chat_bg:"      // per-chat background filter stack, JSON
     private const val KEY_NEWSLETTERS = "newsletters" // named broadcast batches, JSON
+    private const val KEY_WHISPER_URL = "whisper_url"     // transcription endpoint, or unset
+    private const val KEY_WHISPER_KEY = "whisper_key"     // encrypted bearer key
+    private const val KEY_WHISPER_MODEL = "whisper_model" // e.g. whisper-1, or a local model name
+    private const val KEY_TRANSCRIPT_PREFIX = "transcript:" // attachment guid → words
 
     /** The configured BlueBubbles Server URL, or null if setup hasn't run yet. */
     fun baseUrl(context: Context): String? =
@@ -60,6 +64,60 @@ object Store {
     }
 
     fun hasPassword(context: Context): Boolean = !password(context).isNullOrBlank()
+
+    // ---------------------------------------------------------------- transcription
+
+    /**
+     * Where to send a recording to have it turned into words. See [WhisperApi].
+     *
+     * A URL rather than a switch, because there is nothing to switch on: no model ships in this app,
+     * so transcription exists exactly to the extent that you have pointed it at a server. Empty is
+     * the honest off.
+     */
+    fun whisperUrl(context: Context): String? =
+        prefs(context).getString(KEY_WHISPER_URL, null)?.takeIf { it.isNotBlank() }
+
+    fun setWhisperUrl(context: Context, value: String) {
+        var url = value.trim().trimEnd('/')
+        if (url.isNotEmpty() && !url.startsWith("http://") && !url.startsWith("https://")) {
+            url = "https://$url"
+        }
+        prefs(context).edit().putString(KEY_WHISPER_URL, url).apply()
+    }
+
+    /** Encrypted, exactly like the server password: it is a bearer key and may be a paid one. */
+    fun whisperKey(context: Context): String =
+        prefs(context).getString(KEY_WHISPER_KEY, null)
+            ?.let { runCatching { SecureStore.decrypt(it) }.getOrNull() }
+            .orEmpty()
+
+    fun setWhisperKey(context: Context, value: String) {
+        prefs(context).edit().putString(KEY_WHISPER_KEY, SecureStore.encrypt(value.trim())).apply()
+    }
+
+    fun whisperModel(context: Context): String =
+        prefs(context).getString(KEY_WHISPER_MODEL, null)?.takeIf { it.isNotBlank() }
+            ?: WhisperApi.DEFAULT_MODEL
+
+    fun setWhisperModel(context: Context, value: String) {
+        prefs(context).edit().putString(KEY_WHISPER_MODEL, value.trim()).apply()
+    }
+
+    fun canTranscribe(context: Context): Boolean = !whisperUrl(context).isNullOrBlank()
+
+    /**
+     * A transcript already fetched, by attachment guid.
+     *
+     * Cached because transcription is slow and may be billed: opening the same voice memo twice
+     * should not pay for it twice. Keyed on the guid rather than on the file, since the file is a
+     * cache entry that can be evicted while the words are still worth keeping.
+     */
+    fun transcript(context: Context, guid: String): String? =
+        prefs(context).getString(KEY_TRANSCRIPT_PREFIX + guid, null)?.takeIf { it.isNotBlank() }
+
+    fun setTranscript(context: Context, guid: String, text: String) {
+        prefs(context).edit().putString(KEY_TRANSCRIPT_PREFIX + guid, text).apply()
+    }
 
     /**
      * Persists the contact index so the [com.gios.lightchat.socket.SocketService] —
