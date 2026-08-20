@@ -92,6 +92,14 @@ data class Attachment(
      */
     val isVideo: Boolean get() = mimeType?.startsWith("video/") == true
 
+    /**
+     * Playable here too, and for the same reason [isVideo] is.
+     *
+     * The mime type only, not the filename. An iPhone voice memo arrives as `audio/x-caf` whatever
+     * it is called, and a moment shared out of BrightRecorder arrives as `audio/x-wav`.
+     */
+    val isAudio: Boolean get() = mimeType?.startsWith("audio/") == true
+
     /** A short human type for a non-image file, e.g. "Video", "Audio", "Contact". */
     val typeLabel: String
         get() = when {

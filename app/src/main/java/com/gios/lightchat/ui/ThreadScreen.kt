@@ -114,6 +114,9 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     // lands exactly where you were, and the thread is already rendered underneath,
     // which is also what hides the delayed grayscale restore (see ColorMode).
     var viewingImage by remember(convo.guid) { mutableStateOf<Attachment?>(null) }
+    // The downloaded sound being listened to, with the name it arrived under. A File rather than
+    // the Attachment for the same reason the video is: by the time it plays, the bytes are local.
+    var listeningTo by remember(convo.guid) { mutableStateOf<Pair<java.io.File, String?>?>(null) }
     // The downloaded video being watched, if any. A File rather than the Attachment, because by
     // the time this is set the fetch has already happened and the player only wants the bytes.
     var viewingVideo by remember(convo.guid) { mutableStateOf<java.io.File?>(null) }
@@ -362,7 +365,15 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                             // the hand-off, which is right for a PDF or a vCard and only wrong
                             // for the one kind of file this phone has no viewer for.
                             onOpenAttachment = { attachment ->
-                                if (attachment.isVideo) {
+                                if (attachment.isAudio) {
+                                    // Downloaded and played here, for the same reason a video is:
+                                    // there is no audio player installed on this phone, so handing
+                                    // a voice memo to ACTION_VIEW ends in "No app can open this
+                                    // file" after a download you have already waited for.
+                                    viewModel.downloadAttachment(attachment) {
+                                        listeningTo = it to attachment.transferName
+                                    }
+                                } else if (attachment.isVideo) {
                                     viewModel.downloadAttachment(attachment) { viewingVideo = it }
                                 } else {
                                     viewModel.openAttachment(attachment)
@@ -454,6 +465,10 @@ fun ThreadScreen(viewModel: ChatViewModel) {
         // A video plays here rather than being handed to an app that isn't installed. Same
         // overlay pattern as the image viewer: the thread stays composed underneath, so closing
         // lands where you were.
+        listeningTo?.let { (file, name) ->
+            AudioPlayerScreen(file, name, onClose = { listeningTo = null })
+        }
+
         viewingVideo?.let { file ->
             VideoPlayerScreen(file, onClose = { viewingVideo = null })
         }

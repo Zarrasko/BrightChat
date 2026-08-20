@@ -118,6 +118,13 @@
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />
+                <!--
+                    And sound. BrightRecorder shares a moment out as `audio/x-wav`, and anything
+                    else that shares audio resolves here too. A separate <data> rather than a
+                    wildcard: `*/*` would put this app in the chooser for every file on the phone,
+                    including the ones it cannot send.
+                -->
+                <data android:mimeType="audio/*" />
             </intent-filter>
         </activity>
 
