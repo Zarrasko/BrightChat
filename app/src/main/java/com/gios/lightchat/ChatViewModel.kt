@@ -1379,6 +1379,61 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Transcribe something just dictated, and hand back the words.
+     *
+     * Not [transcribe]: that one is about an attachment somebody sent, and caches the result against
+     * its guid. Dictation has no guid and nothing worth caching — it is said once, turned into text,
+     * and the recording is deleted whether it worked or not, because it is a draft of a message and
+     * not a message.
+     */
+    fun transcribeDictation(file: File, onResult: (String?) -> Unit) {
+        val context = app
+        val url = Store.whisperUrl(context)
+        if (url.isNullOrBlank()) {
+            _state.update { it.copy(message = "Set a transcription server in Settings first") }
+            file.delete()
+            onResult(null)
+            return
+        }
+        _state.update { it.copy(message = "Transcribing…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            val words = runCatching {
+                WhisperApi().transcribe(
+                    baseUrl = url,
+                    apiKey = Store.whisperKey(context),
+                    model = Store.whisperModel(context),
+                    file = file,
+                )
+            }
+            file.delete()
+            val text = words.getOrNull()?.takeIf { it.isNotBlank() }
+            _state.update {
+                it.copy(
+                    message = when {
+                        text != null -> null
+                        words.exceptionOrNull() is ApiException ->
+                            (words.exceptionOrNull() as ApiException).message
+                        words.isFailure -> "Couldn't reach the transcription server"
+                        else -> "Didn't catch that"
+                    },
+                )
+            }
+            withContext(Dispatchers.Main) { onResult(text) }
+        }
+    }
+
+    /**
+     * Put a short line in front of the user.
+     *
+     * The state's `message` is how everything else in this class says something went wrong, and the
+     * UI needs the same channel for the couple of things it discovers on its own — a microphone that
+     * would not open, a dictation with nothing in it.
+     */
+    fun say(text: String) {
+        _state.update { it.copy(message = text) }
+    }
+
     fun downloadAttachment(attachment: Attachment, onReady: (File) -> Unit) {
         val client = api ?: return
         // An optimistic row carries the send's temp guid, which the server has never
