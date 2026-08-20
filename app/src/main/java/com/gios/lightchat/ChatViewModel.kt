@@ -1402,8 +1402,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (files.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             for (file in files) {
-                if (isVideoFile(file)) {
-                    sendPickedVideo(convo, file)
+                if (isStreamedFile(file)) {
+                    sendPickedFile(convo, file)
                 } else {
                     sendPicked(convo, readPickedImage(file) ?: continue)
                 }
@@ -1429,14 +1429,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * The optimistic row still goes up, so a long upload isn't a dead screen; it
      * carries the clip's name and reconciles against the echo exactly as a photo does.
      */
-    private fun sendPickedVideo(convo: Conversation, file: File) {
+    private fun sendPickedFile(convo: Conversation, file: File) {
         val length = runCatching { file.length() }.getOrDefault(0L)
         if (length <= 0L) {
             _state.update { it.copy(message = "Couldn’t read that video") }
             return
         }
         if (length > MAX_VIDEO_BYTES) {
-            _state.update { it.copy(message = "That video is too large to send (${length / 1_000_000}MB)") }
+            _state.update {
+                it.copy(message = "That ${kindOf(file)} is too large to send (${length / 1_000_000}MB)")
+            }
             return
         }
         val mime = mimeForExtension(file.extension)
@@ -1460,11 +1462,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Whether a picked file is a clip rather than a still. The extension, not the
-     *  file's contents — the picker only ever hands us paths [Gallery] itself matched
-     *  on extension, so re-sniffing would be answering a question already settled. */
-    private fun isVideoFile(file: File): Boolean =
-        file.extension.lowercase() in setOf("mov", "mp4", "m4v", "3gp")
+    /** See [MediaKind]. Thin wrappers so the call sites read as they did. */
+    private fun isVideoFile(file: File): Boolean = MediaKind.isVideo(file)
+
+    private fun isAudioFile(file: File): Boolean = MediaKind.isAudio(file)
+
+    private fun isStreamedFile(file: File): Boolean = MediaKind.isStreamed(file)
+
+    private fun kindOf(file: File): String = MediaKind.label(file)
 
     /**
      * Shared body of the image sends. Mirrors [sendMessage]: an optimistic bubble goes
@@ -1508,22 +1513,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return PickedImage(bytes, mimeForExtension(file.extension), file.name)
     }
 
-    private fun mimeForExtension(extension: String): String = when (extension.lowercase()) {
-        "png" -> "image/png"
-        "gif" -> "image/gif"
-        "webp" -> "image/webp"
-        "heic" -> "image/heic"
-        "heif" -> "image/heif"
-        "bmp" -> "image/bmp"
-        // `video/quicktime` for .mov and not `video/mp4`, even though the two containers
-        // are near enough the same thing: it is what an iPhone sends and what Messages
-        // on the other end expects to be handed back, and the mime is what the receiving
-        // client branches on (see Attachment.isVideo).
-        "mov" -> "video/quicktime"
-        "mp4", "m4v" -> "video/mp4"
-        "3gp" -> "video/3gpp"
-        else -> "image/jpeg"
-    }
+    private fun mimeForExtension(extension: String): String = MediaKind.mimeOf(extension)
 
     /**
      * The largest clip this app will attempt.
@@ -1550,13 +1540,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(composingNew = false, message = "Sending…") }
         viewModelScope.launch(Dispatchers.IO) {
             val client = api ?: return@launch
-            val video = isVideoFile(file)
+            val video = isStreamedFile(file)
             // A clip is streamed off disk rather than read into a ByteArray, for the
             // reason given on sendPickedVideo; a still keeps the existing read, which
             // also validates that the file is there before a chat gets created for it.
             val img = if (video) null else (readPickedImage(file) ?: return@launch)
             if (video && file.length() > MAX_VIDEO_BYTES) {
-                _state.update { it.copy(message = "That video is too large to send") }
+                _state.update { it.copy(message = "That ${kindOf(file)} is too large to send") }
                 return@launch
             }
             val handle = imessageHandle(addr)
@@ -1648,7 +1638,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 // A clip streams off disk. Roll records video now, so a share reaching
                 // this loop can be one — and readPickedImage on a 100MB recording is a
                 // single allocation this phone will not give us.
-                val ok = if (isVideoFile(file)) {
+                val ok = if (isStreamedFile(file)) {
                     file.length() in 1..MAX_VIDEO_BYTES && runCatching {
                         client.sendAttachment(
                             guid, file, file.name, mimeForExtension(file.extension),

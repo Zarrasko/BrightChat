@@ -260,10 +260,9 @@ class MainActivity : ComponentActivity() {
         val dir = java.io.File(cacheDir, "shared-in").apply { mkdirs() }
         // The name only has to carry a plausible extension — the send reads the mime type
         // off it — and be unique enough that two shares in a row don't collide.
-        val extension = contentResolver.getType(uri)
-            ?.substringAfterLast('/', "")
-            ?.takeIf { it.isNotBlank() && it.length <= 5 }
-            ?: "jpg"
+        // The extension is what the send path reads the mime type back off, so it has to be one
+        // [MediaKind.mimeOf] knows — a mime *subtype* is not an extension. See [MediaKind].
+        val extension = MediaKind.extensionOf(contentResolver.getType(uri))
         val out = java.io.File(dir, "share-" + System.nanoTime() + "." + extension)
         contentResolver.openInputStream(uri)?.use { input ->
             out.outputStream().use { input.copyTo(it) }
