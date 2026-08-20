@@ -77,7 +77,12 @@ fun AgentThreadScreen(viewModel: ChatViewModel) {
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
             )
         }
-        ComposeBar(onSend = viewModel::sendAgentMessage)
+        val dictate = rememberDictation(viewModel)
+        ComposeBar(
+            onSend = viewModel::sendAgentMessage,
+            onDictate = dictate.onTap,
+            dictating = dictate.listening,
+        )
     }
 }
 

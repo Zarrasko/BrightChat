@@ -130,24 +130,10 @@ fun ThreadScreen(viewModel: ChatViewModel) {
 
     val context = LocalContext.current
 
-    // Dictation. Tap to start, tap again to stop and transcribe — a tap rather than a hold, because
-    // a message is longer than a thumb wants to be held down for and letting go by accident half way
-    // through a sentence would lose the sentence.
-    val dictation = remember { Dictation(context) }
-    var dictating by remember { mutableStateOf(false) }
-    val askMicrophone = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted -> if (granted) dictating = dictation.start() }
-    val canDictate = Store.canTranscribe(context)
-    // A recorder holds a hardware encoder and this phone has few, so leaving the thread releases it
-    // whatever state it was in — including a dictation still running.
-    DisposableEffect(dictation) {
-        dictation.sweep()
-        onDispose {
-            dictation.cancel()
-            dictating = false
-        }
-    }
+    // Tap to start, tap again to stop and transcribe. See [rememberDictation] — it lives there
+    // rather than here because a new message and an agent thread are both places you type, and
+    // neither of them had this, which was most of why it could not be found.
+    val dictate = rememberDictation(viewModel)
     val ring = rememberCaller()
 
     /**
@@ -485,31 +471,8 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                 onTextChange = viewModel::onComposeTextChanged,
                 // Offered only when there is a server to transcribe against and a microphone we are
                 // allowed to open. A key that cannot work is worse than no key.
-                onDictate = if (canDictate) {
-                    { onWords ->
-                        when {
-                            dictation.isRecording -> {
-                                val recorded = dictation.stop()
-                                dictating = false
-                                if (recorded == null) {
-                                    viewModel.say("Didn't catch that")
-                                } else {
-                                    viewModel.transcribeDictation(recorded) { words ->
-                                        if (words != null) onWords(words)
-                                    }
-                                }
-                            }
-                            dictation.granted() -> {
-                                dictating = dictation.start()
-                                if (!dictating) viewModel.say("Couldn't open the microphone")
-                            }
-                            else -> askMicrophone.launch(Manifest.permission.RECORD_AUDIO)
-                        }
-                    }
-                } else {
-                    null
-                },
-                dictating = dictating,
+                onDictate = dictate.onTap,
+                dictating = dictate.listening,
             )
         }
 
@@ -599,8 +562,12 @@ fun ComposeBar(
     onTextChange: ((String) -> Unit)? = null,
     showTopDivider: Boolean = true,
     /**
-     * Tap to speak, tap again and the words arrive. Absent when no transcription server is set,
-     * which is what makes this exist exactly to the extent that it can work.
+     * Tap to speak, tap again and the words arrive.
+     *
+     * Always offered when supplied. It used to be hidden unless a transcription server was
+     * configured, on the reasoning that a key which cannot work is worse than no key — and the
+     * report was "no mic button". A hidden key teaches nobody anything, and the person most likely
+     * to be missing the setting is the person who just asked for the feature.
      */
     onDictate: ((onWords: (String) -> Unit) -> Unit)? = null,
     dictating: Boolean = false,
@@ -641,11 +608,15 @@ fun ComposeBar(
             }
             if (onDictate != null) {
                 Spacer(modifier = Modifier.width(16.dp))
+                // A word and not a glyph. This was `◉`, which Public Sans does not have — so the key
+                // rendered as nothing at all and the feature was reported missing. The only glyph
+                // this app uses anywhere is `+`; everything else is a word, and this is why.
+                //
                 // The words are appended to whatever is already typed rather than replacing it, so a
                 // sentence can be half typed and half spoken — and so a mis-heard dictation does not
                 // throw away the part that was right.
                 HapticText(
-                    text = if (dictating) "■" else "◉",
+                    text = if (dictating) "Stop" else "Speak",
                     style = ChatType.body,
                     color = if (dictating) ChatColors.onSurface else ChatColors.onSurfaceDisabled,
                     onClick = {
