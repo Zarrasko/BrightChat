@@ -1,3 +1,40 @@
+## BrightChat v2.22 — dictate a message
+
+**Speak instead of typing.** Tap the ring beside Send, say the message, tap again — the words appear
+in the field.
+
+The keyboard is the hardest part of using this phone, and the app was already configured to talk to
+a Whisper server for the sake of reading somebody else's voice memo. The same endpoint turns your own
+voice into a message, which is the more useful direction of the two: you read a memo occasionally
+and you type every day.
+
+**A tap, not a hold.** A message is longer than a thumb wants to be held down for, and letting go by
+accident half way through a sentence would lose the sentence.
+
+**The words are appended, not substituted.** A sentence can be half typed and half spoken, and a
+mis-heard dictation does not throw away the part that came out right.
+
+### What it records, and what happens to it
+
+AAC in an `.m4a` at 16 kHz mono, which is not a taste: 16 kHz is what Whisper resamples everything
+to internally, so recording higher makes a bigger file for the same transcript, and a minute of
+speech compressed is about 120 kB against 1.9 MB uncompressed — on a phone tethered over a tunnel
+that is the difference between a pause and a wait. The source is `VOICE_RECOGNITION`, which is the
+one the platform points at speech.
+
+The recording is **deleted the moment it comes back as words**, whether it worked or not. It is a
+draft of a message, not a message, and there is nothing about it worth keeping. Nothing is recorded
+unless your thumb has started it, and the key is not there at all unless you have set a
+transcription server — so this feature exists exactly to the extent that it can work.
+
+The recorder is released on every path out, including the failures and including leaving the thread
+mid-dictation. `MediaRecorder` holds a hardware encoder and this phone has few; one leaked by an
+exception is a microphone no other app can open until the process dies.
+
+- 86 tests.
+
+---
+
 ## BrightChat v2.21 — a voice memo you can read
 
 **Whisper transcription. Open a sound somebody sent, press WORDS, and read what was said.**

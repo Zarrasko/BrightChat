@@ -4,6 +4,9 @@ package com.gios.lightchat.ui
 
 import android.content.Context
 import android.text.format.DateUtils
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Image
@@ -32,6 +35,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -68,6 +72,8 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import com.gios.light.common.hw.WheelScroll
 import kotlinx.coroutines.launch
+import com.gios.lightchat.Dictation
+import com.gios.lightchat.api.Store
 import com.gios.lightchat.Attachment
 import com.gios.lightchat.ChatBackground
 import com.gios.lightchat.ChatMessage
@@ -123,6 +129,25 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     var viewingVideo by remember(convo.guid) { mutableStateOf<java.io.File?>(null) }
 
     val context = LocalContext.current
+
+    // Dictation. Tap to start, tap again to stop and transcribe — a tap rather than a hold, because
+    // a message is longer than a thumb wants to be held down for and letting go by accident half way
+    // through a sentence would lose the sentence.
+    val dictation = remember { Dictation(context) }
+    var dictating by remember { mutableStateOf(false) }
+    val askMicrophone = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> if (granted) dictating = dictation.start() }
+    val canDictate = Store.canTranscribe(context)
+    // A recorder holds a hardware encoder and this phone has few, so leaving the thread releases it
+    // whatever state it was in — including a dictation still running.
+    DisposableEffect(dictation) {
+        dictation.sweep()
+        onDispose {
+            dictation.cancel()
+            dictating = false
+        }
+    }
     val ring = rememberCaller()
 
     /**
@@ -458,6 +483,33 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                 },
                 onPickImage = { picking = true },
                 onTextChange = viewModel::onComposeTextChanged,
+                // Offered only when there is a server to transcribe against and a microphone we are
+                // allowed to open. A key that cannot work is worse than no key.
+                onDictate = if (canDictate) {
+                    { onWords ->
+                        when {
+                            dictation.isRecording -> {
+                                val recorded = dictation.stop()
+                                dictating = false
+                                if (recorded == null) {
+                                    viewModel.say("Didn't catch that")
+                                } else {
+                                    viewModel.transcribeDictation(recorded) { words ->
+                                        if (words != null) onWords(words)
+                                    }
+                                }
+                            }
+                            dictation.granted() -> {
+                                dictating = dictation.start()
+                                if (!dictating) viewModel.say("Couldn't open the microphone")
+                            }
+                            else -> askMicrophone.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    }
+                } else {
+                    null
+                },
+                dictating = dictating,
             )
         }
 
@@ -546,6 +598,12 @@ fun ComposeBar(
     onPickImage: (() -> Unit)? = null,
     onTextChange: ((String) -> Unit)? = null,
     showTopDivider: Boolean = true,
+    /**
+     * Tap to speak, tap again and the words arrive. Absent when no transcription server is set,
+     * which is what makes this exist exactly to the extent that it can work.
+     */
+    onDictate: ((onWords: (String) -> Unit) -> Unit)? = null,
+    dictating: Boolean = false,
 ) {
     var input by remember { mutableStateOf("") }
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -579,6 +637,23 @@ fun ComposeBar(
                         autoCorrectEnabled = true,
                     ),
                     modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (onDictate != null) {
+                Spacer(modifier = Modifier.width(16.dp))
+                // The words are appended to whatever is already typed rather than replacing it, so a
+                // sentence can be half typed and half spoken — and so a mis-heard dictation does not
+                // throw away the part that was right.
+                HapticText(
+                    text = if (dictating) "■" else "◉",
+                    style = ChatType.body,
+                    color = if (dictating) ChatColors.onSurface else ChatColors.onSurfaceDisabled,
+                    onClick = {
+                        onDictate { words ->
+                            input = if (input.isBlank()) words else "${input.trimEnd()} $words"
+                            onTextChange?.invoke(input)
+                        }
+                    },
                 )
             }
             Spacer(modifier = Modifier.width(16.dp))
