@@ -14,7 +14,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -61,7 +64,14 @@ import kotlinx.coroutines.delay
  * times a second, and only while it is playing — a paused player is not asking for frames.
  */
 @Composable
-fun AudioPlayerScreen(file: File, name: String?, onClose: () -> Unit) {
+fun AudioPlayerScreen(
+    file: File,
+    name: String?,
+    onClose: () -> Unit,
+    transcript: String? = null,
+    canTranscribe: Boolean = false,
+    onTranscribe: (() -> Unit)? = null,
+) {
     BackHandler(onBack = onClose)
 
     var failed by remember(file) { mutableStateOf(false) }
@@ -178,8 +188,27 @@ fun AudioPlayerScreen(file: File, name: String?, onClose: () -> Unit) {
                     runCatching { player.seekTo(to) }
                 }
             }
+            // The words, when there are any. Under the transport rather than over it, because the
+            // thing you came here to do is listen; reading is what you do when listening was not
+            // enough — a name you did not catch, a street, a number.
+            transcript?.takeIf { it.isNotBlank() }?.let { words ->
+                Spacer(Modifier.height(20.dp))
+                Text(
+                    words,
+                    style = ChatType.body,
+                    color = ChatColors.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 180.dp)
+                        .verticalScroll(rememberScrollState()),
+                )
+            }
+
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth()) {
+                if (canTranscribe && transcript == null && onTranscribe != null) {
+                    PlayerKey("WORDS", Modifier.weight(1f), onClick = onTranscribe)
+                }
                 PlayerKey("CLOSE", Modifier.weight(1f), onClick = onClose)
             }
         }

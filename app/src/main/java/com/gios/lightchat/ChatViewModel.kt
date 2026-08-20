@@ -12,6 +12,7 @@ import com.gios.lightchat.api.AgentApi
 import com.gios.lightchat.api.ApiException
 import com.gios.lightchat.api.BlueBubblesApi
 import com.gios.lightchat.api.Store
+import com.gios.lightchat.api.WhisperApi
 import com.gios.lightchat.dial.AddressBookRepo
 import com.gios.lightchat.db.AgentStore
 import com.gios.lightchat.db.MessageStore
@@ -1326,6 +1327,58 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * activity, the other calls back. The cache path and the "already downloaded" check are
      * shared through [attachmentFile] so a video watched twice is fetched once.
      */
+    /**
+     * Turn a recording into words, and remember them.
+     *
+     * The transcript is cached against the attachment's guid, so a voice memo opened twice is
+     * transcribed once — this is slow and, pointed at a paid endpoint, billed.
+     *
+     * [onResult] is handed the words, or null with a message already set on the state when the
+     * server would not do it. Off the main thread throughout: the request holds open for as long as
+     * the transcription takes, which for a few minutes of audio on a CPU-only server is a minute of
+     * its own.
+     */
+    fun transcribe(attachment: Attachment, file: File, onResult: (String?) -> Unit) {
+        val context = app
+        Store.transcript(context, attachment.guid)?.let {
+            onResult(it)
+            return
+        }
+        val url = Store.whisperUrl(context)
+        if (url.isNullOrBlank()) {
+            _state.update { it.copy(message = "Set a transcription server in Settings first") }
+            onResult(null)
+            return
+        }
+        _state.update { it.copy(message = "Transcribing…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            val words = runCatching {
+                WhisperApi().transcribe(
+                    baseUrl = url,
+                    apiKey = Store.whisperKey(context),
+                    model = Store.whisperModel(context),
+                    file = file,
+                )
+            }
+            val text = words.getOrNull()?.takeIf { it.isNotBlank() }
+            if (text != null) Store.setTranscript(context, attachment.guid, text)
+            _state.update {
+                it.copy(
+                    message = when {
+                        text != null -> null
+                        // The server's own wording where there is one: "the key is wrong" is more
+                        // use than "transcription failed".
+                        words.exceptionOrNull() is ApiException ->
+                            (words.exceptionOrNull() as ApiException).message
+                        words.isFailure -> "Couldn't reach the transcription server"
+                        else -> "Nothing was said in that recording"
+                    },
+                )
+            }
+            withContext(Dispatchers.Main) { onResult(text) }
+        }
+    }
+
     fun downloadAttachment(attachment: Attachment, onReady: (File) -> Unit) {
         val client = api ?: return
         // An optimistic row carries the send's temp guid, which the server has never
