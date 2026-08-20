@@ -1,3 +1,41 @@
+## BrightChat v2.23 — the Speak key, where you can see it
+
+**"No mic button."** Three reasons it could have been missing, and I have fixed all three rather
+than guess which one it was.
+
+### It was hidden unless a server was configured
+
+The most likely one. The key only appeared once a transcription server was set in Settings, on the
+reasoning that a key which cannot work is worse than no key. That was wrong: a hidden key teaches
+nobody anything, and the person most likely to be missing the setting is the person who just asked
+for the feature. It is always there now, and pressing it with nothing configured says what to do
+about it.
+
+The setting is also read **when the key is pressed** rather than when the screen is composed. Before,
+setting a server and returning to a thread that never left composition left the key still believing
+there was none.
+
+### It was in one place out of three
+
+Dictation was in a conversation only. A new message and an agent thread are both places you type and
+neither had it. All three now do, and the plumbing lives in one function rather than three copies —
+the part that must not diverge is releasing the recorder.
+
+### It was a symbol instead of a word
+
+The key was labelled `◉`. A glyph the font does not have renders as nothing at all, so an invisible
+key is indistinguishable from a feature that was never built. It says **Speak**, and **Stop** while
+it is listening — which matches "Send" beside it and needs no explaining.
+
+Worth being straight about: this was a hypothesis, and writing a test for it proved it partly wrong.
+The app already ships `×`, `•`, `‹`, `−`, `↑` and `⌫` as labels and has for many releases, so the
+font is clearly not the problem it looked like. What had no precedent was the Geometric Shapes block,
+where `◉` lives — so that is what the test forbids, and nothing wider.
+
+- 87 tests, up from 86.
+
+---
+
 ## BrightChat v2.22 — dictate a message
 
 **Speak instead of typing.** Tap the ring beside Send, say the message, tap again — the words appear

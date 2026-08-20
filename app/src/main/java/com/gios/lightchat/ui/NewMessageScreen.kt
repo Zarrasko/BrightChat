@@ -61,6 +61,8 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
     // an iMessage to such an address *appears* to send and dies silently on the Mac.
     var unavailable by remember { mutableStateOf<Set<String>>(emptySet()) }
     val focus = remember { FocusRequester() }
+    // Speaking a first message rather than typing it. See [rememberDictation].
+    val dictate = rememberDictation(viewModel)
 
     // Our own picker (see PhotoPickerScreen), shown over this screen. Only a 1:1 can
     // take one: the group create path can't send to a constructed guid. Just the first
@@ -261,11 +263,24 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
                     }
                 }
             }
-            if (canSend) ComposeBar(onSend = sendNew, onPickImage = pickForCompose)
+            if (canSend) {
+                ComposeBar(
+                    onSend = sendNew,
+                    onPickImage = pickForCompose,
+                    onDictate = dictate.onTap,
+                    dictating = dictate.listening,
+                )
+            }
         } else if (canSend) {
             // Composing: the message field hugs the "To" divider (no gap, no second
             // line) so it's right under the recipient; the empty room falls below it.
-            ComposeBar(onSend = sendNew, onPickImage = pickForCompose, showTopDivider = false)
+            ComposeBar(
+                onSend = sendNew,
+                onPickImage = pickForCompose,
+                showTopDivider = false,
+                onDictate = dictate.onTap,
+                dictating = dictate.listening,
+            )
         }
 
         state.message?.let {
