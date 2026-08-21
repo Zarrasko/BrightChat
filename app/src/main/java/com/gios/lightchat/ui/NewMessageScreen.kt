@@ -267,7 +267,7 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
                 ComposeBar(
                     onSend = sendNew,
                     onPickImage = pickForCompose,
-                    onDictate = dictate.onTap,
+                    onDictate = dictate.onTap.takeIf { dictate.available },
                     dictating = dictate.listening,
                 )
             }
@@ -278,7 +278,7 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
                 onSend = sendNew,
                 onPickImage = pickForCompose,
                 showTopDivider = false,
-                onDictate = dictate.onTap,
+                onDictate = dictate.onTap.takeIf { dictate.available },
                 dictating = dictate.listening,
             )
         }

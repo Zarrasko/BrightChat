@@ -80,7 +80,7 @@ fun AgentThreadScreen(viewModel: ChatViewModel) {
         val dictate = rememberDictation(viewModel)
         ComposeBar(
             onSend = viewModel::sendAgentMessage,
-            onDictate = dictate.onTap,
+            onDictate = dictate.onTap.takeIf { dictate.available },
             dictating = dictate.listening,
         )
     }

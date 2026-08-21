@@ -4,6 +4,7 @@ import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,7 +23,16 @@ import com.gios.lightchat.api.Store
  * because the part that must not diverge is releasing the recorder.
  */
 class DictationControl(
-    /** True while it is listening, so the key can say Stop. */
+    /**
+     * Whether to show the key at all.
+     *
+     * False until a transcription server is configured. This was the other way round for one
+     * release — always shown, because a hidden key had been reported as a missing one — and the
+     * answer to that turned out to be a settings page you can actually reach rather than a key that
+     * cannot work. A microphone that only ever apologises is worse than no microphone.
+     */
+    val available: Boolean,
+    /** True while it is listening, so the key can be filled in. */
     val listening: Boolean,
     /** Tap. Starts, or stops and transcribes, handing the words to [onWords]. */
     val onTap: (onWords: (String) -> Unit) -> Unit,
@@ -31,21 +41,22 @@ class DictationControl(
 /**
  * Wire up dictation for a screen.
  *
- * ### The key is always there
+ * ### When the key is there
  *
- * It used to be hidden unless a transcription server was configured, on the reasoning that a key
- * which cannot work is worse than no key. That was wrong, and the report was "no mic button": a
- * hidden key teaches nobody anything, and the person most likely to be missing the setting is the
- * person who just asked for the feature. It is shown, and pressing it with nothing configured says
- * what to do about it.
+ * Only once a transcription server is configured — [DictationControl.available]. It went the other
+ * way for one release, on the reasoning that a hidden key teaches nobody anything; what that missed
+ * is that a key which cannot work teaches them the wrong thing, and the real fix for "I could not
+ * find the setting" was a settings page you can reach.
  *
- * The setting is read **when the key is pressed**, not when the screen is composed. Reading it at
- * composition meant that setting a server and coming back to a thread that never left composition
- * left the key still believing there was none.
+ * Whether it is configured comes from [ChatViewModel]'s state, not from the store as each screen
+ * composes. That is what makes it appear the moment the setting is filled in: reading it at
+ * composition meant setting a server and coming back to a thread that never left composition left
+ * the key still believing there was none.
  */
 @Composable
 fun rememberDictation(viewModel: ChatViewModel): DictationControl {
     val context = LocalContext.current
+    val state by viewModel.state.collectAsState()
     val dictation = remember { Dictation(context) }
     var listening by remember { mutableStateOf(false) }
 
@@ -81,6 +92,7 @@ fun rememberDictation(viewModel: ChatViewModel): DictationControl {
     }
 
     return DictationControl(
+        available = state.canTranscribe,
         listening = listening,
         onTap = { onWords ->
             when {
@@ -95,7 +107,10 @@ fun rememberDictation(viewModel: ChatViewModel): DictationControl {
                         }
                     }
                 }
-                // Read now rather than at composition, and said out loud rather than hidden.
+                // Still checked, and not because the key is reachable without it: the setting can
+                // be cleared from the settings screen while a thread underneath holds a stale
+                // composition, and a tap that silently recorded into nothing would be worse than
+                // this line.
                 !Store.canTranscribe(context) ->
                     viewModel.say("Add a transcription server in Settings to dictate")
                 dictation.granted() -> {
