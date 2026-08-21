@@ -8,7 +8,6 @@ import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -16,7 +15,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +45,7 @@ import com.gios.lightchat.ui.SettingsScreen
 import com.gios.lightchat.ui.SetupScreen
 import com.gios.lightchat.ui.ThreadScreen
 import com.gios.lightchat.ui.tabOf
+import com.gios.lightchat.ui.KeepScreenOn
 import com.gios.lightchat.ui.theme.LightChatTheme
 
 /** The recipient extra on an incoming share. AOSP messaging's key, and what Roll sends. */
@@ -117,32 +116,28 @@ class MainActivity : ComponentActivity() {
         }
         enableImmersive()
         setContent {
-            // The screen stays awake while a newsletter is going out.
+            // The screen stays awake while something slow is in flight.
             //
-            // A broadcast is one send per recipient down a single tunnel to a Mac, deliberately in
-            // sequence so they arrive in order and do not compete for the socket — so twenty
-            // recipients is a minute or two, not a moment. The panel going dark in the middle of
-            // that is the problem: the send survives it, but you cannot see how far it has got, and
-            // the only way to find out is to wake the phone and hope the progress line is still
-            // there. Worse on a phone this size, where the display timeout is short by design.
+            // Two things in this app take longer than the display timeout. A broadcast is one send
+            // per recipient down a single tunnel to a Mac, deliberately in sequence so they arrive
+            // in order and do not compete for the socket — twenty recipients is a minute or two,
+            // not a moment. A transcription is a whole audio file uploaded to a Whisper server and
+            // a model run over it, which on a self-hosted box can be slower than the recording was.
             //
-            // A window flag rather than a wake lock: no permission, and the system takes it back by
-            // itself when the activity goes away, so there is no path where this is left holding the
-            // screen on with nothing sending.
+            // Both survive the panel going dark, so this is not about correctness: it is that you
+            // cannot see how far either has got, and the only way to find out is to wake the phone
+            // and hope the line is still there. Worse on a phone this size, where the display
+            // timeout is short by design.
             //
-            // Scoped to the newsletter and not to every upload on purpose. A photo takes a second or
-            // two and holding the screen on for that would cost battery all day for nothing; a
-            // broadcast is the one send long enough to watch.
+            // Scoped to these two and not to every upload on purpose. A photo takes a second or two
+            // and holding the screen on for that would cost battery all day for nothing.
+            //
+            // Recording a dictation holds the screen too, but from inside [rememberDictation] —
+            // whether the microphone is open is not this activity's business, and every screen that
+            // can dictate goes through that one function.
             val progress by viewModel.state.collectAsState()
             val broadcasting = progress.newsletterProgress?.let { !it.done } == true
-            DisposableEffect(broadcasting) {
-                if (broadcasting) {
-                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                } else {
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                }
-                onDispose { window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
-            }
+            KeepScreenOn(broadcasting || progress.transcribing)
             LightChatTheme {
                 // Every screen below can reach the wheel.
                 CompositionLocalProvider(LocalWheelBus provides wheel) {

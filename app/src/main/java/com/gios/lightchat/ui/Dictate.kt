@@ -60,6 +60,16 @@ fun rememberDictation(viewModel: ChatViewModel): DictationControl {
         }
     }
 
+    // Speaking is the one thing you do on this phone with nothing to touch, so the display timeout
+    // has no idea you are still there and the panel goes dark mid-sentence. The recording itself
+    // survives that — MediaRecorder does not care about the screen — but you are then talking at a
+    // black phone with no way to tell whether it is still listening, and the app is a background
+    // process that can be reclaimed with the take unsaved.
+    //
+    // Held only while the microphone is open. The transcription that follows is held from
+    // MainActivity instead, which sees every Whisper request rather than only this one.
+    KeepScreenOn(listening)
+
     // A recorder holds a hardware encoder and this phone has few, so leaving the screen releases it
     // whatever state it was in — including a dictation still running.
     DisposableEffect(dictation) {
