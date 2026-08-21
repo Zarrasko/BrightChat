@@ -1,3 +1,33 @@
+## BrightChat v2.24 — the screen stays on while a newsletter goes out
+
+**A broadcast takes a while, and the panel used to go dark in the middle of it.**
+
+A newsletter is one send per recipient down a single tunnel to a Mac, deliberately in sequence so
+they arrive in order and do not compete for the socket. Twenty recipients is a minute or two, not a
+moment — and on a phone whose display timeout is short by design, the screen went out while it was
+still going. The only way to find out how far it had got was to wake the phone and hope the progress
+line was still there.
+
+The screen now stays awake for as long as `Sending 7/20…` is true, and lets go the moment it is not.
+
+**It also protects the send itself**, which is worth knowing. The send was never cancelled by the
+screen going off — it runs in the view model's scope, which outlives the display — but with the
+screen off the app is a background process, and a background process on a phone this size can be
+reclaimed to free memory. Two minutes is long enough for that to happen. Holding the screen on keeps
+the app in the foreground for the duration.
+
+A window flag rather than a wake lock: no permission, and the system takes it back by itself when the
+activity goes away, so there is no path where this is left holding the screen on with nothing
+sending.
+
+Scoped to the newsletter and not to every upload, on purpose. A photo takes a second or two and
+holding the screen on for that would cost battery all day for nothing. A broadcast is the one send
+long enough to be worth watching.
+
+- 87 tests.
+
+---
+
 ## BrightChat v2.23 — the Speak key, where you can see it
 
 **"No mic button."** Three reasons it could have been missing, and I have fixed all three rather

@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -15,6 +16,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -115,6 +117,32 @@ class MainActivity : ComponentActivity() {
         }
         enableImmersive()
         setContent {
+            // The screen stays awake while a newsletter is going out.
+            //
+            // A broadcast is one send per recipient down a single tunnel to a Mac, deliberately in
+            // sequence so they arrive in order and do not compete for the socket — so twenty
+            // recipients is a minute or two, not a moment. The panel going dark in the middle of
+            // that is the problem: the send survives it, but you cannot see how far it has got, and
+            // the only way to find out is to wake the phone and hope the progress line is still
+            // there. Worse on a phone this size, where the display timeout is short by design.
+            //
+            // A window flag rather than a wake lock: no permission, and the system takes it back by
+            // itself when the activity goes away, so there is no path where this is left holding the
+            // screen on with nothing sending.
+            //
+            // Scoped to the newsletter and not to every upload on purpose. A photo takes a second or
+            // two and holding the screen on for that would cost battery all day for nothing; a
+            // broadcast is the one send long enough to watch.
+            val progress by viewModel.state.collectAsState()
+            val broadcasting = progress.newsletterProgress?.let { !it.done } == true
+            DisposableEffect(broadcasting) {
+                if (broadcasting) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+                onDispose { window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+            }
             LightChatTheme {
                 // Every screen below can reach the wheel.
                 CompositionLocalProvider(LocalWheelBus provides wheel) {
