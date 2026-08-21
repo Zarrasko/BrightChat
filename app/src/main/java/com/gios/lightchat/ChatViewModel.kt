@@ -89,6 +89,10 @@ data class UiState(
     val newsletterEditor: NewsletterBatch? = null,   // the batch being edited
     val newsletterCompose: NewsletterBatch? = null,  // the batch being written to
     val newsletterProgress: NewsletterProgress? = null, // a broadcast in flight, or its outcome
+    // Whether a transcription server is configured at all. The mic key is drawn from this, so it
+    // lives in the state rather than being read off disk by each composer: a key that appears the
+    // moment the setting is filled in, and disappears the moment it is cleared.
+    val canTranscribe: Boolean = false,
     // A Whisper request is in flight — a dictation on its way to be read, or a received clip
     // being transcribed. Counted rather than a flag (see [transcribing]) so two at once can't
     // have the first one to finish clear it for both.
@@ -129,6 +133,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(
         UiState(
             isConfigured = api != null,
+            canTranscribe = Store.canTranscribe(application),
             privateApi = Store.privateApi(application),
             favorites = Store.favorites(application),
             pins = Store.pins(application),
@@ -1343,6 +1348,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * the transcription takes, which for a few minutes of audio on a CPU-only server is a minute of
      * its own.
      */
+    /**
+     * Re-read whether transcription is set up.
+     *
+     * Called by the settings screen every time one of the three fields is committed or a QR code is
+     * scanned. The alternative — each composer reading the store as it composes — is what made the
+     * key stale before: set a server, go back to a thread that never left the composition, and the
+     * key still believed there was nothing there.
+     */
+    fun transcriptionChanged() {
+        _state.update { it.copy(canTranscribe = Store.canTranscribe(app)) }
+    }
+
     /**
      * How many Whisper requests are in flight. Drives [UiState.transcribing], which is what holds
      * the screen on while one runs — see `KeepScreenOn` in MainActivity.

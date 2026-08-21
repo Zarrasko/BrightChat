@@ -90,6 +90,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                         config.url?.let { Store.setWhisperUrl(context, it) }
                         config.key?.let { Store.setWhisperKey(context, it) }
                         config.model?.let { Store.setWhisperModel(context, it) }
+                        viewModel.transcriptionChanged()
                         scanned++
                         // Says which parts landed, because a code carrying only a key looks
                         // identical to one carrying nothing until the next transcription fails.
@@ -219,6 +220,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
         // --------------------------------------------------------------------- transcription
         SectionHeader("Transcription")
         Whisper(
+            viewModel = viewModel,
             reload = scanned,
             note = scanNote,
             onScan = { scanNote = null; scanning = true },
@@ -364,7 +366,7 @@ private fun AnnounceCalls() {
  * writes to it, rather than sitting there showing what was there before.
  */
 @Composable
-private fun Whisper(reload: Int, note: String?, onScan: () -> Unit) {
+private fun Whisper(viewModel: ChatViewModel, reload: Int, note: String?, onScan: () -> Unit) {
     val context = LocalContext.current
     var whisperUrl by remember(reload) { mutableStateOf(Store.whisperUrl(context).orEmpty()) }
     var whisperKey by remember(reload) { mutableStateOf(Store.whisperKey(context)) }
@@ -398,6 +400,9 @@ private fun Whisper(reload: Int, note: String?, onScan: () -> Unit) {
             onDone = {
                 Store.setWhisperUrl(context, it)
                 whisperUrl = Store.whisperUrl(context).orEmpty()
+                // The URL is what decides whether dictation exists at all, so the microphone in
+                // every composer appears — or goes — on this line.
+                viewModel.transcriptionChanged()
             },
         )
         Spacer(modifier = Modifier.height(6.dp))

@@ -1,3 +1,35 @@
+## BrightChat v2.26 — it is a microphone, and it only shows up when it works
+
+**"Should be a mic not a voice button."** It is now a drawn microphone — a capsule, a cradle, a stem
+and a foot — filled while it is listening, outlined while it is not.
+
+Drawn, and not written, for the third time of asking. It was `◉` first, which Public Sans has no
+glyph for, so the key rendered as nothing at all and the feature was reported missing. Then it was
+the word "Speak", which could at least be seen. A picture this time, but not a font's picture: there
+is no typeface on this phone whose microphone can be relied on, and 🎤 is a color emoji on a
+monochrome panel, which would arrive as a grey blob. Four drawn primitives always draw.
+
+Worth recording how it was checked, since a drawn icon either looks right or looks like a mistake:
+the geometry was rendered outside the app and looked at before any of it went into the phone. The
+first attempt put the stem at the *center* of the cradle arc rather than its lowest point, which
+draws a trident. That would have shipped.
+
+**"Do not show the voice button unless it is turned on."** It is hidden again until a transcription
+server is configured, which reverses the call made in v2.23 — and the reversal is right. The
+reasoning then was that a hidden key teaches nobody anything; what that missed is that a key which
+cannot work teaches the wrong thing, and the actual fix for "I could not find the setting" was
+v2.25's settings page you can reach. A microphone that only ever apologizes is worse than no
+microphone.
+
+It appears and disappears the moment the setting changes, rather than the next time the app is
+restarted. Whether transcription is set up now lives in the app's state and is republished whenever
+a field is committed or a QR code is scanned — reading it off disk as each screen composed is what
+made the key stale before.
+
+- 96 tests.
+
+---
+
 ## BrightChat v2.25 — one settings page, and it scrolls
 
 **"Build out a full app settings page, it's a little hard to access everything."** It was hard for
