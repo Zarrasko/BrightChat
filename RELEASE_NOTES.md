@@ -1,3 +1,76 @@
+## BrightChat v2.25 — one settings page, and it scrolls
+
+**"Build out a full app settings page, it's a little hard to access everything."** It was hard for
+two reasons, and the first one is a bug.
+
+### Half the settings were off the bottom of the screen
+
+The page was a plain column with a spacer at each end. That centres a short page nicely, and clips a
+long one — and the page got long: unknown senders, on-screen alerts, announce calls, your own number,
+transcription. Everything past the bottom of the panel was simply unreachable, **Sign out included**.
+There was no scroll bar to find, so there was nothing to tell you anything was missing.
+
+It scrolls now, and the wheel scrolls it, because a thumb on this screen covers the line it is trying
+to read.
+
+### And it has sections
+
+Server · Messages · Calls · Newsletters · Agents · Transcription · Delivery · Account. The page is
+read by scanning for the headings, so one place decides how far apart they sit rather than a spacer
+per setting that drifts as things are added. Every setting says, in the grey line underneath, what
+the state it is currently in actually means.
+
+### Newsletters is in Settings now
+
+It was reachable only by starting a new message and finding a line at the foot of the recipient
+picker. Nobody would look there for a saved list of people to write to, so it is linked from Settings
+as well, with the number of saved batches next to it. (Speed dial stays on the Dial tab, with the
+keypad it belongs to.)
+
+## Scan the Whisper API key off another screen
+
+**"Add QR code input for Whisper — the API key, that is."** Fifty-odd characters of case-sensitive
+base62 is a bad thing to type on any phone, and a worse one here.
+
+Settings → Transcription → **Scan a QR code**. It reads three shapes, in order of how much they say:
+
+- **A bare key.** `qrencode` over the key you just pasted from a dashboard, which is what people
+  actually have. This is the case the feature exists for.
+- **A URL**, taken as the server — and `?api_key=…&model=…` off the query if it carries them, with
+  the query stripped from what gets stored.
+- **A JSON object**, for the whole setup in one code: `url`, `key`, `model`, with `base_url`/`api_key`
+  also accepted so one generator can make both this and an agent code.
+
+Scanning something that is neither — a poster, a wifi code, a sentence — says so rather than storing
+the words and failing every request afterwards with no explanation. What landed is named back at you
+("Scanned: key"), because a code carrying only a key looks exactly like one carrying nothing until
+the next transcription fails.
+
+The camera, the decode and the permission flow are the ones the agent scanner already used: ZXing
+compiled in, no Google Play Services, nothing leaves the phone.
+
+## The screen stays on while you talk to it
+
+**"Also keep the screen on with voice to text."** Speaking is the one thing you do on this phone with
+nothing to touch, so the display timeout has no idea you are still there and the panel goes dark
+mid-sentence. The recording survives that — MediaRecorder does not care about the screen — but you
+are then talking at a black phone with no way to tell whether it is still listening.
+
+The screen is now held while the microphone is open, and held again while a transcription is in
+flight: a whole audio file going up to a Whisper server and a model run over it can easily outlast
+the display timeout, whether the words came from the Speak key or from a clip somebody sent you.
+
+Under it, the newsletter hold from v2.24 was rebuilt as one shared thing rather than a window flag in
+the activity. It counts its holders, which matters more than it sounds: stopping a dictation makes it
+"not listening" and "transcribing" in the same frame, and with a plain flag the first of those to
+finish would have turned the screen off on the other. It is the view's own `keepScreenOn` — no
+permission, and the platform drops it with the view, so there is no path where this is left holding
+the screen with nothing running.
+
+- 96 tests, nine of them new and all about what a scanned code is allowed to mean.
+
+---
+
 ## BrightChat v2.24 — the screen stays on while a newsletter goes out
 
 **A broadcast takes a while, and the panel used to go dark in the middle of it.**

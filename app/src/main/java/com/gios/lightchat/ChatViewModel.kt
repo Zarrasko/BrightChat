@@ -22,6 +22,7 @@ import com.gios.lightchat.socket.SocketBus
 import com.gios.lightchat.socket.SocketService
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -88,6 +89,10 @@ data class UiState(
     val newsletterEditor: NewsletterBatch? = null,   // the batch being edited
     val newsletterCompose: NewsletterBatch? = null,  // the batch being written to
     val newsletterProgress: NewsletterProgress? = null, // a broadcast in flight, or its outcome
+    // A Whisper request is in flight — a dictation on its way to be read, or a received clip
+    // being transcribed. Counted rather than a flag (see [transcribing]) so two at once can't
+    // have the first one to finish clear it for both.
+    val transcribing: Boolean = false,
 )
 
 /**
@@ -1338,6 +1343,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * the transcription takes, which for a few minutes of audio on a CPU-only server is a minute of
      * its own.
      */
+    /**
+     * How many Whisper requests are in flight. Drives [UiState.transcribing], which is what holds
+     * the screen on while one runs — see `KeepScreenOn` in MainActivity.
+     *
+     * A count and not a boolean: transcribing a received clip and dictating a reply to it are the
+     * same operation against the same server, and nothing stops both being outstanding at once.
+     * With a flag, whichever finished first would turn the screen off on the other.
+     *
+     * Atomic because the two ends are on different threads: it goes up on the caller's thread (the
+     * tap) and comes down on the IO dispatcher where the request finished.
+     */
+    private val whisperCalls = AtomicInteger(0)
+
+    private fun beginTranscribing() {
+        whisperCalls.incrementAndGet()
+        _state.update { it.copy(transcribing = true) }
+    }
+
+    private fun endTranscribing() {
+        if (whisperCalls.decrementAndGet() <= 0) {
+            whisperCalls.set(0)
+            _state.update { it.copy(transcribing = false) }
+        }
+    }
+
     fun transcribe(attachment: Attachment, file: File, onResult: (String?) -> Unit) {
         val context = app
         Store.transcript(context, attachment.guid)?.let {
@@ -1351,6 +1381,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         _state.update { it.copy(message = "Transcribing…") }
+        beginTranscribing()
         viewModelScope.launch(Dispatchers.IO) {
             val words = runCatching {
                 WhisperApi().transcribe(
@@ -1360,6 +1391,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     file = file,
                 )
             }
+            endTranscribing()
             val text = words.getOrNull()?.takeIf { it.isNotBlank() }
             if (text != null) Store.setTranscript(context, attachment.guid, text)
             _state.update {
@@ -1397,6 +1429,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         _state.update { it.copy(message = "Transcribing…") }
+        beginTranscribing()
         viewModelScope.launch(Dispatchers.IO) {
             val words = runCatching {
                 WhisperApi().transcribe(
@@ -1406,6 +1439,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     file = file,
                 )
             }
+            endTranscribing()
             file.delete()
             val text = words.getOrNull()?.takeIf { it.isNotBlank() }
             _state.update {
