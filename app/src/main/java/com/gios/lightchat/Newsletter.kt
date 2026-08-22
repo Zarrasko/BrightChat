@@ -58,45 +58,108 @@ data class NewsletterBatch(
     }
 }
 
+/** Where one item stands for one recipient. */
+enum class SendState { Pending, Sending, Sent, Failed }
+
+/**
+ * One thing being broadcast: the message, or one photo.
+ *
+ * The text counts as an item even when it is empty, in which case it is simply not in the list.
+ * A photos-only broadcast therefore has photo items and nothing else, and a text-only one has a
+ * single item -- which keeps the grid honest rather than showing a column that can never fill.
+ */
+data class NewsletterItem(val label: String, val isPhoto: Boolean)
+
+/**
+ * One recipient's row: what each item did for them.
+ *
+ * Carries [targetKey] and not just the label, because the resend has to address exactly the
+ * recipient that missed something, and two people can share a display name.
+ */
+data class NewsletterRow(
+    val targetKey: String,
+    val label: String,
+    val states: List<SendState>,
+) {
+    val allSent: Boolean get() = states.all { it == SendState.Sent }
+    val nothingSent: Boolean get() = states.none { it == SendState.Sent }
+    val anyFailed: Boolean get() = states.any { it == SendState.Failed }
+
+    /** Indices of the items this recipient still needs. What a resend actually retries. */
+    fun missing(): List<Int> = states.indices.filter { states[it] != SendState.Sent }
+}
+
 /**
  * How far a newsletter send has got.
  *
  * Held in `UiState` and rendered by the compose screen, because a send to forty recipients is
- * the one thing in this app that takes long enough for "Sending…" to be an unhelpful answer.
+ * the one thing in this app that takes long enough for "Sending..." to be an unhelpful answer.
  *
  * **[batchId] is what stops this being reported about the wrong batch.** There is one of these
  * for the whole app, so a broadcast the user backed out of is still running while they open
- * another batch — and without an id on it, that second batch's screen would show the first
+ * another batch -- and without an id on it, that second batch's screen would show the first
  * one's outcome as its own.
  *
- * [failed] and [partial] carry labels rather than ids: their only reader is a line of text
- * naming who missed what, and by then the target that produced them is gone. The two are
- * separate because "got nothing" and "got the words but not the photos" call for different
- * things from the user, and merging them would make re-running the batch — which double-sends
- * to everyone who succeeded — look like the fix for both.
+ * ## Per item, not per recipient
+ *
+ * This used to be four numbers: sent, total, and two lists of names for "got nothing" and "got
+ * the words but not the photos". That reported the shape of the failure without ever saying
+ * *which photo*, so a batch where the third of five pictures failed for two people out of forty
+ * left the only fix as re-running the whole thing -- double-sending to the thirty-eight who
+ * were fine.
+ *
+ * [rows] is a grid instead: one row per recipient, one state per item, filled in as each lands.
+ * The counts below are derived from it so the old status line still reads the same, and
+ * [resendable] is the list the retry button works from.
  */
 data class NewsletterProgress(
     val batchId: String,
     val batchName: String,
-    val sent: Int,
-    val total: Int,
-    val failed: List<String> = emptyList(),
-    val partial: List<String> = emptyList(),
+    val items: List<NewsletterItem> = emptyList(),
+    val rows: List<NewsletterRow> = emptyList(),
     val done: Boolean = false,
-    /** Set when the broadcast never started — nothing was sent and [sent]/[failed] say
-     *  nothing useful, so this replaces the whole line rather than decorating it. */
+    /** Set when the broadcast never started -- nothing was sent and the rows say nothing
+     *  useful, so this replaces the whole line rather than decorating it. */
     val error: String? = null,
 ) {
+    val total: Int get() = rows.size
+
+    /**
+     * Recipients who got *something*. The number the outcome line quotes.
+     *
+     * Deliberately not "got everything": the line has always read "Sent to 5 -- photos missing:
+     * Alex", counting Alex among the five because a message did reach him. Narrowing it to
+     * complete deliveries would silently restate an outcome users already read one way. The
+     * grid, and [missingCount], are where "everything" is answered now.
+     */
+    val sent: Int get() = rows.count { row -> row.states.any { it == SendState.Sent } }
+
+    /** Got nothing at all. */
+    val failed: List<String> get() = rows.filter { it.nothingSent && it.anyFailed }.map { it.label }
+
+    /** Got some of it. Kept distinct from [failed] because the two call for different things. */
+    val partial: List<String>
+        get() = rows.filter { !it.allSent && !it.nothingSent }.map { it.label }
+
+    /** Every recipient still owed something once the send is over. */
+    fun resendable(): List<NewsletterRow> = rows.filter { !it.allSent }
+
+    /** How many item deliveries are still outstanding, across everyone. */
+    fun missingCount(): Int = rows.sumOf { it.missing().size }
+
     /** The status line: in-flight progress, or the outcome once [done]. */
     fun line(): String {
         error?.let { return it }
-        if (!done) return "Sending $sent/$total…"
+        if (!done) {
+            val settled = rows.count { row -> row.states.none { it == SendState.Pending || it == SendState.Sending } }
+            return "Sending $settled/$total\u2026"
+        }
         val notes = buildList {
             if (failed.isNotEmpty()) add("failed: " + failed.joinToString(", "))
             if (partial.isNotEmpty()) add("photos missing: " + partial.joinToString(", "))
         }
-        val head = if (sent == 0) "Couldn’t send to anyone" else "Sent to $sent"
-        return if (notes.isEmpty()) head else head + " — " + notes.joinToString(" — ")
+        val head = if (sent == 0) "Couldn\u2019t send to anyone" else "Sent to $sent"
+        return if (notes.isEmpty()) head else head + " \u2014 " + notes.joinToString(" \u2014 ")
     }
 }
 

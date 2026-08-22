@@ -1,6 +1,9 @@
 package com.gios.lightchat.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,13 +11,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +33,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
@@ -34,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.gios.light.common.hw.WheelScroll
 import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.NewsletterBatch
+import com.gios.lightchat.SendState
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
 import java.io.File
@@ -158,6 +167,33 @@ fun NewsletterComposeScreen(viewModel: ChatViewModel, batch: NewsletterBatch) {
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 onClick = viewModel::clearNewsletterProgress,
             )
+
+            // The grid. Only for this batch: another batch's rows under this batch's header
+            // would read as this one's recipients.
+            if (it.batchId == batch.id && it.rows.isNotEmpty() && it.error == null) {
+                NewsletterGrid(it)
+                if (it.done && it.missingCount() > 0) {
+                    val n = it.missingCount()
+                    Text(
+                        text = "RESEND $n MISSING",
+                        style = ChatType.hint,
+                        color = ChatColors.onSurface,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = viewModel::resendNewsletterMissing)
+                            .padding(vertical = 10.dp),
+                    )
+                    Text(
+                        text = "Only the items above that didn't land, and only to the people " +
+                            "missing them. Nobody is sent anything twice.",
+                        style = ChatType.hint,
+                        color = ChatColors.onSurfaceDisabled,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    )
+                }
+            }
         }
 
         if (sending) {
@@ -234,6 +270,72 @@ fun NewsletterComposeScreen(viewModel: ChatViewModel, batch: NewsletterBatch) {
                         }
                     },
                 )
+            }
+        }
+    }
+}
+
+/**
+ * One row per recipient, one square per item, filled in as each lands.
+ *
+ * The question this answers is "which photo is missing, for whom", which a counter cannot
+ * answer at all. Squares rather than a progress bar because the useful reading is positional:
+ * the third square being empty down several rows is a photo that is failing, not a person who
+ * is unreachable, and that distinction is the whole diagnosis.
+ *
+ * Scrolls on its own for a long batch, capped so the compose bar never leaves the screen -- the
+ * grid is worth nothing if it pushes away the thing you tapped to make it appear.
+ */
+@Composable
+private fun NewsletterGrid(progress: com.gios.lightchat.NewsletterProgress) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 220.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = 8.dp),
+    ) {
+        progress.rows.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = row.label,
+                    style = ChatType.hint,
+                    color = if (row.allSent) ChatColors.onSurfaceDisabled else ChatColors.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                )
+                row.states.forEach { state ->
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 4.dp)
+                            .size(10.dp)
+                            .border(1.dp, ChatColors.onSurfaceVariant)
+                            .background(
+                                when (state) {
+                                    SendState.Sent -> ChatColors.onSurface
+                                    // Halfway, so "in flight" is not mistaken for "arrived" on
+                                    // a panel with no colour to tell them apart with.
+                                    SendState.Sending -> ChatColors.onSurfaceDisabled
+                                    else -> Color.Transparent
+                                },
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        // A failure is not an empty square: pending and failed are both empty,
+                        // and at the end of a send they mean very different things.
+                        if (state == SendState.Failed) {
+                            Text(
+                                text = "\u00d7",
+                                style = ChatType.hint,
+                                color = ChatColors.onSurface,
+                            )
+                        }
+                    }
+                }
             }
         }
     }

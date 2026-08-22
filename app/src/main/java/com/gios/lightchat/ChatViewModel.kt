@@ -1937,6 +1937,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /** The broadcast currently in flight, if any. One at a time — see [sendNewsletter]. */
     private var newsletterJob: Job? = null
 
+    /**
+     * What the last broadcast was carrying, kept so the resend button has something to send.
+     *
+     * The photo *bytes* rather than the files: a picture attached minutes ago can be evicted
+     * from the cache between the send and the retry, and a resend that failed because the file
+     * had gone would be indistinguishable from one that failed because the chat was
+     * unreachable. Held for one batch at a time, dropped when the composer is cleared.
+     */
+    private class NewsletterPayload(
+        val batch: NewsletterBatch,
+        val body: String,
+        val photos: List<PickedImage>,
+    )
+
+    private var newsletterPayload: NewsletterPayload? = null
+
     fun openNewsletters() = _state.update {
         it.copy(composingNew = false, newsletterList = true, newsletterProgress = null, message = null)
     }
@@ -2085,8 +2101,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         fun stillborn(reason: String) = _state.update {
             it.copy(
                 newsletterProgress = NewsletterProgress(
-                    batchId = batch.id, batchName = label, sent = 0, total = total,
-                    done = true, error = reason,
+                    batchId = batch.id, batchName = label, done = true, error = reason,
                 ),
                 message = null,
             )
@@ -2102,10 +2117,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (body.isEmpty() && files.isEmpty()) return
 
+        // The grid, built before anything is sent so every square is on screen from the first
+        // frame. A row that appeared only once it had been attempted would make a slow batch
+        // look shorter than it is.
+        val items = buildList {
+            if (body.isNotEmpty()) add(NewsletterItem("Message", isPhoto = false))
+            files.forEach { add(NewsletterItem(it.name, isPhoto = true)) }
+        }
         _state.update {
             it.copy(
                 newsletterProgress = NewsletterProgress(
-                    batchId = batch.id, batchName = label, sent = 0, total = total,
+                    batchId = batch.id,
+                    batchName = label,
+                    items = items,
+                    rows = targets.map { t ->
+                        NewsletterRow(t.key, t.label, List(items.size) { SendState.Pending })
+                    },
                 ),
                 message = null,
             )
@@ -2133,19 +2160,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 photos += PickedImage(bytes, mimeForExtension(file.extension), file.name)
             }
 
+            newsletterPayload = NewsletterPayload(batch, body, photos)
+
             val method = sendMethod()
-            val failed = ArrayList<String>()   // got nothing
-            val partial = ArrayList<String>()  // got the words, not the photos
-            var sent = 0
+
+            // The live grid. Mutated in place and republished after every item, so a row fills
+            // in square by square rather than appearing whole once its recipient is finished.
+            val grid = targets.map { t ->
+                NewsletterRow(t.key, t.label, List(items.size) { SendState.Pending })
+            }.toMutableList()
 
             fun publish(done: Boolean) {
                 val snapshot = NewsletterProgress(
                     batchId = batch.id,
                     batchName = label,
-                    sent = sent,
-                    total = total,
-                    failed = failed.toList(),
-                    partial = partial.toList(),
+                    items = items,
+                    rows = grid.toList(),
                     done = done,
                 )
                 // Written whole rather than as a copy() of whatever is in state: this coroutine
@@ -2153,66 +2183,209 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(newsletterProgress = snapshot) }
             }
 
+            /** Set one square and show it immediately. The point of the whole feature. */
+            fun mark(row: Int, item: Int, value: SendState) {
+                val states = grid[row].states.toMutableList()
+                states[item] = value
+                grid[row] = grid[row].copy(states = states)
+                publish(done = false)
+            }
+
+            /** Everything this recipient has not had yet, when the chat itself is unreachable. */
+            fun failRest(row: Int) {
+                val states = grid[row].states.toMutableList()
+                for (i in states.indices) if (states[i] != SendState.Sent) states[i] = SendState.Failed
+                grid[row] = grid[row].copy(states = states)
+                publish(done = false)
+            }
+
             for ((index, target) in targets.withIndex()) {
                 if (index > 0) delay(newsletterGapMs)
                 val convo = newsletterConversation(target)
                 if (convo == null) {
-                    failed += target.label
-                    publish(done = false)
+                    failRest(index)
                     continue
                 }
                 // The room that delivered the first thing is reused for the rest, so a forked
                 // group's photos land in the same room as its text instead of each one
                 // re-probing the dead siblings (see sendAcrossRooms / lastGoodRoom).
                 var room: String? = null
-                val textOk = body.isEmpty() || runCatching {
-                    val echo = sendAcrossRooms(convo.guid, sendTargets(convo, method)) { g ->
-                        client.send(g, body, newTempGuid(), method, null).also { room = g }
-                    }
-                    bumpConversation(convo.guid, echo.previewText, echo.date, fromMe = true)
-                }.isSuccess
+                var cursor = 0
 
-                // Not attempted when the text failed: that chat is unreachable, and every photo
-                // would be another doomed upload holding up the rest of the batch.
-                var photosOk = true
-                if (textOk) {
-                    for (photo in photos) {
-                        val ok = runCatching {
-                            val target1 = room
-                            val echo = if (target1 != null) {
+                var textOk = true
+                if (body.isNotEmpty()) {
+                    mark(index, cursor, SendState.Sending)
+                    textOk = runCatching {
+                        val echo = sendAcrossRooms(convo.guid, sendTargets(convo, method)) { g ->
+                            client.send(g, body, newTempGuid(), method, null).also { room = g }
+                        }
+                        bumpConversation(convo.guid, echo.previewText, echo.date, fromMe = true)
+                    }.isSuccess
+                    mark(index, cursor, if (textOk) SendState.Sent else SendState.Failed)
+                    cursor++
+                }
+
+                // Photos are not attempted when the text failed: that chat is unreachable, and
+                // every photo would be another doomed upload holding up the rest of the batch.
+                if (!textOk) {
+                    failRest(index)
+                    continue
+                }
+
+                for (photo in photos) {
+                    mark(index, cursor, SendState.Sending)
+                    val ok = runCatching {
+                        val target1 = room
+                        val echo = if (target1 != null) {
+                            client.sendAttachment(
+                                target1, photo.bytes, photo.name, photo.mime, newTempGuid(), method,
+                            )
+                        } else {
+                            sendAcrossRooms(convo.guid, sendTargets(convo, method)) { g ->
                                 client.sendAttachment(
-                                    target1, photo.bytes, photo.name, photo.mime, newTempGuid(), method,
-                                )
-                            } else {
-                                sendAcrossRooms(convo.guid, sendTargets(convo, method)) { g ->
-                                    client.sendAttachment(
-                                        g, photo.bytes, photo.name, photo.mime, newTempGuid(), method,
-                                    ).also { room = g }
-                                }
+                                    g, photo.bytes, photo.name, photo.mime, newTempGuid(), method,
+                                ).also { room = g }
                             }
-                            bumpConversation(convo.guid, echo.previewText, echo.date, fromMe = true)
-                        }.isSuccess
-                        if (!ok) { photosOk = false; break }
-                    }
+                        }
+                        bumpConversation(convo.guid, echo.previewText, echo.date, fromMe = true)
+                    }.isSuccess
+                    mark(index, cursor, if (ok) SendState.Sent else SendState.Failed)
+                    cursor++
+                    // One failed upload no longer abandons the rest. Each photo is its own
+                    // square now, so carrying on means the grid says which ones actually
+                    // landed -- and the resend can then ask for only those that did not.
                 }
 
-                when {
-                    !textOk -> failed += target.label
-                    // A photos-only broadcast whose photos failed delivered nothing at all,
-                    // whatever the (vacuously true) text result says.
-                    !photosOk && body.isEmpty() -> failed += target.label
-                    !photosOk -> { sent++; partial += target.label }
-                    else -> sent++
-                }
                 // The thread's cached messages no longer include what just went out; drop it so
                 // opening that chat re-fetches rather than showing a thread the broadcast is
-                // missing from. Also on a partial — some of it landed.
-                if (textOk) messageCache.remove(convo.guid)
-                publish(done = false)
+                // missing from. Also on a partial -- some of it landed.
+                messageCache.remove(convo.guid)
             }
             publish(done = true)
             // Pull the broadcast's own echoes into the list. Without this the rows it just
             // touched carry the optimistic bump and nothing else until the next refresh.
+            refresh()
+        }
+    }
+
+    /**
+     * Send only what is still missing, to only the recipients still missing it.
+     *
+     * The reason the grid exists. Re-running a whole batch to fix two recipients double-sends to
+     * everyone who was fine, which is worse than the original failure -- so before this, a
+     * partly-failed broadcast had no fix at all short of opening each chat by hand.
+     *
+     * The grid is kept and repaired in place rather than rebuilt: a square that succeeded the
+     * first time stays green, so a second failure reads as "still missing" rather than starting
+     * the count over. Recipients who already have everything are not touched.
+     */
+    fun resendNewsletterMissing() {
+        val progress = _state.value.newsletterProgress ?: return
+        if (!progress.done) return
+        val payload = newsletterPayload
+        if (payload == null || payload.batch.id != progress.batchId) {
+            _state.update {
+                it.copy(
+                    newsletterProgress = progress.copy(
+                        error = "That broadcast is no longer loaded — open the batch and send again",
+                    ),
+                )
+            }
+            return
+        }
+        if (newsletterJob?.isActive == true) return
+        val outstanding = progress.resendable()
+        if (outstanding.isEmpty()) return
+
+        val byKey = payload.batch.targets.associateBy { it.key }
+        val grid = progress.rows.toMutableList()
+
+        newsletterJob = viewModelScope.launch(Dispatchers.IO) {
+            val client = api
+            if (client == null) {
+                _state.update {
+                    it.copy(
+                        newsletterProgress = progress.copy(error = "Not signed in to the server"),
+                    )
+                }
+                return@launch
+            }
+            val method = sendMethod()
+
+            fun publish(done: Boolean) {
+                val snapshot = progress.copy(rows = grid.toList(), done = done, error = null)
+                _state.update { it.copy(newsletterProgress = snapshot) }
+            }
+
+            fun mark(row: Int, item: Int, value: SendState) {
+                val states = grid[row].states.toMutableList()
+                states[item] = value
+                grid[row] = grid[row].copy(states = states)
+                publish(done = false)
+            }
+
+            publish(done = false)
+
+            var first = true
+            for (row in outstanding) {
+                val at = grid.indexOfFirst { it.targetKey == row.targetKey }
+                if (at < 0) continue
+                val target = byKey[row.targetKey] ?: continue
+                if (!first) delay(newsletterGapMs)
+                first = false
+
+                val convo = newsletterConversation(target)
+                if (convo == null) {
+                    val states = grid[at].states.toMutableList()
+                    for (i in states.indices) if (states[i] != SendState.Sent) states[i] = SendState.Failed
+                    grid[at] = grid[at].copy(states = states)
+                    publish(done = false)
+                    continue
+                }
+
+                var room: String? = null
+                // Index 0 is the message when there is one; the photos follow in order. The
+                // same layout the first pass built, so a square means the same thing on a retry.
+                val textIndex = if (payload.body.isNotEmpty()) 0 else -1
+                val photoBase = if (textIndex == 0) 1 else 0
+
+                if (textIndex >= 0 && grid[at].states[textIndex] != SendState.Sent) {
+                    mark(at, textIndex, SendState.Sending)
+                    val ok = runCatching {
+                        val echo = sendAcrossRooms(convo.guid, sendTargets(convo, method)) { g ->
+                            client.send(g, payload.body, newTempGuid(), method, null).also { room = g }
+                        }
+                        bumpConversation(convo.guid, echo.previewText, echo.date, fromMe = true)
+                    }.isSuccess
+                    mark(at, textIndex, if (ok) SendState.Sent else SendState.Failed)
+                    if (!ok) continue
+                }
+
+                payload.photos.forEachIndexed { i, photo ->
+                    val slot = photoBase + i
+                    if (grid[at].states.getOrNull(slot) == SendState.Sent) return@forEachIndexed
+                    mark(at, slot, SendState.Sending)
+                    val ok = runCatching {
+                        val known = room
+                        val echo = if (known != null) {
+                            client.sendAttachment(
+                                known, photo.bytes, photo.name, photo.mime, newTempGuid(), method,
+                            )
+                        } else {
+                            sendAcrossRooms(convo.guid, sendTargets(convo, method)) { g ->
+                                client.sendAttachment(
+                                    g, photo.bytes, photo.name, photo.mime, newTempGuid(), method,
+                                ).also { room = g }
+                            }
+                        }
+                        bumpConversation(convo.guid, echo.previewText, echo.date, fromMe = true)
+                    }.isSuccess
+                    mark(at, slot, if (ok) SendState.Sent else SendState.Failed)
+                }
+
+                messageCache.remove(convo.guid)
+            }
+            publish(done = true)
             refresh()
         }
     }

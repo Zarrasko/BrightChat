@@ -60,6 +60,13 @@ class NewsletterJsonTest {
         assertEquals("No recipients", NewsletterBatch("id", "Empty").summary())
     }
 
+    /**
+     * Build a progress grid from the outcome it should read as.
+     *
+     * The counts the status line quotes are derived from the grid now rather than stored, so a
+     * test that wants "four sent, one failed" has to say it in squares. Two items per row -- a
+     * message and one photo -- so a partial recipient has somewhere to be partial.
+     */
     private fun progress(
         sent: Int,
         total: Int,
@@ -67,7 +74,55 @@ class NewsletterJsonTest {
         partial: List<String> = emptyList(),
         done: Boolean = false,
         error: String? = null,
-    ) = NewsletterProgress("nl-1", "B", sent, total, failed, partial, done, error)
+    ): NewsletterProgress {
+        val rows = ArrayList<NewsletterRow>()
+        repeat(sent - partial.size) { i ->
+            rows += NewsletterRow("ok$i", "OK$i", listOf(SendState.Sent, SendState.Sent))
+        }
+        // Counted as sent by the old model and still counted as sent here: they got something.
+        partial.forEach { rows += NewsletterRow("p:$it", it, listOf(SendState.Sent, SendState.Failed)) }
+        failed.forEach { rows += NewsletterRow("f:$it", it, listOf(SendState.Failed, SendState.Failed)) }
+        while (rows.size < total) {
+            rows += NewsletterRow("pend${rows.size}", "P${rows.size}", listOf(SendState.Pending, SendState.Pending))
+        }
+        return NewsletterProgress(
+            batchId = "nl-1",
+            batchName = "B",
+            items = listOf(NewsletterItem("Message", false), NewsletterItem("a.jpg", true)),
+            rows = rows,
+            done = done,
+            error = error,
+        )
+    }
+
+    @Test
+    fun `a square is tracked per item per recipient`() {
+        val p = progress(1, 2, failed = listOf("Alex"), done = true)
+        // One row each, two squares each: the whole point is that "which item" is answerable.
+        assertEquals(2, p.rows.size)
+        assertEquals(2, p.items.size)
+        assertEquals(listOf(0, 1), p.rows.first { it.label == "Alex" }.missing())
+    }
+
+    @Test
+    fun `resend targets only what is still missing`() {
+        val p = progress(2, 3, partial = listOf("Sam"), failed = listOf("Alex"), done = true)
+        val outstanding = p.resendable()
+        // Everyone who got everything is left out of the retry entirely -- re-running the batch
+        // is what this exists to avoid.
+        assertEquals(setOf("Sam", "Alex"), outstanding.map { it.label }.toSet())
+        // Sam got the message and missed the photo, so only the photo is owed.
+        assertEquals(listOf(1), outstanding.first { it.label == "Sam" }.missing())
+        // Three deliveries outstanding: Alex's two and Sam's one.
+        assertEquals(3, p.missingCount())
+    }
+
+    @Test
+    fun `nothing is owed when everyone got everything`() {
+        val p = progress(3, 3, done = true)
+        assertEquals(emptyList<NewsletterRow>(), p.resendable())
+        assertEquals(0, p.missingCount())
+    }
 
     @Test
     fun `progress reads as progress while running and as an outcome when done`() {
