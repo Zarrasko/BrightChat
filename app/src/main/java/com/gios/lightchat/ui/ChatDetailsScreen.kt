@@ -540,6 +540,45 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                         )
                     }
                 }
+
+                // Delete the whole conversation, the verb LightOS's own messenger calls
+                // "clear" and reaches the same way: tap the name at the top of a thread.
+                // Not inside `canManage` — that also requires a group, and a 1:1 is the
+                // thread you most want to be rid of. Gated on the Private API alone
+                // because that is what the server gates DELETE /chat/:guid on; the
+                // ViewModel refuses without it, so offering the row would be a dead tap.
+                //
+                // There is deliberately no local-only "clear": the store is a cache of
+                // the Mac's Messages, so emptying it here would refill on the next sync
+                // and read as the delete having failed.
+                if (state.privateApi) {
+                    item(key = "delete") {
+                        HapticText(
+                            text = if (confirming == DELETE) {
+                                "Delete this conversation?"
+                            } else {
+                                "Delete conversation"
+                            },
+                            style = ChatType.body,
+                            color = if (confirming == DELETE) {
+                                ChatColors.onSurface
+                            } else {
+                                ChatColors.onSurfaceDim
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                            onClick = {
+                                if (confirming == DELETE) {
+                                    confirming = null
+                                    // Clears `open`, so this screen and the thread under
+                                    // it both unmount back to the conversation list.
+                                    viewModel.deleteConversation(convo)
+                                } else {
+                                    confirming = DELETE
+                                }
+                            },
+                        )
+                    }
+                }
             }
 
             // This screen's own line first: it is the newer of the two, and a stale
@@ -591,6 +630,9 @@ private const val LEAVE = "\u0000leave"
 
 /** Sentinel for the background row's two-tap Remove, sharing the same slot. */
 private const val BG_REMOVE = "\u0000background"
+
+/** Sentinel for the Delete conversation row's two-tap confirm, same slot again. */
+private const val DELETE = "\u0000delete"
 
 /** A section heading, plus the gap under it. */
 @Composable

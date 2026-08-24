@@ -16,7 +16,7 @@ install or update it directly. Don't have BrightMarket yet? Get it, and browse
 every Bright app, at
 **[gi-os.github.io/brightmarket-index/browse.html](https://gi-os.github.io/brightmarket-index/browse.html)**.
 
-**Current version: v2.27.x.** See [Version history](#version-history).
+**Current version: v2.28.x.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -349,6 +349,7 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v2.25.x | One settings page that scrolls, with sections; QR-code input for the Whisper key |
 | v2.26.x | The Speak key is a drawn microphone, shown only when transcription is configured |
 | v2.27.x | Fix: the colour lift could lose a one-shot race to LightOS and never retry, leaving photos grayscale until an activity swap (light-reports#35) |
+| v2.28.x | **Delete conversation** on the contact page — tap the header, two-tap confirm at the foot of the page (light-reports#36) |
 
 ## Licence
 
