@@ -40,7 +40,7 @@ android {
         targetSdk = 35
         // CI overwrites both from the workflow run number; see .github/workflows/build.yml
         versionCode = 16
-        versionName = "2.26.0"
+        versionName = "2.27.0"
 
         buildConfigField("String", "REPORT_TOKEN", "\"$reportToken\"")
         buildConfigField("String", "REPORT_REPO", "\"gi-os/light-reports\"")

@@ -19,34 +19,54 @@ import android.util.Log
  * and the viewer simply stays grayscale like the rest of the phone.
  *
  * [acquire]/[release] bracket the lifetime of any screen that wants colour — the
- * full-screen image viewer, and the photo picker with its camera; the
- * [onAppHidden]/[onAppVisible] pair (MainActivity.onStop/onStart) restores
- * grayscale while the user is elsewhere on the phone and re-lifts it if they
- * come back with the viewer still open. `holders` survives that stop/start;
- * nothing is persisted — a process death mid-view can leave the phone in color
- * until the app next runs (same gap zero accepts).
+ * full-screen image viewer, the photo picker with its camera, and the background
+ * editor; the [onAppHidden]/[onAppVisible] pair (MainActivity.onStop/onStart)
+ * restores grayscale while the user is elsewhere on the phone and re-lifts it if
+ * they come back with the viewer still open.
+ *
+ * This used to write the setting **on transitions** — lift on the 0→1 holder, restore
+ * on the 1→0 — and that shape is exactly what BrightMusic's v0.41 report caught when it
+ * inherited this file: a transition that is missed, or that fires while LightOS has
+ * already re-pinned the setting underneath us, strands the panel in the wrong mode with
+ * no call left that will ever correct it. The lift also early-returned when the
+ * daltonizer was already off ("already colour") without recording anything, so the
+ * matching restore had nothing to put back. light-reports#35 is the same failure from
+ * the other side: LightOS pins grayscale during the launch handoff, the one-shot lift
+ * loses the race, and colour never engages until some activity swap re-runs
+ * onStart. So this is now the same [apply] model BrightMusic moved to: every entry
+ * point states what the panel should be *right now* and makes it so.
  */
 object ColorMode {
     private const val TAG = "ColorMode"
     private const val ENABLED = "accessibility_display_daltonizer_enabled"
     private const val MODE = "accessibility_display_daltonizer"
 
-    /** The daltonizer mode to put back (LightOS pins 0 = simulate monochromacy,
-     *  i.e. grayscale); non-null exactly while we're holding the phone in color. */
-    private var savedMode: Int? = null
+    /** Whether *we* are the reason the panel is in colour. Never inferred from the
+     *  setting itself — reading the setting to decide is what made the old lift lose
+     *  races against LightOS writing the same key. */
+    private var holdingColour = false
+
+    /** The daltonizer mode to put back. Defaults to 0 (LightOS pins simulate
+     *  monochromacy), which is also what recovers a phone left stuck in colour by an
+     *  older build: restoring 0 is always the right grayscale. */
+    private var savedMode: Int = 0
 
     /**
-     * How many screens currently want colour, not whether one does — there are two
-     * holders now (the image viewer and the photo picker), and with a boolean whichever
-     * released first would turn colour off underneath the other. Kept across activity
-     * stop/start.
+     * How many screens currently want colour, not whether one does — there are three
+     * holders now (the image viewer, the photo picker, the background editor), and with
+     * a boolean whichever released first would turn colour off underneath the others.
+     * Kept across activity stop/start.
      */
     private var holders = 0
+
+    /** False while the app is in the background, where the rest of the phone must
+     *  stay mono. */
+    private var appVisible = true
 
     /** A screen that wants true colour opened: hold it until [release]. */
     fun acquire(context: Context) {
         holders++
-        if (holders == 1) lift(context)
+        apply(context)
     }
 
     /** Back to grayscale, immediately. Hiding the flip is the *viewer's* job: it
@@ -58,41 +78,48 @@ object ColorMode {
      *  visibly desaturated. */
     fun release(context: Context) {
         if (holders > 0) holders--
-        if (holders == 0) restore(context)
+        apply(context)
     }
 
     /** App left the foreground — the rest of the phone should be B&W even if
      *  the viewer is still open underneath. */
     fun onAppHidden(context: Context) {
-        restore(context)
+        appVisible = false
+        apply(context)
     }
 
     /** App back in the foreground — re-lift if anything still wants colour. Doesn't
      *  touch [holders]: leaving the app isn't the same as closing the viewer. */
     fun onAppVisible(context: Context) {
-        if (holders > 0) lift(context)
+        appVisible = true
+        apply(context)
     }
 
-    private fun lift(context: Context) {
+    /**
+     * Put the panel where it should be, from scratch, every time.
+     *
+     * Idempotent and stateless about how it got here, which is the whole point: a
+     * missed or overwritten transition self-corrects on the next call instead of
+     * stranding the phone in the wrong mode until the process restarts.
+     */
+    private fun apply(context: Context) {
+        val wantColour = holders > 0 && appVisible
+        if (wantColour == holdingColour) return
         val resolver = context.contentResolver
-        if (Settings.Secure.getInt(resolver, ENABLED, 0) != 1) return // already color
-        val mode = Settings.Secure.getInt(resolver, MODE, 0)
         try {
-            Settings.Secure.putInt(resolver, ENABLED, 0)
-            savedMode = mode
+            if (wantColour) {
+                // Remember what to put back *before* turning it off. If it is already
+                // off, the stored 0 is right anyway: LightOS pins monochromacy, so 0 is
+                // what "on" means here.
+                savedMode = Settings.Secure.getInt(resolver, MODE, 0)
+                Settings.Secure.putInt(resolver, ENABLED, 0)
+            } else {
+                Settings.Secure.putInt(resolver, MODE, savedMode)
+                Settings.Secure.putInt(resolver, ENABLED, 1)
+            }
+            holdingColour = wantColour
         } catch (e: SecurityException) {
             Log.w(TAG, "WRITE_SECURE_SETTINGS not granted; staying grayscale")
-        }
-    }
-
-    private fun restore(context: Context) {
-        val mode = savedMode ?: return
-        try {
-            Settings.Secure.putInt(context.contentResolver, MODE, mode)
-            Settings.Secure.putInt(context.contentResolver, ENABLED, 1)
-            savedMode = null
-        } catch (e: SecurityException) {
-            Log.w(TAG, "WRITE_SECURE_SETTINGS revoked mid-hold; can't restore grayscale")
         }
     }
 }

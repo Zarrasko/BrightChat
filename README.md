@@ -16,7 +16,7 @@ install or update it directly. Don't have BrightMarket yet? Get it, and browse
 every Bright app, at
 **[gi-os.github.io/brightmarket-index/browse.html](https://gi-os.github.io/brightmarket-index/browse.html)**.
 
-**Current version: v2.18.x.** See [Version history](#version-history).
+**Current version: v2.27.x.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -341,6 +341,14 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v2.17.x | **Newsletter** — named batches of chats and contacts that one message, photos and all, goes out to separately |
 | v2.18.x | Fix: photos still uploading lost their bubble when a fetch landed, and never came back (light-reports#22) |
 | v2.19.x | **Send video** — clips appear in the picker with their running time and stream straight off disk, so a recording never has to fit in memory |
+| v2.20.x | **Audio clips** — voice memos play in-app with a draggable scrubber, and BrightChat is a share target for BrightRecorder |
+| v2.21.x | **Whisper transcription** — open a voice memo, press WORDS, read what was said; any OpenAI-shaped server |
+| v2.22.x | **Dictate a message** — tap, speak, tap; the words are appended to the draft and the recording is deleted on return |
+| v2.23.x | The Speak key is always visible, in all three composers, as a word |
+| v2.24.x | The screen stays on while a newsletter goes out |
+| v2.25.x | One settings page that scrolls, with sections; QR-code input for the Whisper key |
+| v2.26.x | The Speak key is a drawn microphone, shown only when transcription is configured |
+| v2.27.x | Fix: the colour lift could lose a one-shot race to LightOS and never retry, leaving photos grayscale until an activity swap (light-reports#35) |
 
 ## Licence
 

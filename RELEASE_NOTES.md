@@ -1,3 +1,34 @@
+## BrightChat v2.27 — colour that loses a race to LightOS now wins the rematch
+
+**"Color filter did not work until i shook to submit this feedback."** Opening a photo is supposed
+to lift the phone's forced grayscale for as long as the photo is on screen. On this launch it
+didn't — and shaking the phone to file the report is what fixed it, which is the bug in one
+sentence: the report activity swapping in and out re-ran the app's start/stop pair, and *that*
+re-applied the colour lift that the first attempt had lost.
+
+Lost to what? LightOS pins the grayscale itself (the accessibility daltonizer), and it writes that
+setting around app handoffs. The old `ColorMode` wrote its side **on transitions only** — once when
+the first screen asked for colour, once when the last one left. A one-shot write that lands before
+LightOS's does is simply overwritten, and nothing in the app would ever write again: the screen
+count never re-crossed zero, so the phone sat in black and white with a photo open, looking exactly
+like the missing adb grant. Worse, the old lift trusted a *read* of the setting — if the daltonizer
+happened to be off for the instant it looked (as it is mid-handoff), it concluded "already colour",
+recorded nothing, and the restore on the way out had nothing to put back.
+
+BrightMusic hit this same failure in its v0.41 (this very file was the ancestor) and the fix ports
+straight back: stop writing on edges, state the goal. One `apply()` computes what the panel should
+be *right now* — some screen wants colour **and** the app is in the foreground — and makes it so,
+called from every entry point: screen opened, screen closed, app hidden, app shown. A write that
+LightOS clobbers is re-issued by the next call instead of being lost forever, and what to restore is
+remembered from what we ourselves changed, never guessed from a read that can lie. Leaving the app
+still returns the phone to black and white immediately — that part was always right.
+
+Fixes [light-reports#35] — colour did not engage until shaking to report forced an activity swap.
+
+- 96 tests.
+
+---
+
 ## BrightChat v2.26 — it is a microphone, and it only shows up when it works
 
 **"Should be a mic not a voice button."** It is now a drawn microphone — a capsule, a cradle, a stem
