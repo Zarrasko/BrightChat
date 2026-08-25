@@ -256,6 +256,65 @@ class MessageStore private constructor(context: Context) {
         }
     }
 
+    /** One conversation you exchanged messages in, within a window. */
+    data class Talked(
+        val chatGuid: String,
+        val firstMs: Long,
+        val lastMs: Long,
+        val messages: Int,
+        val fromThem: Int,
+    ) {
+        /** Whether they said anything, as opposed to you having talked at them. */
+        val theyReplied: Boolean get() = fromThem > 0
+    }
+
+    /**
+     * Who you exchanged messages with in a window, and when.
+     *
+     * **A query, not a log.** Every message this phone has ever synced is already in this table
+     * with its date, so who you talked to last Tuesday is a `GROUP BY` — there is nothing to record
+     * as it happens and nothing to miss if the app was closed. That makes it retroactive over the
+     * whole synced history, which a recorder could never be.
+     *
+     * The rooms join is load-bearing. A group iMessage that has forked spans several room guids and
+     * is one conversation; messages are tagged with whichever room they arrived in. Without
+     * collapsing them a forked group comes back as two or three separate people you talked to.
+     *
+     * Counting `from_me` from the JSON rather than a column because there isn't one — a `LIKE` is
+     * crude but the alternative is decoding a thousand rows to answer "did they reply". The
+     * canonical form is `"fromMe":true`, which is what the encoder writes.
+     */
+    fun talkedTo(fromMs: Long, toMs: Long): List<Talked> {
+        val out = ArrayList<Talked>()
+        val sql = """
+            SELECT COALESCE(r.primary_guid, m.chat_guid) AS conv,
+                   MIN(m.date), MAX(m.date), COUNT(*),
+                   SUM(CASE WHEN m.json LIKE '%"fromMe":true%' THEN 0 ELSE 1 END)
+            FROM messages m
+            LEFT JOIN rooms r ON r.room_guid = m.chat_guid
+            WHERE m.date >= ? AND m.date < ?
+            GROUP BY conv
+            ORDER BY MIN(m.date) ASC
+        """.trimIndent()
+        runCatching {
+            helper.readableDatabase.rawQuery(sql, arrayOf(fromMs.toString(), toMs.toString()))
+                .use { c ->
+                    while (c.moveToNext()) {
+                        out.add(
+                            Talked(
+                                chatGuid = c.getString(0),
+                                firstMs = c.getLong(1),
+                                lastMs = c.getLong(2),
+                                messages = c.getInt(3),
+                                fromThem = c.getInt(4),
+                            ),
+                        )
+                    }
+                }
+        }
+        return out
+    }
+
     /** The conversation list, newest activity first — what the list screen renders. */
     fun chats(): List<Conversation> {
         val out = ArrayList<Conversation>()

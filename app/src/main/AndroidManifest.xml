@@ -97,6 +97,19 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.LightChat.SplashScreen">
+        <!--
+          Who you talked to on a day, read-only, by date, for LightNotebook's journal.
+
+          Names only. No message text ever leaves this app and nothing here says what was said — a
+          journal wants "talked to Alex", and anything past that is handing over your conversations.
+          Answered from the local message table, so it is retroactive across everything synced rather
+          than only what happened since some recorder started. See TalkedProvider.
+        -->
+        <provider
+            android:name=".share.TalkedProvider"
+            android:authorities="com.gios.lightchat.talked"
+            android:exported="true" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
