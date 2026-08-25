@@ -1,3 +1,40 @@
+## BrightChat v2.29 — who you talked to, and one branch that could ship July
+
+**Days can ask who you talked to.** LightNotebook's journal already knows where you were; it can now
+ask this app who you spoke to on a given day. It is a query, not a log: every message this phone has
+synced is in the local table with its date, so the answer is a `GROUP BY` — nothing to record as it
+happens, nothing missed because the app was closed, and retroactive across everything ever synced in
+a way a recorder could not be.
+
+Names only. **No message text ever leaves this app**, and nothing in the provider says what was
+said. What a day gets is the first and last time you exchanged something, the conversation's name,
+whether it was a group, how many messages, and whether they replied at all — that last one because
+talking *at* someone and talking *with* them are different days. The name is the same iMessage-style
+title the app shows itself, so a day never calls someone by a phone number the rest of the app calls
+Alex.
+
+This existed on `main` and had never reached `develop`, which is the odd part and the reason for the
+rest of this release.
+
+**`main` could have shipped July's app to everyone.** The release workflow triggered on pushes to
+`develop` *and* `main`, and `main` had been 66 commits behind develop since the end of July. Any
+push to it — a stray click, a merge from a branch someone thought was current — would have built,
+signed and published an APK from that old commit, and BrightMarket would have offered it to every
+install as an update, on top of a version far newer than it. Nothing about it would have looked
+wrong: the build would go green and the release would appear.
+
+`main` is the same commit as develop now, and it is no longer a release trigger. `develop` is the
+only branch that publishes.
+
+**A change into develop gets compiled before it ships, not by shipping.** develop is both the
+default branch and the release trigger, and the Check workflow ignored it — so the push that
+released a change was also the first thing to compile it. Check now runs on pull requests, so a
+pull request into develop is built before it can become a release. It is deliberately not added to
+the push trigger; that would build every release twice.
+
+Also: light-common moves to 1.2.3, and every action in both workflows is pinned to a commit SHA
+rather than a moving version tag.
+
 ## BrightChat v2.28 — delete a conversation from the top of it
 
 **"Add a 'clear' option to delete the chat when you tap the phone number at the top of a chat."**

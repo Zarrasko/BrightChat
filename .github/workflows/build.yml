@@ -3,9 +3,13 @@ name: Build & Release APK
 # Same shape as the other gi-os/Light* repos: every push to the integration branch
 # builds, signs, verifies and publishes one APK, which is what Obtainium watches.
 # Unlike those repos the keystore is not committed — it comes from repo secrets.
+# `develop` only. `main` was on this list too, while sitting 66 commits behind develop — so any
+# push to it, accidental or otherwise, would have cut a signed release from July's code that
+# BrightMarket immediately offers as an update to everyone. `main` is now the same commit as
+# develop and is not a trigger.
 on:
   push:
-    branches: [develop, main]
+    branches: [develop]
     paths-ignore:
       - '**.md'
   workflow_dispatch:
@@ -25,13 +29,13 @@ jobs:
       GPR_TOKEN: ${{ secrets.GPR_TOKEN }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
 
       # versionCode is the workflow run number, so every push produces a newer build
       # and `adb install -r` (and Obtainium) upgrade in place instead of erroring.
@@ -117,7 +121,7 @@ jobs:
             || { echo '::error::package declares no launcher icon'; exit 1; }
 
       - name: Upload release APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: LightChat-apk
           path: out/*.apk
@@ -126,14 +130,14 @@ jobs:
       # Debug stays an artifact and is never published: Obtainium picks whatever asset
       # it finds, and two APKs per release is how it ends up installing the wrong one.
       - name: Upload debug APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: LightChat-debug-apk
           path: debugout/*.apk
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ steps.ver.outputs.version }}
           name: LightChat v${{ steps.ver.outputs.version }}

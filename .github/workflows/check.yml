@@ -4,9 +4,14 @@ name: Check
 # out whether something compiles without also shipping it. This runs on every other
 # branch and does exactly that and nothing else — no keystore, no APK, no release.
 # Same shape as gi-os/LightCamera's check.yml.
+# `pull_request` as well as the branch pushes. develop is both the default branch and the release
+# trigger, so before this a change merged straight into develop was compiled for the first time by
+# the same push that shipped it — a pull request into develop now gets a build first. Deliberately
+# not adding develop to the push trigger: that would compile every release twice.
 on:
   push:
     branches-ignore: [develop, main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -24,13 +29,13 @@ jobs:
       GPR_TOKEN: ${{ secrets.GPR_TOKEN }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
 
       # `env -u CI` is load-bearing, and the reason needs writing down: build.gradle.kts
       # refuses to configure a release build with no keystore *while CI is set*, so that a
