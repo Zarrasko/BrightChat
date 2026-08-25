@@ -14,7 +14,7 @@ reached privately over [Tailscale](https://tailscale.com/). Package
 Scan the code above with **BrightMarket** installed to open BrightChat there and
 install or update it directly. Don't have BrightMarket yet? Get it, and browse
 every Bright app, at
-**[gi-os.github.io/brightmarket-index/browse.html](https://gi-os.github.io/brightmarket-index/browse.html)**.
+**[brightmarket.gzl.dev](https://brightmarket.gzl.dev)**.
 
 **Current version: v2.28.x.** See [Version history](#version-history).
 
@@ -206,7 +206,7 @@ the list's Known tab uses — a named group, or any participant in your address 
 
 ### Photos from Roll
 
-[Roll](https://github.com/gi-os/LightCamera), the camera app, sends straight here: its send
+[Roll](https://github.com/gi-os/Roll), the camera app, sends straight here: its send
 button opens your contacts, you pick a person, and BrightChat opens on that thread with the
 photograph already sent. No chooser in between.
 
@@ -377,3 +377,21 @@ details (package id, install instructions) are superseded by the sections above.
 > Open the app to a list of conversations (newest activity first); tap one to read the
 > thread, or tap **New** to start one (searches your contacts by name/number/email).
 > Tap **Messages** at the top for settings, **Refresh** to re-pull.
+
+<!-- bright-footer:begin -->
+---
+
+## Bright\*
+
+*iMessage on an Android phone that has never heard of Apple, by way of a BlueBubbles server on your own Mac.*
+
+26 open-source apps for the **Light Phone III** — camera, music, maps, messages,
+reading, transit, games. The phone has no app store, so they install by sideload: scan one
+code from **[brightmarket.gzl.dev](https://brightmarket.gzl.dev)** and BrightMarket keeps them updated.
+
+[Roll](https://github.com/gi-os/Roll) · [BrightMusic](https://github.com/gi-os/BrightMusic) · [BrightWay](https://github.com/gi-os/BrightWay) · **BrightChat** (you are here) · [BrightControl](https://github.com/gi-os/BrightControl) · [BrightRemote](https://github.com/gi-os/BrightRemote) · [browse all 26 →](https://brightmarket.gzl.dev)
+
+The Light Phone does not sponsor or endorse any of these. Built by
+[Giovanni Lupo](https://github.com/gi-os) — if this one is useful to you, a ⭐ helps the next
+person find it.
+<!-- bright-footer:end -->

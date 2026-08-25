@@ -6,6 +6,8 @@ name: Build & Release APK
 on:
   push:
     branches: [develop, main]
+    paths-ignore:
+      - '**.md'
   workflow_dispatch:
 
 permissions:
