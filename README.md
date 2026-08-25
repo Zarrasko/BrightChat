@@ -383,8 +383,6 @@ details (package id, install instructions) are superseded by the sections above.
 
 ## Bright\*
 
-*iMessage on an Android phone that has never heard of Apple, by way of a BlueBubbles server on your own Mac.*
-
 26 open-source apps for the **Light Phone III** — camera, music, maps, messages,
 reading, transit, games. The phone has no app store, so they install by sideload: scan one
 code from **[brightmarket.gzl.dev](https://brightmarket.gzl.dev)** and BrightMarket keeps them updated.
