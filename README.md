@@ -1,3 +1,5 @@
+<img src="docs/icon.png" alt="" width="72" align="left" />
+
 # BrightChat
 
 An **iMessage client** for the [Light Phone III](https://www.thelightphone.com/),
