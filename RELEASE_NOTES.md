@@ -1,3 +1,22 @@
+## BrightChat v2.30 — one box for a message, not two
+
+BrightControl v3.65 grew a heads-up box of its own. It reads the shade and puts the same box over
+the screen for whatever posted — including the notification this app raises a moment before it
+draws its own. So with both switched on, a text was one buzz and **two boxes**, one landing on top
+of the other.
+
+**This one now stands aside.** BrightControl says who is drawing the box; when it is, the box here
+is skipped. The setting is untouched — it still reads as yours, and the row says *On-screen alerts:
+BrightControl* rather than pretending to be on while nothing appears. Turn banners off over there
+and this app's box comes straight back, with nothing to set here.
+
+**The buzz and the notification never change.** Both happen before the gate, and both have to: the
+notification is the record BrightControl reads and LightGlance's dot counts. If BrightControl's
+listener grant ever lapses, this app has still buzzed and still filled the shade.
+
+**And it checks BrightControl is really there.** A remembered claim from an app that has since been
+uninstalled would have silenced this box for good, with nothing on the phone to explain why.
+
 ## BrightChat v2.29 — who you talked to, and one branch that could ship July
 
 **Days can ask who you talked to.** LightNotebook's journal already knows where you were; it can now

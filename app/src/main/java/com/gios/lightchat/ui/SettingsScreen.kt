@@ -37,6 +37,7 @@ import com.gios.lightchat.CallAnnounce
 import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.Delivery
 import com.gios.lightchat.Dialer
+import com.gios.lightchat.AlertOwner
 import com.gios.lightchat.api.Store
 import com.gios.lightchat.api.parseWhisperQr
 import com.gios.lightchat.ui.theme.ChatColors
@@ -148,13 +149,25 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
         // On by default. Off keeps the buzz and the shade notification but never puts
         // the box over the screen (or wakes it) — for people who find a lit-up panel
         // worse than waiting to check.
+        //
+        // A third state, and it is not this app's to set: BrightControl draws the box for every
+        // app on the phone now, and when it does, this one stands down. Saying "on" while nothing
+        // appeared would be a toggle that lies — and the setting really is still on, which is why
+        // it is said out loud here rather than quietly flipped.
         var headsUpBox by remember { mutableStateOf(Store.headsUpBox(context)) }
+        val ownedElsewhere = AlertOwner.ownedElsewhere(context)
         Toggle(
-            label = if (headsUpBox) "On-screen alerts: on" else "On-screen alerts: off",
-            hint = if (headsUpBox) {
-                "New messages put a box over whatever the phone is showing."
-            } else {
-                "Just the buzz and a notification. Nothing appears over the screen."
+            label = when {
+                ownedElsewhere -> "On-screen alerts: BrightControl"
+                headsUpBox -> "On-screen alerts: on"
+                else -> "On-screen alerts: off"
+            },
+            hint = when {
+                ownedElsewhere ->
+                    "BrightControl puts the box up for every app now, so this one stands aside. " +
+                        "Turn banners off there to bring this one back."
+                headsUpBox -> "New messages put a box over whatever the phone is showing."
+                else -> "Just the buzz and a notification. Nothing appears over the screen."
             },
             onClick = {
                 headsUpBox = !headsUpBox

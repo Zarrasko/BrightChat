@@ -83,6 +83,12 @@ object HeadsUp {
             Log.d(TAG, "on-screen alerts off; notification only")
             return
         }
+        // BrightControl draws this box for every app now, off the notification posted a moment
+        // ago. Drawing ours as well is the same message twice, one box on top of the other.
+        if (AlertOwner.ownedElsewhere(context)) {
+            Log.d(TAG, "BrightControl owns the box; notification only")
+            return
+        }
         if (alreadyRead) {
             Log.d(TAG, "message already read elsewhere; no box")
             return

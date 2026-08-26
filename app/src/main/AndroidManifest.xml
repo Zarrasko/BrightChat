@@ -68,6 +68,13 @@
     <queries>
         <package android:name="com.gios.lightnotebook" />
         <!--
+          BrightControl, so `getPackageInfo` can answer whether it is still installed. It draws
+          the on-screen box for every app now and tells this one to stand down; a remembered
+          claim from an app that has since been removed would silence this app's box for good.
+          See AlertOwner.
+        -->
+        <package android:name="com.gios.lightcontrol" />
+        <!--
           The dialer, for the Call verb on the contact page and the thread header. Without
           this, `queryIntentActivities` for ACTION_DIAL comes back empty on a phone that
           plainly has a phone app, and the verb hides itself — the same failure mode the
@@ -177,6 +184,23 @@
         <receiver
             android:name=".PollAlarm"
             android:exported="false" />
+
+        <!--
+            BrightControl saying whether it is drawing the on-screen box for every app. Exported
+            because the sender is another app, and it must be: BrightControl addresses it with
+            setPackage, which still needs the receiver to be reachable across the UID boundary.
+
+            Nothing here is trusted with anything. The only thing this can do is stop this app
+            drawing its own box; the buzz and the shade notification are never gated on it, so a
+            forged broadcast costs a box and cannot silence a message. See AlertOwner.
+        -->
+        <receiver
+            android:name=".AlertOwnerReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.gios.lightcontrol.action.ALERTS_OWNED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Re-arms everything after the app updates itself. Without this, an Obtainium
              update that lands while the app isn't running leaves no alarm and no socket

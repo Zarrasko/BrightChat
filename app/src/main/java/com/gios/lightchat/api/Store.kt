@@ -28,6 +28,7 @@ object Store {
     private const val KEY_POLL_FAILS = "poll_fails"   // consecutive failures
     private const val KEY_NOTIFY_UNKNOWN = "notify_unknown" // alert for senders not in the address book
     private const val KEY_HEADS_UP = "heads_up_box" // show the on-screen box for new messages
+    private const val KEY_ALERTS_OWNED = "alerts_owned" // BrightControl draws the box for every app
     private const val KEY_CALL_ANNOUNCE = "call_announce" // text people the dumb-phone number when calling them
     private const val KEY_MY_NUMBER = "my_number" // manual override for the SIM's own number
     private const val KEY_NOTED = "noted_keys"        // conversations whose note has been opened
@@ -289,6 +290,22 @@ object Store {
 
     fun setHeadsUpBox(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_HEADS_UP, value).apply()
+    }
+
+    /**
+     * Whether BrightControl has claimed the on-screen box for every app on the phone.
+     *
+     * Written only by [com.gios.lightchat.AlertOwnerReceiver], never by a settings screen: this is
+     * not a preference, it is a fact about another app, and the user's own preference above stays
+     * exactly where they left it so turning BrightControl's banners off gives the box straight
+     * back. Read through [com.gios.lightchat.AlertOwner.ownedElsewhere], which also checks the
+     * claimant is still installed.
+     */
+    fun alertsOwnedElsewhere(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ALERTS_OWNED, false)
+
+    fun setAlertsOwnedElsewhere(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_ALERTS_OWNED, value).apply()
     }
 
     /**
