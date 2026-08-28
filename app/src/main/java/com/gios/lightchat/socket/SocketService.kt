@@ -22,6 +22,7 @@ import com.gios.lightchat.PendingAlerts
 import com.gios.lightchat.PollAlarm
 import com.gios.lightchat.SenderFilter
 import com.gios.lightchat.ReadStatusEvent
+import com.gios.lightchat.RoomIdentity
 import com.gios.lightchat.TypingEvent
 import com.gios.lightchat.api.BlueBubblesApi
 import com.gios.lightchat.api.Store
@@ -295,8 +296,26 @@ class SocketService : Service() {
         val data = args?.firstOrNull() as? JSONObject ?: return
         val incoming = BlueBubblesApi.messageEvent(data, isNew) ?: return
         SocketBus.incoming.tryEmit(incoming)
+        // The same room as the REST sweep left it, by room guid rather than by chat guid: a group
+        // iMessage has forked into sibling rooms is stored once, under the primary guid, and the
+        // event is tagged with whichever room the message landed in.
+        val stored = runCatching {
+            MessageStore.get(this).conversationForRoom(incoming.chatGuid)
+        }.getOrNull()
         // Read once: this is a JSON parse per call, and both the filter and the title want it.
         val contacts = contacts()
+        // Who the room is, which the event alone cannot say: a push carries no `participants` for a
+        // group, so an unnamed one used to reach every notification as "Unknown". Resolved once and
+        // used by both the filter and the title, so the two cannot disagree about the same room.
+        // See [RoomIdentity].
+        val room = RoomIdentity.of(
+            eventName = incoming.chatDisplayName,
+            eventParticipants = incoming.participants,
+            storedName = stored?.displayName,
+            storedParticipants = stored?.participants.orEmpty(),
+            nickname = Store.nickname(this, stored?.guid ?: incoming.chatGuid),
+            sender = incoming.message.sender,
+        )
         // A one-time code, if this is one. Read before the alert gate because it decides the
         // gate, and held for the keyboard either way — see CodeProvider. Only for genuinely new
         // incoming messages: a code re-delivered by a reconnect is one the user has already
@@ -319,7 +338,12 @@ class SocketService : Service() {
             // the alert is gated. See SenderFilter.
             SenderFilter.mayAlert(
                 this,
-                SenderFilter.knownSender(contacts, incoming.chatDisplayName, incoming.message.sender),
+                SenderFilter.knownSender(
+                    contacts,
+                    room.name,
+                    incoming.message.sender,
+                    room.participants,
+                ),
                 carriesCode = code != null,
             )
         // Arrived while the app was open. Not necessarily *seen*: the user can be on the
@@ -327,7 +351,7 @@ class SocketService : Service() {
         // the message was never recorded anywhere. Hold it for the screen going off
         // instead — see PendingAlerts.
         if (alertable && AppForeground.active) {
-            val alert = alertText(incoming, contacts)
+            val alert = alertText(incoming, contacts, room)
             // "Foreground" alone can't tell the list from the open thread. A reply that
             // lands in the conversation the user is *in* — the one they just texted — is
             // being read as it arrives, and posting it when the screen goes off is a
@@ -346,7 +370,7 @@ class SocketService : Service() {
             // Title, and a body that names whoever is responsible — the sender in a group,
             // the reactor for a tapback. See AlertText; the phrasing is shared with the
             // background poll so the same message reads the same either way.
-            val alert = alertText(incoming, contacts)
+            val alert = alertText(incoming, contacts, room)
             val title = alert.title
             // The notification is the record — it stays in LightOS's list and feeds
             // LightGlance's dot. The box is the alert, and buzzes either way.
@@ -388,12 +412,18 @@ class SocketService : Service() {
      * off the socket thread's own work, but it is a single indexed-ish read for the one
      * message a reaction points at, and without it the line can only say "a message".
      */
-    private fun alertText(incoming: com.gios.lightchat.IncomingMessage, contacts: Contacts) =
+    private fun alertText(
+        incoming: com.gios.lightchat.IncomingMessage,
+        contacts: Contacts,
+        room: RoomIdentity.Room,
+    ) =
         AlertText.forMessage(
             message = incoming.message,
             isGroup = incoming.isGroup,
-            chatDisplayName = incoming.chatDisplayName,
-            participants = incoming.participants,
+            // The room as resolved in [onMessage], not as the event described it: for an unnamed
+            // group the event describes nobody. See [RoomIdentity].
+            chatDisplayName = room.name,
+            participants = room.participants,
             contacts = contacts,
             findTarget = { guid ->
                 runCatching { MessageStore.get(this).messageByGuid(guid) }.getOrNull()

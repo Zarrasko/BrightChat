@@ -446,7 +446,19 @@ clears the password and returns to setup.
 - **`SenderFilter`** (`SenderFilter.kt`) — the one place that decides whether a message may
   interrupt. Two callers (`SocketService.onMessage` for live messages, `CatchUp` for the poll)
   holding different shapes of the same fact, so it takes a `known` boolean rather than deriving it;
-  `knownSender` is the socket's version, off a single incoming message.
+  `knownSender` is the socket's version, off a single incoming message — and it takes the room's
+  participants, so `Contacts.knows`' rule ("a group is Known as soon as one member is") applies on
+  the live path too and not only on the poll.
+- **`RoomIdentity`** (`RoomIdentity.kt`) — who a room is, for the socket path: nickname, then the
+  event's name, then the stored row's; participants from the event, then the stored row, then the
+  sender alone. **A socket event carries no `participants` for a group** — the REST calls have to
+  name `chats.participants` in their `with` array and a push cannot ask for anything, and
+  `chatParticipants`' `chatIdentifier` fallback is rejected for a group because a group's identifier
+  is the literal `chat<digits>`. So an unnamed group reached `Contacts.title("", emptyList())` and
+  every one of its notifications, heads-up boxes and deferred alerts read **"Unknown"**. The stored
+  row — the same room as the REST sweep left it, looked up by `conversationForRoom` so a forked
+  group resolves to its primary — supplies what the event cannot. Pure and `Context`-free, so the
+  ordering is unit-tested (`RoomIdentityTest`).
 - **`SecureStore`** (`api/SecureStore.kt`) — at-rest encryption only. An
   AES-256-GCM key lives non-exportable in the AndroidKeyStore (hardware-backed)
   and encrypts the password. (Trimmed down from `ask`'s version — no Ed25519 /

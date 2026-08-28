@@ -42,8 +42,23 @@ object SenderFilter {
      *
      * A non-blank chat name means a named group, which counts as known whoever is speaking in it —
      * matching `Contacts.knows`, and matching the intuition that a group you named is not a
-     * stranger. Otherwise it comes down to whether the sender resolves to a name.
+     * stranger. Otherwise it comes down to whether the sender resolves to a name, or any of
+     * [participants] does.
+     *
+     * The participants are the half that used to be missing, and it mattered twice. This is
+     * `Contacts.knows`'s rule — "a group is Known as soon as one member is" — and without them the
+     * socket disagreed with the poll about the same room: an unnamed group of people you know, with
+     * a number you don't speaking in it, was a stranger to the live path and a friend to the
+     * catch-up. Which of those you got depended on whether the phone happened to be awake. The
+     * socket could not apply the rule at all until [RoomIdentity] gave it a participant list; see
+     * there for why an event on its own has none.
      */
-    fun knownSender(contacts: Contacts, chatDisplayName: String, sender: String?): Boolean =
-        chatDisplayName.isNotBlank() || (sender != null && contacts.name(sender) != null)
+    fun knownSender(
+        contacts: Contacts,
+        chatDisplayName: String,
+        sender: String?,
+        participants: List<String> = emptyList(),
+    ): Boolean = chatDisplayName.isNotBlank() ||
+        (sender != null && contacts.name(sender) != null) ||
+        participants.any { contacts.name(it) != null }
 }
