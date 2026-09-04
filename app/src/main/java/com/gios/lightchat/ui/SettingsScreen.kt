@@ -39,6 +39,8 @@ import com.gios.lightchat.Delivery
 import com.gios.lightchat.Dialer
 import com.gios.lightchat.AlertOwner
 import com.gios.lightchat.api.Store
+import com.gios.lightchat.api.KlipyApi
+import com.gios.lightchat.api.parseApiKeyQr
 import com.gios.lightchat.api.parseWhisperQr
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatDimens
@@ -77,6 +79,10 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
     // Scanning is a full-screen sub-mode, exactly as in the agent editor: the camera takes the
     // whole panel and the page comes back with the field filled in.
     var scanning by rememberSaveable { mutableStateOf(false) }
+    // Which field the camera is being opened for. Two things on this page are an API key now, and
+    // a scan aimed at one must not be able to overwrite the other — a Whisper code carries a URL
+    // and a model as well, and applying that to the GIF key would repoint transcription.
+    var scanFor by rememberSaveable { mutableStateOf(ScanTarget.Whisper) }
     var scanNote by rememberSaveable { mutableStateOf<String?>(null) }
     // Bumped by a successful scan, to re-read what the scan just wrote into the store.
     var scanned by remember { mutableStateOf(0) }
@@ -84,6 +90,18 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
     if (scanning) {
         QrScanScreen(
             onResult = { text ->
+                if (scanFor == ScanTarget.Gif) {
+                    val key = parseApiKeyQr(text)
+                    scanNote = if (key == null) {
+                        "That QR code doesn’t look like a key."
+                    } else {
+                        Store.setKlipyKey(context, key)
+                        scanned++
+                        "Scanned: GIF key"
+                    }
+                    scanning = false
+                    return@QrScanScreen
+                }
                 val config = parseWhisperQr(text)
                 scanNote = when {
                     config == null -> "That QR code doesn’t look like a key."
@@ -235,8 +253,16 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
         Whisper(
             viewModel = viewModel,
             reload = scanned,
-            note = scanNote,
-            onScan = { scanNote = null; scanning = true },
+            note = scanNote.takeIf { scanFor == ScanTarget.Whisper },
+            onScan = { scanNote = null; scanFor = ScanTarget.Whisper; scanning = true },
+        )
+
+        // ------------------------------------------------------------------------------ gifs
+        SectionHeader("GIFs")
+        GifKey(
+            reload = scanned,
+            note = scanNote.takeIf { scanFor == ScanTarget.Gif },
+            onScan = { scanNote = null; scanFor = ScanTarget.Gif; scanning = true },
         )
 
         // -------------------------------------------------------------------------- delivery
@@ -448,6 +474,69 @@ private fun Whisper(viewModel: ChatViewModel, reload: Int, note: String?, onScan
             modifier = Modifier.fillMaxWidth(),
         )
         Hint(note ?: "Reads an API key, or a whole server setup, off the screen of another device.")
+    }
+    Spacer(modifier = Modifier.height(12.dp))
+}
+
+/** Which key the QR scanner was opened for. */
+private enum class ScanTarget { Whisper, Gif }
+
+/**
+ * The GIF service key.
+ *
+ * One field, because there is one thing to say: a key, or nothing. Nothing is a working state —
+ * the picker still offers what this phone has **saved**, which is a real library rather than a
+ * cache, and needs no service (see [com.gios.lightchat.Gifs]). What a key buys is search.
+ *
+ * The service is KLIPY, which is what Discord's GIF search runs on since Google switched the Tenor
+ * API off in June — see [KlipyApi] for the whole story. Their test key is a form and a minute, and
+ * it is not in this repository on purpose: a key committed to a public repo is a key that gets
+ * scraped and rate-limited for every install.
+ */
+@Composable
+private fun GifKey(reload: Int, note: String?, onScan: () -> Unit) {
+    val context = LocalContext.current
+    var key by remember(reload) { mutableStateOf(Store.klipyKey(context)) }
+    val saved = remember(reload) { Store.savedGifs(context).size }
+    var editing by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(reload) { if (reload > 0) editing = true }
+
+    HapticText(
+        text = if (key.isBlank()) "GIF search: off" else "GIF search: KLIPY",
+        style = ChatType.body,
+        color = if (key.isBlank()) ChatColors.onSurfaceDim else ChatColors.onSurface,
+        onClick = { editing = !editing },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Hint(
+        when {
+            key.isBlank() && saved == 0 -> "A key turns the GIF button in a thread into a search."
+            key.isBlank() -> "$saved saved — searching for more needs a key."
+            saved == 0 -> "Hold a GIF in the picker to save it."
+            saved == 1 -> "1 saved GIF, kept on the phone."
+            else -> "$saved saved GIFs, kept on the phone."
+        },
+    )
+
+    if (editing) {
+        Spacer(modifier = Modifier.height(10.dp))
+        WhisperField(
+            value = key,
+            hint = "API key",
+            onDone = {
+                Store.setKlipyKey(context, it)
+                key = Store.klipyKey(context)
+            },
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        HapticText(
+            text = "Scan a QR code",
+            style = ChatType.body,
+            color = ChatColors.onSurface,
+            onClick = onScan,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Hint(note ?: "Get one at ${KlipyApi.KEY_SOURCE}, then scan it off the laptop’s screen.")
     }
     Spacer(modifier = Modifier.height(12.dp))
 }

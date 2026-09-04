@@ -68,6 +68,19 @@ object Attachments {
     suspend fun thumbnail(context: Context, api: BlueBubblesApi, attachment: Attachment): ImageBitmap? =
         load(context, api, attachment, THUMB_DIM, thumbnails)
 
+    /**
+     * The cached local file for [attachment], downloading it on first use — no decoding.
+     *
+     * Split out of [load] for the one attachment this app draws without decoding it to a bitmap:
+     * an **animated GIF**, which [android.graphics.BitmapFactory] flattens to its first frame and
+     * which [com.gios.lightchat.ui.rememberGifPainter] plays from the file instead. Same cache
+     * entry as the still path, so a GIF opened full-screen after being seen in the thread is not
+     * fetched twice — and so an outgoing GIF renders from the bytes [cacheLocal] seeded, exactly
+     * as an outgoing photograph does.
+     */
+    suspend fun file(context: Context, api: BlueBubblesApi, attachment: Attachment): File? =
+        withContext(Dispatchers.IO) { fetch(context, api, attachment) }
+
     private suspend fun load(
         context: Context,
         api: BlueBubblesApi,
@@ -78,26 +91,30 @@ object Attachments {
         if (!attachment.isImage) return null
         cache.get(attachment.guid)?.let { return it }
         return withContext(Dispatchers.IO) {
-            val file = File(context.cacheDir, "att_" + safeName(attachment.guid))
-            if (!file.exists() || file.length() == 0L) {
-                val ok = downloads.withPermit {
-                    // Re-checked inside the permit: a full-size and a thumbnail request for
-                    // the same photo queue together, and the second would otherwise
-                    // re-download over a file the first had just written.
-                    if (file.exists() && file.length() > 0L) {
-                        true
-                    } else {
-                        runCatching { api.downloadAttachment(attachment.guid, file) }
-                            .onFailure { file.delete() } // never trust a truncated file later
-                            .isSuccess
-                    }
-                }
-                if (!ok) return@withContext null
-            }
+            val file = fetch(context, api, attachment) ?: return@withContext null
             val image = decode(file, maxDim)?.asImageBitmap() ?: return@withContext null
             cache.put(attachment.guid, image)
             image
         }
+    }
+
+    /** The bytes on disk, downloaded if they aren't there yet. Caller is on IO. */
+    private suspend fun fetch(context: Context, api: BlueBubblesApi, attachment: Attachment): File? {
+        val file = File(context.cacheDir, "att_" + safeName(attachment.guid))
+        if (file.exists() && file.length() > 0L) return file
+        val ok = downloads.withPermit {
+            // Re-checked inside the permit: a full-size and a thumbnail request for
+            // the same photo queue together, and the second would otherwise
+            // re-download over a file the first had just written.
+            if (file.exists() && file.length() > 0L) {
+                true
+            } else {
+                runCatching { api.downloadAttachment(attachment.guid, file) }
+                    .onFailure { file.delete() } // never trust a truncated file later
+                    .isSuccess
+            }
+        }
+        return file.takeIf { ok }
     }
 
     /**

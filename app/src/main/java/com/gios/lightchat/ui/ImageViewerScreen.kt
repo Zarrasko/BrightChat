@@ -43,6 +43,10 @@ import kotlinx.coroutines.delay
  *  no detail left to reveal on this screen anyway. */
 private const val MAX_SCALE = 4f
 
+/** A GIF is decoded larger for the viewer than for the thread — this is the full-screen look at
+ *  it. Still well under the photograph cap: a GIF holds every frame in memory at once. */
+private const val GIF_VIEWER_DIM = 900
+
 /** The scale a double-tap jumps to (a second double-tap returns to fit). */
 private const val DOUBLE_TAP_SCALE = 2.5f
 
@@ -67,6 +71,13 @@ fun ImageViewerScreen(
     attachment: Attachment,
     loadImage: suspend (Attachment) -> ImageBitmap?,
     onClose: () -> Unit,
+    /**
+     * The undecoded file, for an animated GIF — which is played rather than decoded (see
+     * [rememberGifPainter]). Null means "no GIF playback here", in which case a GIF opens as its
+     * first frame, exactly as it did before: a viewer that shows something is better than one
+     * that refuses to open.
+     */
+    loadFile: (suspend (Attachment) -> java.io.File?)? = null,
 ) {
     // True color for exactly as long as the viewer is up (vandamd's zero trick;
     // see ColorMode — a no-op without the one-time WRITE_SECURE_SETTINGS grant).
@@ -103,9 +114,17 @@ fun ImageViewerScreen(
 
     BackHandler { closing = true }
 
-    val bitmap by produceState<ImageBitmap?>(initialValue = null, attachment.guid) {
-        value = loadImage(attachment)
+    // One or the other, never both: a GIF is played from its file and everything else is decoded.
+    val animated = attachment.isGif && loadFile != null
+    val bitmap by produceState<ImageBitmap?>(initialValue = null, attachment.guid, animated) {
+        value = if (animated) null else loadImage(attachment)
     }
+    val gifFile by produceState<java.io.File?>(initialValue = null, attachment.guid, animated) {
+        value = if (animated) loadFile?.invoke(attachment) else null
+    }
+    // Decoded larger here than in the thread: this is the full-screen view of it, and the zoom
+    // goes to 4x.
+    val gif = rememberGifPainter(gifFile, maxDim = GIF_VIEWER_DIM)
 
     // The zoom/pan transform: the image is drawn scaled by [scale] about the
     // screen centre, then shifted by [offset] (screen pixels).
@@ -176,23 +195,35 @@ fun ImageViewerScreen(
         contentAlignment = Alignment.Center,
     ) {
         val image = bitmap
-        if (image != null) {
-            Image(
+        // The same transform for both, so pinch, pan and the double-tap zoom behave identically
+        // whether what is on screen is a photograph or a GIF.
+        val transform = Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                translationX = offset.x
+                translationY = offset.y
+                alpha = fade.value
+            }
+        when {
+            gif != null -> Image(
+                painter = gif,
+                contentDescription = attachment.transferName,
+                contentScale = ContentScale.Fit,
+                modifier = transform,
+            )
+            image != null -> Image(
                 bitmap = image,
                 contentDescription = attachment.transferName,
                 contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        translationX = offset.x
-                        translationY = offset.y
-                        alpha = fade.value
-                    },
+                modifier = transform,
             )
-        } else {
-            Text(text = "[Image]", style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
+            else -> Text(
+                text = if (animated) "[GIF]" else "[Image]",
+                style = ChatType.hint,
+                color = ChatColors.onSurfaceDisabled,
+            )
         }
     }
 }

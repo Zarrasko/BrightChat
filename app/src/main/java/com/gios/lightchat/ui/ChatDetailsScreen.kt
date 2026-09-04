@@ -600,7 +600,12 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
         // photos open in colour. Its own BackHandler is registered after the one that
         // closes this screen, so Back closes the photo first.
         viewing?.let { attachment ->
-            ImageViewerScreen(attachment, viewModel::loadImage, onClose = { viewing = null })
+            ImageViewerScreen(
+                attachment,
+                viewModel::loadImage,
+                onClose = { viewing = null },
+                loadFile = viewModel::loadImageFile,
+            )
         }
 
         // The background editor, same overlay bargain as the viewer: the details page

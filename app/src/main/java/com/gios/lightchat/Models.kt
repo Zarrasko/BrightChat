@@ -85,6 +85,17 @@ data class Attachment(
     val isImage: Boolean get() = mimeType?.startsWith("image/") == true
 
     /**
+     * A GIF, which is drawn by a different path from every other image.
+     *
+     * The mime type, not the filename, like [isVideo] beside it — iMessage renames attachments and
+     * a GIF arrives called all sorts of things. It matters because BitmapFactory decodes a GIF to
+     * its **first frame** with no error: for as long as this app had no notion of a GIF, every one
+     * anybody sent looked like a still photograph of one. See
+     * [com.gios.lightchat.ui.rememberGifPainter].
+     */
+    val isGif: Boolean get() = mimeType?.startsWith("image/gif") == true
+
+    /**
      * Playable here rather than handed to another app.
      *
      * The mime type only — not the file extension — because it is what the server said the file

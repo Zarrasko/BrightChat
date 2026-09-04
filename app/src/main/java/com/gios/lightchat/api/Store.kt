@@ -2,6 +2,8 @@ package com.gios.lightchat.api
 
 import android.content.Context
 import com.gios.lightchat.Contacts
+import com.gios.lightchat.Gif
+import com.gios.lightchat.GifJson
 import com.gios.lightchat.NewsletterBatch
 import com.gios.lightchat.NewsletterJson
 import org.json.JSONObject
@@ -42,6 +44,10 @@ object Store {
     private const val KEY_WHISPER_KEY = "whisper_key"     // encrypted bearer key
     private const val KEY_WHISPER_MODEL = "whisper_model" // e.g. whisper-1, or a local model name
     private const val KEY_TRANSCRIPT_PREFIX = "transcript:" // attachment guid → words
+    private const val KEY_KLIPY_KEY = "klipy_key"       // encrypted GIF-service key
+    private const val KEY_GIFS_SAVED = "gifs_saved"     // saved GIFs, JSON (see GifJson)
+    private const val KEY_GIFS_RECENT = "gifs_recent"   // recently sent GIFs, JSON
+    private const val KEY_GIF_CUSTOMER = "gif_customer" // random per-install id the GIF API asks for
 
     /** The configured BlueBubbles Server URL, or null if setup hasn't run yet. */
     fun baseUrl(context: Context): String? =
@@ -118,6 +124,67 @@ object Store {
 
     fun setTranscript(context: Context, guid: String, text: String) {
         prefs(context).edit().putString(KEY_TRANSCRIPT_PREFIX + guid, text).apply()
+    }
+
+    // ------------------------------------------------------------------------- gifs
+
+    /**
+     * The GIF service key. See [KlipyApi] for which service and why.
+     *
+     * Encrypted at rest like the server password and the Whisper key, and stored per install
+     * rather than compiled in: this repository is public, and a key committed to it is a key
+     * that gets scraped and then rate-limited for everybody using the app.
+     *
+     * Blank is a working state, not a broken one — the picker still offers what this phone has
+     * saved and recently sent, which needs no service at all.
+     */
+    fun klipyKey(context: Context): String =
+        prefs(context).getString(KEY_KLIPY_KEY, null)
+            ?.let { runCatching { SecureStore.decrypt(it) }.getOrNull() }
+            .orEmpty()
+
+    fun setKlipyKey(context: Context, value: String) {
+        prefs(context).edit().putString(KEY_KLIPY_KEY, SecureStore.encrypt(value.trim())).apply()
+    }
+
+    /** Whether GIFs can be *searched*. Saved ones work regardless. */
+    fun canSearchGifs(context: Context): Boolean = klipyKey(context).isNotBlank()
+
+    /**
+     * The saved GIFs, newest first, and the ones recently sent.
+     *
+     * Local by construction, like [favorites] and [newsletters]: BlueBubbles has no concept of a
+     * GIF, and the GIF service has no concept of this person — there is no account here to sync
+     * with. JSON rather than the newline-joined form the guid lists use, because a GIF carries a
+     * provider-written title. See [com.gios.lightchat.Gifs], which owns the files behind these.
+     */
+    fun savedGifs(context: Context): List<Gif> =
+        GifJson.decode(prefs(context).getString(KEY_GIFS_SAVED, null))
+
+    fun setSavedGifs(context: Context, value: List<Gif>) {
+        prefs(context).edit().putString(KEY_GIFS_SAVED, GifJson.encode(value)).apply()
+    }
+
+    fun recentGifs(context: Context): List<Gif> =
+        GifJson.decode(prefs(context).getString(KEY_GIFS_RECENT, null))
+
+    fun setRecentGifs(context: Context, value: List<Gif>) {
+        prefs(context).edit().putString(KEY_GIFS_RECENT, GifJson.encode(value)).apply()
+    }
+
+    /**
+     * A random id the GIF service wants on each request, made once on first use.
+     *
+     * A UUID and nothing else: not the install id, not a hash of the phone, not anything derived
+     * from the person holding it. The service uses it to keep its own recents and to fill its ad
+     * slots; this app keeps recents itself, so the value of the id to us is exactly that the API
+     * stops asking. Cleared with everything else on sign out, which is the right lifetime for it.
+     */
+    fun gifCustomerId(context: Context): String {
+        prefs(context).getString(KEY_GIF_CUSTOMER, null)?.takeIf { it.isNotBlank() }?.let { return it }
+        val id = java.util.UUID.randomUUID().toString()
+        prefs(context).edit().putString(KEY_GIF_CUSTOMER, id).apply()
+        return id
     }
 
     /**
@@ -497,6 +564,10 @@ object Store {
     /** Sign out: wipe the stored password. */
     fun signOut(context: Context) {
         prefs(context).edit().clear().apply()
+        // The saved GIFs are the one thing whose *files* live outside this preference file (see
+        // [com.gios.lightchat.Gifs]), so clearing the list here would leave the bytes on the phone
+        // with nothing left pointing at them.
+        runCatching { java.io.File(context.filesDir, "gifs").deleteRecursively() }
     }
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

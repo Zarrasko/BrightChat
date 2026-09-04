@@ -1,3 +1,48 @@
+## BrightChat v2.31 — GIFs, and a library of your own
+
+**The GIF button that every other messenger has.** Beside the `+` in a thread there is now **GIF**:
+trending when it opens, a search box, a two-column grid, and the GIF you pick goes out as a normal
+iMessage attachment that plays inline on whatever the other person reads their messages on. The
+file is sent, not a link — a link would arrive as a preview card for somebody's CDN, and half the
+time as nothing at all.
+
+**The service is KLIPY, because Discord's is.** Google **switched the Tenor API off on 30 June**,
+which is what broke the GIF picker in Discord, WhatsApp, X and Bluesky on the same afternoon.
+Discord's default GIF search moved to KLIPY; so has WhatsApp's; and KLIPY kept a Tenor-shaped API
+so the rest of the internet could follow. This app reads both envelopes, because which one a given
+key is served is not something a phone can decide, and the failure mode of guessing is an empty
+grid with nothing to explain it.
+
+Search needs a key — theirs, free, a minute on their partner panel — typed into **Settings → GIFs**
+or scanned off a laptop screen as a QR code, the same way the transcription key already worked. It
+is deliberately not shipped in the app: this repository is public, and a key committed to it is a
+key that gets scraped and then rate-limited for everybody.
+
+**Saving keeps the file, not a bookmark.** Hold a GIF in the picker and it is saved — and what that
+does is copy the actual GIF onto the phone. The Saved tab then works with no key, no tunnel and no
+signal, which matters more than it sounds like: GIF providers lose GIFs, get re-slugged, and — as
+this year demonstrated in one go — get switched off. A bookmark to a dead URL is a broken
+favourite. A file is a file. There is a **Recent** tab beside it for the ones you have actually
+sent, which is metadata only and lives in the cache, because the one you send constantly is worth
+offering and is not worth holding disk for forever.
+
+**Two taps to send, one hold to save.** Discord sends on the tap; this doesn't. The photo picker
+has had an explicit Send since the day a stray thumb sent somebody a photograph, and a GIF is no
+different: the first tap arms the cell, the second sends it — either on Send at the foot, or on
+the armed cell itself, so "double-tap to send" is true without a single stray tap sending anything.
+
+**And GIFs now actually move.** Every GIF anybody has ever sent this app arrived as a still, because
+`BitmapFactory` hands back the first frame of one and says nothing about it. They animate now —
+inline in the thread, in the full-screen viewer, and in the picker's grid — through the platform's
+own `ImageDecoder`, which has known how since Android 9. No image library was added to do it: the
+whole of it is a decoder call and a hundred-line painter, which is the same bargain the rest of this
+app makes with Coil, Glide and Google Play Services.
+
+The picker holds the colour lift for as long as it is open, like the photo picker does, because
+choosing a GIF in greyscale is choosing half of one. The wheel scrolls it.
+
+- 125 tests.
+
 ## BrightChat v2.30 — one box for a message, not two
 
 BrightControl v3.65 grew a heads-up box of its own. It reads the shade and puts the same box over

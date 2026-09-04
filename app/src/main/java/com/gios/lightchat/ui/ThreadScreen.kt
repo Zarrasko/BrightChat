@@ -195,12 +195,17 @@ fun ThreadScreen(viewModel: ChatViewModel) {
     // window on this phone, and coming back to a closed picker would orphan the photo.
     var picking by rememberSaveable(convo.guid) { mutableStateOf(false) }
 
+    // The GIF picker, over the thread the same way. Not saveable, unlike the photo picker: there
+    // is no hand-off to another app to be killed behind, and what it holds — a search, a page, an
+    // armed GIF — is worth less than a re-open costs.
+    var pickingGif by remember(convo.guid) { mutableStateOf(false) }
+
     // The wheel walks the thread. `reverse`, because the list is reverse-laid-out: the
     // scroll axis is reversed with it, so an unflipped notch up would head off towards
     // last month while the page appeared to fall downwards. Both overlays below stay
     // composed on top of this list, so the notch has to be handed to them instead —
     // otherwise the thread scrolls under a photo you're looking at.
-    WheelScroll(listState, active = viewingImage == null && !picking, reverse = true)
+    WheelScroll(listState, active = viewingImage == null && !picking && !pickingGif, reverse = true)
 
     // Which messages begin a same-speaker run (so only they get a name label).
     val labeled = remember(state.messages) {
@@ -372,6 +377,8 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                                 byGuid[g]?.shortDescription ?: "an earlier message"
                             },
                             loadImage = viewModel::loadImage,
+                            // The undecoded file, for a GIF — see AttachmentImage.
+                            loadFile = viewModel::loadImageFile,
                             onImageTap = { viewingImage = it },
                             // A video is downloaded and played in the app; everything else keeps
                             // the hand-off, which is right for a PDF or a vCard and only wrong
@@ -468,6 +475,7 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                     replyingTo = null
                 },
                 onPickImage = { picking = true },
+                onPickGif = { pickingGif = true },
                 onTextChange = viewModel::onComposeTextChanged,
                 // Offered only when there is a server to transcribe against and a microphone we are
                 // allowed to open. A key that cannot work is worse than no key.
@@ -479,7 +487,12 @@ fun ThreadScreen(viewModel: ChatViewModel) {
         // The open image covers everything (opaque, gesture-consuming); the
         // thread stays composed — and visible again the instant this leaves.
         viewingImage?.let { image ->
-            ImageViewerScreen(image, viewModel::loadImage, onClose = { viewingImage = null })
+            ImageViewerScreen(
+                image,
+                viewModel::loadImage,
+                onClose = { viewingImage = null },
+                loadFile = viewModel::loadImageFile,
+            )
         }
 
         // A video plays here rather than being handed to an app that isn't installed. Same
@@ -527,6 +540,21 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                 )
             }
         }
+
+        if (pickingGif) {
+            BackHandler { pickingGif = false }
+            // Surface for the same reason the photo picker is one: it paints *and* consumes
+            // touches, so the picker's own header can't be tapped through into the thread's.
+            Surface(modifier = Modifier.fillMaxSize(), color = ChatColors.background) {
+                GifPickerScreen(
+                    onSend = { gif ->
+                        pickingGif = false
+                        viewModel.sendGif(gif)
+                    },
+                    onClose = { pickingGif = false },
+                )
+            }
+        }
     }
 }
 
@@ -554,11 +582,20 @@ private fun TypingIndicator() {
 
 /** Bottom compose row: a growing text field and a Send action. Shared with the
  *  new-message screen. When [onPickImage] is supplied (the thread, not a brand-new
- *  chat) a leading "+" opens the photo picker. */
+ *  chat) a leading "+" opens the photo picker, and [onPickGif] adds GIF beside it. */
 @Composable
 fun ComposeBar(
     onSend: (String) -> Unit,
     onPickImage: (() -> Unit)? = null,
+    /**
+     * Opens the GIF picker. Null on the new-message screen and in the newsletter composer, which
+     * is the same line the photo picker draws: the thread is where a GIF is a reply to something,
+     * and a broadcast of one to forty people is not a thing this app should make easy.
+     *
+     * The word rather than a drawn glyph, because "GIF" *is* the icon everywhere else and Public
+     * Sans has all three letters — unlike the star and the heart, which had to be drawn.
+     */
+    onPickGif: (() -> Unit)? = null,
     onTextChange: ((String) -> Unit)? = null,
     showTopDivider: Boolean = true,
     /**
@@ -585,6 +622,15 @@ fun ComposeBar(
                     style = ChatType.body,
                     color = ChatColors.onSurfaceDisabled,
                     onClick = onPickImage,
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+            }
+            if (onPickGif != null) {
+                HapticText(
+                    text = "GIF",
+                    style = ChatType.hint,
+                    color = ChatColors.onSurfaceDisabled,
+                    onClick = onPickGif,
                 )
                 Spacer(modifier = Modifier.width(16.dp))
             }
@@ -659,6 +705,7 @@ private fun MessageRow(
     showReceipt: Boolean,
     replyQuote: String?,
     loadImage: suspend (Attachment) -> ImageBitmap?,
+    loadFile: suspend (Attachment) -> java.io.File?,
     onImageTap: (Attachment) -> Unit,
     onOpenAttachment: (Attachment) -> Unit,
     canReact: Boolean,
@@ -741,7 +788,7 @@ private fun MessageRow(
         // keep the same cap whether or not there's a reaction.
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             if (message.fromMe) ReactionGutter(message, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
-            MessageContent(message, loadImage, onImageTap, onOpenAttachment, canReact, pickerOpen, onLongPress, onReact, onReply, onDismissPicker, Modifier.weight(MESSAGE_MAX_WIDTH))
+            MessageContent(message, loadImage, loadFile, onImageTap, onOpenAttachment, canReact, pickerOpen, onLongPress, onReact, onReply, onDismissPicker, Modifier.weight(MESSAGE_MAX_WIDTH))
             if (!message.fromMe) ReactionGutter(message, Modifier.weight(1f - MESSAGE_MAX_WIDTH))
         }
         // "Not delivered" on any sent message the Mac later failed to deliver
@@ -821,6 +868,7 @@ private fun ReactionGutter(message: ChatMessage, modifier: Modifier) {
 private fun MessageContent(
     message: ChatMessage,
     loadImage: suspend (Attachment) -> ImageBitmap?,
+    loadFile: suspend (Attachment) -> java.io.File?,
     onImageTap: (Attachment) -> Unit,
     onOpenAttachment: (Attachment) -> Unit,
     canReact: Boolean,
@@ -861,6 +909,7 @@ private fun MessageContent(
             AttachmentImage(
                 attachment = image,
                 load = loadImage,
+                loadFile = loadFile,
                 // A tap while the tapback picker is open dismisses it (matching a
                 // tap anywhere else on the turn); otherwise it opens the viewer.
                 onTap = { if (pickerOpen) onDismissPicker() else onImageTap(image) },
@@ -947,14 +996,23 @@ private fun ReactionPicker(selected: ReactionType?, onReact: (ReactionType) -> U
  *  photo can't swallow the thread; width fills the message column. Tapping it
  *  opens the full-screen viewer ([onTap]); long-press still reaches the tapback
  *  picker via [onLongPress] (the image's own gesture handler would otherwise
- *  swallow it). */
+ *  swallow it).
+ *
+ *  A **GIF takes the other branch**: it is played from its file rather than decoded to a
+ *  bitmap, because BitmapFactory silently hands back the first frame — which is what every
+ *  GIF anybody sent this app used to look like. See [AttachmentGif]. */
 @Composable
 private fun AttachmentImage(
     attachment: Attachment,
     load: suspend (Attachment) -> ImageBitmap?,
+    loadFile: suspend (Attachment) -> java.io.File?,
     onTap: () -> Unit,
     onLongPress: (() -> Unit)?,
 ) {
+    if (attachment.isGif) {
+        AttachmentGif(attachment, loadFile, onTap, onLongPress)
+        return
+    }
     val bitmap by produceState<ImageBitmap?>(initialValue = null, attachment.guid) {
         value = load(attachment)
     }
@@ -986,6 +1044,54 @@ private fun AttachmentImage(
         )
     } else {
         Text(text = "[Image]", style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
+    }
+}
+
+/**
+ * One inline GIF, playing.
+ *
+ * The same gestures as a still — tap for the viewer, long-press and double-tap for the tapback
+ * picker — and the same size cap, so a tall GIF can't take the thread over. The file arrives
+ * through the same download and cache as everything else ([loadFile]); an outgoing one renders
+ * from the bytes the send seeded there, so a GIF you have just sent animates in your own thread
+ * before the server has echoed it back.
+ *
+ * `ContentScale.Fit` and a height cap rather than the intrinsic size: GIFs come in every shape,
+ * including a 900px-tall one somebody's cousin made in 2011.
+ */
+@Composable
+private fun AttachmentGif(
+    attachment: Attachment,
+    loadFile: suspend (Attachment) -> java.io.File?,
+    onTap: () -> Unit,
+    onLongPress: (() -> Unit)?,
+) {
+    val file by produceState<java.io.File?>(initialValue = null, attachment.guid) {
+        value = loadFile(attachment)
+    }
+    val painter = rememberGifPainter(file)
+    if (painter != null) {
+        val haptics = LocalHapticFeedback.current
+        Image(
+            painter = painter,
+            contentDescription = attachment.transferName,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 360.dp)
+                .combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onTap()
+                    },
+                    onLongClick = onLongPress,
+                    onDoubleClick = onLongPress,
+                ),
+        )
+    } else {
+        Text(text = "[GIF]", style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
     }
 }
 

@@ -403,6 +403,45 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   whose methods all throw "Stub!" (`testImplementation("org.json:json:…")`, never
   `implementation`, which would duplicate the platform's classes in the APK).
 
+  **GIFs (done):** a picker behind the **GIF** key in the compose bar (`ui/GifPickerScreen.kt`,
+  `api/KlipyApi.kt`, `Gifs.kt`, `Gif.kt`, `ui/GifPainter.kt`, `ChatViewModel.sendGif`). Three lists
+  behind a row of words — Trending/search, Saved, Recent — a two-column grid of *playing* previews,
+  tap to arm and tap again to send, hold to save. **The provider is KLIPY** because Google shut the
+  **Tenor API off on 30 June 2026** and Discord's default GIF search moved there (WhatsApp too);
+  there is deliberately no Tenor path anywhere in this app, the endpoint is gone rather than
+  deprecated. `parsePage` reads **both** KLIPY's own envelope (`data.data[]`, renditions nested
+  `file.{hd,md,sm,xs}.gif`) and the Tenor-compatible one they also serve (`results[]`,
+  `media_formats.{gif,tinygif}`, dimensions in a positional `dims` array), because which one a key
+  is served is not knowable from the phone and guessing wrong is an empty grid with no explanation;
+  renditions are found by *walking* the item for `.gif` URLs rather than by naming a field, which is
+  also what keeps mp4/webp renditions out — an mp4 would arrive as a video attachment. Medium is
+  picked to send (an HD GIF is megabytes up the Tailscale tunnel for no visible gain) and the
+  smallest to draw. The key is per-install and encrypted (`Store.klipyKey`), typed or scanned in
+  Settings → GIFs, and **never committed**: this repo is public. `customer_id` is a random UUID made
+  on first use — the API wants one; we keep recents ourselves.
+  **Saving keeps the file.** `Gifs.toggleSaved` writes to `Store.savedGifs` and the sendable
+  rendition is copied into `filesDir/gifs` the first time it exists (`promoteIfSaved`, which is why
+  saving in the picker — where only the *preview* has been downloaded — still ends up offline-
+  complete). So the Saved tab needs no key, no tunnel and no signal, and survives the provider
+  losing or re-slugging the GIF. Recents are metadata only, capped at 24, in `cacheDir/gifs` which
+  `prune` holds under 24MB. Sending downloads the file and then goes through the ordinary photo
+  path (`sendPicked` — bytes seeded into the image cache, optimistic bubble, echo reconciled), so a
+  GIF is a normal `image/gif` attachment; `Gifs.reportShare` pings the provider *after* the send,
+  best-effort, because it is their ranking signal and must never be able to fail a send.
+  **Animation is the platform's, not a library's.** `BitmapFactory` decodes a GIF to its first
+  frame and says nothing, which is why every GIF anyone ever sent this app looked like a still.
+  `Attachment.isGif` routes those to `rememberGifPainter`, which decodes with `ImageDecoder` into an
+  `AnimatedImageDrawable` and draws it through a small `Painter` — no Coil, no Glide. Three things
+  are load-bearing there: the decode is off-main (ImageDecoder is synchronous), the drawable
+  repaints by *calling back* rather than by ticking (no `Drawable.Callback` means one frame and
+  then nothing, which looks exactly like no animation at all), and it only animates on a hardware
+  canvas, hence drawing into `drawIntoCanvas`'s native canvas rather than converting once to a
+  bitmap. `Attachments.file` is the download half of the still loader, split out so a GIF shares the
+  same cache entry — including the bytes `cacheLocal` seeds, so an outgoing GIF animates in your own
+  thread before the server echoes it. The viewer takes an optional `loadFile` and plays a GIF under
+  the same pinch/pan transform; the contact page's grid still shows a still frame, which is what a
+  thumbnail should be.
+
 Note: messaging yourself (note-to-self) legitimately shows each message twice —
 iMessage stores a sent *and* a received row (two GUIDs). Normal chats don't; the
 socket echo of your own sends dedupes by GUID.

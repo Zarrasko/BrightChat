@@ -1325,6 +1325,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * The attachment's file, downloaded and cached but not decoded — for a GIF, which is played
+     * from the file rather than decoded to a bitmap. See [Attachments.file].
+     */
+    suspend fun loadImageFile(attachment: Attachment): File? {
+        val client = api ?: return null
+        return Attachments.file(app, client, attachment)
+    }
+
+    /**
      * Opens a non-image attachment: downloads it to a FileProvider-shared cache file,
      * then hands off to an external app via `ACTION_VIEW`. Falls back to a share
      * chooser, then a message if nothing on the (minimal) device can handle it.
@@ -1567,6 +1576,46 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     sendPicked(convo, readPickedImage(file) ?: continue)
                 }
             }
+        }
+    }
+
+    /**
+     * Sends a GIF from the picker.
+     *
+     * **The file goes out, not the URL.** A link would arrive as a link — iMessage would show the
+     * recipient a preview card for somebody's CDN, and half of them would see nothing at all —
+     * whereas the bytes arrive as an ordinary `image/gif` attachment that Messages plays inline on
+     * every Apple device. It also means what was sent is what was seen: the GIF cannot be
+     * re-pointed or taken down afterwards.
+     *
+     * Fetching it first is the reason this is not simply [sendImageFiles]. The picker has only the
+     * preview rendition on the phone at the point you press Send, so the sendable one is downloaded
+     * here — and a failed download has to be said out loud, because there is no optimistic bubble
+     * yet to go wrong in front of you. Once the file is local, the send is exactly the photo path:
+     * bytes seeded into the image cache, optimistic bubble, echo reconciled.
+     *
+     * The provider is told afterwards ([Gifs.reportShare]) and never before: it is their ranking
+     * signal, their terms ask for it, and it must not be able to fail a send.
+     */
+    fun sendGif(gif: Gif) {
+        val convo = _state.value.open ?: return
+        _state.update { it.copy(message = "Fetching GIF…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            val file = Gifs.file(app, gif)
+            if (file == null) {
+                _state.update { it.copy(message = "Couldn’t fetch that GIF") }
+                return@launch
+            }
+            val picked = readPickedImage(file)
+            if (picked == null) {
+                _state.update { it.copy(message = "Couldn’t fetch that GIF") }
+                return@launch
+            }
+            // Remembered on the send rather than on the tap, so the Recent tab lists what actually
+            // went out to somebody and not what was looked at.
+            Gifs.remember(app, gif)
+            sendPicked(convo, picked)
+            Gifs.reportShare(app, gif)
         }
     }
 

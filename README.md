@@ -18,7 +18,7 @@ install or update it directly. Don't have BrightMarket yet? Get it, and browse
 every Bright app, at
 **[brightmarket.gzl.dev](https://brightmarket.gzl.dev)**.
 
-**Current version: v2.28.x.** See [Version history](#version-history).
+**Current version: v2.31.x.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -57,6 +57,10 @@ Google push involved, it adds:
   current on LightOS, so photos you just took were never offered. This one reads DCIM
   and Pictures directly. Multi-select, an inline camera, and the whole thing runs in
   colour — with the grayscale grant, picking and framing a photo aren't guesswork.
+- **GIFs, from the same library Discord uses.** A **GIF** key beside the `+` opens a picker —
+  trending, search, and a grid you can scroll with the wheel. Holding one saves it, which keeps
+  the file on the phone rather than a link to somebody else's server, so the Saved tab works with
+  no signal. See [GIFs](#gifs).
 - **Videos send as well as receive.** Clips sit in the same grid as the photos, each
   showing how long it runs, and go out as normal iMessage attachments. The file is
   streamed off disk rather than read into memory, so the size of a recording is the
@@ -206,6 +210,28 @@ The messages still arrive: they appear in the list with an unread mark and open 
 just don't interrupt. **Settings → Unknown senders** switches it, and "known" is the same test
 the list's Known tab uses — a named group, or any participant in your address book.
 
+### GIFs
+
+The **GIF** key beside the `+` in a thread opens the picker: **Trending** when it opens, a search
+box, and **Saved** and **Recent** beside them. Tap a GIF to arm it, tap again — or tap **Send** at
+the foot — to send it. **Hold** one to save it.
+
+What goes out is the file, not a link, so it arrives as an ordinary iMessage attachment and plays
+inline wherever the other person reads their messages. GIFs that arrive here play too, in the
+thread and full screen.
+
+**Searching needs a key.** The service is [KLIPY](https://klipy.com/developers), which is what
+Discord's GIF search runs on since Google shut the Tenor API down on 30 June 2026. A key is free
+and takes a minute on their partner panel; put it in **Settings → GIFs**, either typed or scanned
+as a QR code (`qrencode` over the key on a laptop, same as the transcription key). It isn't
+shipped in the app on purpose — this repo is public, and a key in it is a key that gets scraped
+and rate-limited for everyone.
+
+**Saving keeps the GIF, not a bookmark.** A saved GIF is copied onto the phone, so the Saved tab
+works with no key, no tunnel and no signal — and it survives the provider losing, re-slugging or
+switching off the original, which is not a hypothetical. Recent is the last two dozen you actually
+sent, cached rather than kept.
+
 ### Photos from Roll
 
 [Roll](https://github.com/gi-os/Roll), the camera app, sends straight here: its send
@@ -352,6 +378,9 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v2.26.x | The Speak key is a drawn microphone, shown only when transcription is configured |
 | v2.27.x | Fix: the colour lift could lose a one-shot race to LightOS and never retry, leaving photos grayscale until an activity swap (light-reports#35) |
 | v2.28.x | **Delete conversation** on the contact page — tap the header, two-tap confirm at the foot of the page (light-reports#36) |
+| v2.29.x | LightNotebook's journal can ask who you talked to on a day (names and counts, never text); `main` is no longer a release trigger |
+| v2.30.x | One box for a message, not two: the heads-up box stands aside when BrightControl is drawing banners for every app |
+| v2.31.x | **GIFs** — a picker on KLIPY (what Discord moved to when Google shut Tenor down), saved GIFs kept as files on the phone, and GIFs that animate instead of showing their first frame |
 
 ## Licence
 
