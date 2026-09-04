@@ -482,50 +482,55 @@ private fun Whisper(viewModel: ChatViewModel, reload: Int, note: String?, onScan
 private enum class ScanTarget { Whisper, Gif }
 
 /**
- * The GIF service key.
+ * The GIF search key, and how many GIFs this phone has kept.
  *
- * One field, because there is one thing to say: a key, or nothing. Nothing is a working state —
- * the picker still offers what this phone has **saved**, which is a real library rather than a
- * cache, and needs no service (see [com.gios.lightchat.Gifs]). What a key buys is search.
+ * **The app ships with a key**, so this row normally has nothing to do: GIF search works out of the
+ * box. What the field is for is a *personal* key, which matters because the shipped one's allowance
+ * is per key rather than per install — every phone running BrightChat draws on the same one, so a
+ * busy hour is a busy hour for all of them. Entering one here takes precedence over it.
+ *
+ * The field shows only what this phone's owner typed, never the built-in key: pre-filling it would
+ * be handing the shipped key to anybody who opened this screen, and would then save it back as
+ * though they had chosen it.
  *
  * The service is KLIPY, which is what Discord's GIF search runs on since Google switched the Tenor
- * API off in June — see [KlipyApi] for the whole story. Their test key is a form and a minute, and
- * it is not in this repository on purpose: a key committed to a public repo is a key that gets
- * scraped and rate-limited for every install.
+ * API off in June — see [KlipyApi] for the whole story.
  */
 @Composable
 private fun GifKey(reload: Int, note: String?, onScan: () -> Unit) {
     val context = LocalContext.current
-    var key by remember(reload) { mutableStateOf(Store.klipyKey(context)) }
+    var own by remember(reload) { mutableStateOf(Store.ownKlipyKey(context)) }
+    val canSearch = remember(reload, own) { Store.canSearchGifs(context) }
     val saved = remember(reload) { Store.savedGifs(context).size }
     var editing by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(reload) { if (reload > 0) editing = true }
 
     HapticText(
-        text = if (key.isBlank()) "GIF search: off" else "GIF search: KLIPY",
+        text = if (canSearch) "GIF search: KLIPY" else "GIF search: off",
         style = ChatType.body,
-        color = if (key.isBlank()) ChatColors.onSurfaceDim else ChatColors.onSurface,
+        color = if (canSearch) ChatColors.onSurface else ChatColors.onSurfaceDim,
         onClick = { editing = !editing },
         modifier = Modifier.fillMaxWidth(),
     )
     Hint(
         when {
-            key.isBlank() && saved == 0 -> "A key turns the GIF button in a thread into a search."
-            key.isBlank() -> "$saved saved — searching for more needs a key."
-            saved == 0 -> "Hold a GIF in the picker to save it."
-            saved == 1 -> "1 saved GIF, kept on the phone."
-            else -> "$saved saved GIFs, kept on the phone."
+            !canSearch -> "A key turns the GIF button in a thread into a search."
+            own.isNotBlank() && saved > 0 -> "Your own key. $saved saved, kept on the phone."
+            own.isNotBlank() -> "Your own key. Hold a GIF in the picker to save it."
+            saved == 0 -> "Shared with every BrightChat. Hold a GIF in the picker to save it."
+            saved == 1 -> "Shared with every BrightChat. 1 saved GIF, kept on the phone."
+            else -> "Shared with every BrightChat. $saved saved GIFs, kept on the phone."
         },
     )
 
     if (editing) {
         Spacer(modifier = Modifier.height(10.dp))
         WhisperField(
-            value = key,
-            hint = "API key",
+            value = own,
+            hint = "Your own API key",
             onDone = {
                 Store.setKlipyKey(context, it)
-                key = Store.klipyKey(context)
+                own = Store.ownKlipyKey(context)
             },
         )
         Spacer(modifier = Modifier.height(12.dp))
@@ -536,7 +541,11 @@ private fun GifKey(reload: Int, note: String?, onScan: () -> Unit) {
             onClick = onScan,
             modifier = Modifier.fillMaxWidth(),
         )
-        Hint(note ?: "Get one at ${KlipyApi.KEY_SOURCE}, then scan it off the laptop’s screen.")
+        Hint(
+            note ?: "The shared key is enough most of the time. If searching says it is busy, a " +
+                "free one from ${KlipyApi.KEY_SOURCE} is yours alone — type it, or scan it off a " +
+                "laptop screen.",
+        )
     }
     Spacer(modifier = Modifier.height(12.dp))
 }

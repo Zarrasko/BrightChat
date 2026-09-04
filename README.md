@@ -220,12 +220,20 @@ What goes out is the file, not a link, so it arrives as an ordinary iMessage att
 inline wherever the other person reads their messages. GIFs that arrive here play too, in the
 thread and full screen.
 
-**Searching needs a key.** The service is [KLIPY](https://klipy.com/developers), which is what
-Discord's GIF search runs on since Google shut the Tenor API down on 30 June 2026. A key is free
-and takes a minute on their partner panel; put it in **Settings → GIFs**, either typed or scanned
-as a QR code (`qrencode` over the key on a laptop, same as the transcription key). It isn't
-shipped in the app on purpose — this repo is public, and a key in it is a key that gets scraped
-and rate-limited for everyone.
+**Search works out of the box.** The service is [KLIPY](https://klipy.com/developers), which is
+what Discord's GIF search runs on since Google shut the Tenor API down on 30 June 2026, and the
+released APK ships with a key — so there is nothing to set up.
+
+That key's allowance is **per key, not per install**: every BrightChat draws on the same one, so a
+busy hour is a busy hour for all of them, and searching then says so. The answer is your own key,
+free and a minute on their partner panel, in **Settings → GIFs** — typed, or scanned as a QR code
+(`qrencode` over the key on a laptop, same as the transcription key). It takes precedence over the
+shipped one.
+
+The shipped key is a repository secret (`KLIPY_KEY`), not a line in this repo, and reaches the APK
+scrambled rather than as a readable string — which stops `strings app.apk` and the scrapers, and
+nothing more than that. **Build it yourself and GIF search is off** until you put a key in
+Settings; everything else about the picker, saving included, works regardless.
 
 **Saving keeps the GIF, not a bookmark.** A saved GIF is copied onto the phone, so the Saved tab
 works with no key, no tunnel and no signal — and it survives the provider losing, re-slugging or
@@ -314,6 +322,9 @@ not after.
 Signing is mandatory and the keystore is **not** committed (unlike the other `gi-os`
 repos) — it lives in repo secrets `KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` /
 `KEY_ALIAS` / `KEY_PASSWORD`, with the certificate pinned in `signing-fingerprint.txt`.
+Two more secrets are read the same way and are both optional — `REPORT_TOKEN`, which
+shake-to-report files issues with, and `KLIPY_KEY`, the GIF search key the APK ships
+with. A build without either still works; the feature it belongs to is simply off.
 `versionCode` is the workflow run number; `versionName` in the committed
 `build.gradle.kts` (currently `1.0.0`) is only the `major.minor` base — CI stamps
 `major.minor.RUN` at build time and tags it `vX.Y.Z`.

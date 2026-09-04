@@ -127,7 +127,9 @@ class KlipyApi(private val key: String) {
     private fun reasonFor(code: Int): String = when (code) {
         401, 403 -> "The GIF service refused that key"
         404 -> "That GIF service has no search endpoint"
-        429 -> "Too many GIF searches for now — try again shortly"
+        // The shipped key's allowance is shared by every install, so this is a normal thing to
+        // meet rather than an error — and it names the way out, since the way out is a setting.
+        429 -> "GIF search is busy — try shortly, or add your own key in Settings"
         in 500..599 -> "The GIF service is having trouble"
         else -> "The GIF service said $code"
     }

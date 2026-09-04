@@ -13,10 +13,16 @@ so the rest of the internet could follow. This app reads both envelopes, because
 key is served is not something a phone can decide, and the failure mode of guessing is an empty
 grid with nothing to explain it.
 
-Search needs a key — theirs, free, a minute on their partner panel — typed into **Settings → GIFs**
-or scanned off a laptop screen as a QR code, the same way the transcription key already worked. It
-is deliberately not shipped in the app: this repository is public, and a key committed to it is a
-key that gets scraped and then rate-limited for everybody.
+**There is nothing to set up.** The APK ships with a search key, so the GIF button works the first
+time it is pressed. It arrives from a repository secret rather than a line in this public repo, and
+it is scrambled rather than readable in the binary — which stops `strings` and the scrapers that
+walk GitHub for things shaped like keys, and, to be straight about it, nothing more than that.
+
+The one thing worth knowing: that allowance is **per key, not per phone**. Every BrightChat draws
+on the same one, so a busy hour is busy for everybody, and search says *GIF search is busy — try
+shortly, or add your own key in Settings* rather than failing silently. Your own key — free, a
+minute on their partner panel — goes in **Settings → GIFs**, typed or scanned off a laptop screen,
+and takes precedence from then on.
 
 **Saving keeps the file, not a bookmark.** Hold a GIF in the picker and it is saved — and what that
 does is copy the actual GIF onto the phone. The Saved tab then works with no key, no tunnel and no
@@ -41,7 +47,7 @@ app makes with Coil, Glide and Google Play Services.
 The picker holds the colour lift for as long as it is open, like the photo picker does, because
 choosing a GIF in greyscale is choosing half of one. The wheel scrolls it.
 
-- 125 tests.
+- 129 tests.
 
 ## BrightChat v2.30 — one box for a message, not two
 

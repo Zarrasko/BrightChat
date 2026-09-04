@@ -86,11 +86,14 @@ import kotlinx.coroutines.withContext
  * the mark appearing in the corner is the only confirmation. See [Gifs] for what saving actually
  * does — it keeps the file, so a saved GIF works with no key and no tunnel.
  *
- * ### Without a key
+ * ### Keys
  *
- * Searching needs one ([Store.klipyKey]); Saved and Recent do not. With no key the screen opens on
- * Saved and says what is missing rather than showing an empty grid or an error, because "GIFs are
- * broken" and "you haven't pasted a key in yet" look identical otherwise.
+ * The app ships with a search key, so this opens on Trending and works with nothing set up. That
+ * key's allowance is per key rather than per install, though — every BrightChat draws on the same
+ * one — so a 429 is a normal thing to meet, and it is reported as "busy, or add your own key in
+ * Settings" rather than as a failure. Saved and Recent need no key at all, and a build configured
+ * with none (a fresh clone, no repository secret) opens on Saved and says what is missing, because
+ * "GIFs are broken" and "nobody put a key in this build" look identical otherwise.
  */
 @Composable
 fun GifPickerScreen(onSend: (Gif) -> Unit, onClose: () -> Unit) {
@@ -246,6 +249,8 @@ fun GifPickerScreen(onSend: (Gif) -> Unit, onClose: () -> Unit) {
 
         val note = when {
             tab == GifTab.Find && failure != null -> failure
+            // Only reachable in a build with no key configured at all — normally the app ships
+            // with one. Still worth saying properly rather than showing an empty grid.
             tab == GifTab.Find && !canSearch ->
                 "Add a GIF key in Settings to search.\nSaved GIFs work without one."
             tab == GifTab.Find && loading && shown.isEmpty() -> ""

@@ -416,8 +416,24 @@ on the tailnet is far lighter, and gets ordering right because it owns the sort.
   renditions are found by *walking* the item for `.gif` URLs rather than by naming a field, which is
   also what keeps mp4/webp renditions out — an mp4 would arrive as a video attachment. Medium is
   picked to send (an HD GIF is megabytes up the Tailscale tunnel for no visible gain) and the
-  smallest to draw. The key is per-install and encrypted (`Store.klipyKey`), typed or scanned in
-  Settings → GIFs, and **never committed**: this repo is public. `customer_id` is a random UUID made
+  smallest to draw. **The key is two keys.** The APK **ships with one** (`KlipyKey.builtIn`) so the
+  GIF button works on a fresh install with nothing to set up: `app/build.gradle.kts` reads it from
+  `local.properties` (git-ignored) or the `KLIPY_KEY` repository secret — exactly the `REPORT_TOKEN`
+  pattern beside it, and for the same reason, since **this repo is public** — XORs it against a
+  fixed pad, Base64s it, and emits it as `BuildConfig.KLIPY_KEY`; `api/KlipyKey.kt` undoes that at
+  runtime. Be honest about what the scrambling buys: it defeats `strings app.apk` and the scrapers
+  that walk public repos for key-shaped strings, and nothing else — the pad is in the same binary,
+  as it is in every app that ships a key. The real protection is that the key can be rotated in the
+  partner panel and the next build carries the new one. **The pad lives in two files that compile
+  separately**, so `KlipyKeyTest` asserts they still match by reading the build script: drift there
+  yields a key that decodes to rubbish, a 401, and no other symptom. A build with no key configured
+  decodes to blank, which is the same "search off" state the app already knows how to be in.
+  A **personal** key still matters, and `Store.klipyKey` prefers it (`ownKlipyKey`, encrypted at
+  rest, typed or scanned in Settings → GIFs): the shipped key's allowance is **per key, not per
+  install**, so every phone draws on the same one and a 429 is a normal thing to meet — hence the
+  429 copy naming the setting as the way out. Settings shows only `ownKlipyKey`, never the built-in
+  one: pre-filling that field would hand the shipped key to anybody who opened the screen, and
+  would then save it back as though they had chosen it. `customer_id` is a random UUID made
   on first use — the API wants one; we keep recents ourselves.
   **Saving keeps the file.** `Gifs.toggleSaved` writes to `Store.savedGifs` and the sendable
   rendition is copied into `filesDir/gifs` the first time it exists (`promoteIfSaved`, which is why

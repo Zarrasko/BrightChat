@@ -129,16 +129,29 @@ object Store {
     // ------------------------------------------------------------------------- gifs
 
     /**
-     * The GIF service key. See [KlipyApi] for which service and why.
+     * The GIF service key to search with: this phone's own if one has been entered, else the one
+     * the app ships with ([KlipyKey]). See [KlipyApi] for which service and why.
      *
-     * Encrypted at rest like the server password and the Whisper key, and stored per install
-     * rather than compiled in: this repository is public, and a key committed to it is a key
-     * that gets scraped and then rate-limited for everybody using the app.
+     * The two exist for different reasons and neither replaces the other. The **built-in** key is
+     * what makes the GIF button work on a fresh install with nothing to set up, and its allowance
+     * is per *key* — every install draws on the same one — so a busy hour is a 429 for everybody.
+     * A **personal** key is the answer to that, and takes precedence whenever it is set.
      *
-     * Blank is a working state, not a broken one — the picker still offers what this phone has
+     * Blank is still a working state, not a broken one: the picker offers what this phone has
      * saved and recently sent, which needs no service at all.
      */
-    fun klipyKey(context: Context): String =
+    fun klipyKey(context: Context): String = ownKlipyKey(context).ifBlank { KlipyKey.builtIn }
+
+    /**
+     * Only this phone's own key, blank when none has been entered.
+     *
+     * Separate from [klipyKey] because the settings screen must show what the *user* set — a field
+     * pre-filled with the app's built-in key would be handing the shipped key to anybody who opened
+     * Settings, and worse, it would then be saved back as though they had chosen it.
+     *
+     * Encrypted at rest, like the server password and the Whisper key.
+     */
+    fun ownKlipyKey(context: Context): String =
         prefs(context).getString(KEY_KLIPY_KEY, null)
             ?.let { runCatching { SecureStore.decrypt(it) }.getOrNull() }
             .orEmpty()
@@ -147,7 +160,7 @@ object Store {
         prefs(context).edit().putString(KEY_KLIPY_KEY, SecureStore.encrypt(value.trim())).apply()
     }
 
-    /** Whether GIFs can be *searched*. Saved ones work regardless. */
+    /** Whether GIFs can be *searched* at all. Saved ones work regardless. */
     fun canSearchGifs(context: Context): Boolean = klipyKey(context).isNotBlank()
 
     /**

@@ -1,3 +1,4 @@
+import java.util.Base64
 import java.util.Properties
 
 plugins {
@@ -30,6 +31,45 @@ val reportToken: String = run {
     fromFile ?: System.getenv("REPORT_TOKEN") ?: ""
 }
 
+/**
+ * The GIF search key the app ships with, so that GIFs work on a fresh install with nothing to set
+ * up. Read exactly like [reportToken] above — `local.properties` (git-ignored) for a local build,
+ * the `KLIPY_KEY` repository secret in CI — and for the same reason: **this repository is public**,
+ * and a key committed to it is a key that is scraped within days and rate-limited for every user of
+ * the app. An empty string is a working build; GIF search is then off until somebody puts their own
+ * key in Settings, which is the same state the app shipped in before this.
+ */
+val klipyKey: String = run {
+    val local = rootProject.file("local.properties")
+    val fromFile = if (local.exists()) {
+        Properties().apply { local.inputStream().use { load(it) } }.getProperty("klipyKey")
+    } else {
+        null
+    }
+    fromFile ?: System.getenv("KLIPY_KEY") ?: ""
+}
+
+/**
+ * Scrambles [value] so it is not a readable string in the shipped APK.
+ *
+ * XOR against a fixed pad, then Base64 — undone by `KlipyKey` at runtime. **Be clear about what
+ * this buys.** Anything the app can decode, a person holding the APK can decode too: the pad is in
+ * the same binary. What it stops is the cheap attack, which is also the only one that happens at
+ * this scale — `strings app.apk | grep -i klipy`, or a scraper walking public repositories for
+ * things shaped like API keys. Someone willing to open the APK in a decompiler was always going to
+ * get it, key or no key, which is why the real protection is that this key can be rotated from the
+ * partner panel and the app keeps working from the next build.
+ */
+fun scramble(value: String): String {
+    if (value.isEmpty()) return ""
+    val pad = "brightchat".toByteArray(Charsets.UTF_8)
+    val bytes = value.toByteArray(Charsets.UTF_8)
+    val out = ByteArray(bytes.size) { i -> (bytes[i].toInt() xor pad[i % pad.size].toInt()).toByte() }
+    // `java.util.Base64` spelled out would resolve `java` to Gradle's own `java` extension, not
+    // the package — hence the import at the top of this file.
+    return Base64.getEncoder().encodeToString(out)
+}
+
 android {
     namespace = "com.gios.lightchat"
     compileSdk = 35
@@ -43,6 +83,8 @@ android {
         versionName = "2.31.0"
 
         buildConfigField("String", "REPORT_TOKEN", "\"$reportToken\"")
+        // Scrambled, not encrypted — see [scramble]. Decoded by `api/KlipyKey.kt`.
+        buildConfigField("String", "KLIPY_KEY", "\"${scramble(klipyKey)}\"")
         buildConfigField("String", "REPORT_REPO", "\"gi-os/light-reports\"")
 
         ndk {
