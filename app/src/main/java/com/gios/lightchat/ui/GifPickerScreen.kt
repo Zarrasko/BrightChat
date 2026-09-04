@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
@@ -50,6 +51,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -99,6 +101,7 @@ import kotlinx.coroutines.withContext
 fun GifPickerScreen(onSend: (Gif) -> Unit, onClose: () -> Unit) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
+    val keyboard = LocalSoftwareKeyboardController.current
 
     val canSearch = remember { Store.canSearchGifs(context) }
     val customerId = remember { if (canSearch) Store.gifCustomerId(context) else "" }
@@ -124,8 +127,11 @@ fun GifPickerScreen(onSend: (Gif) -> Unit, onClose: () -> Unit) {
     var loading by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
 
-    // Typing settles before anything is fetched. A search per keystroke on this keyboard is a
-    // request per letter, all but the last one wasted, against a key with an hourly allowance.
+    // Nothing is fetched until typing has actually stopped. This is a debounce and always was,
+    // but at 350ms it was firing between letters — on a keyboard this size the gap mid-word is
+    // routinely longer than that, so a half-typed word became a search, and the grid flickered
+    // through results for prefixes nobody meant. Long enough now that finishing a word is one
+    // request, and the Search key below is there for anybody who doesn't want to wait for it.
     LaunchedEffect(query) {
         delay(SEARCH_SETTLE_MS)
         val settled = query.trim()
@@ -228,6 +234,14 @@ fun GifPickerScreen(onSend: (Gif) -> Unit, onClose: () -> Unit) {
                     // Typing is a search, so it moves you to the list that answers it — nothing
                     // is more annoying than a search box that fills a grid you can't see.
                     tab = GifTab.Find
+                },
+                onSearch = {
+                    // The keyboard's Search key: don't make somebody who is finished wait out the
+                    // settle. It also puts the keyboard away, which on this panel is the
+                    // difference between seeing two rows of results and seeing none.
+                    val settled = query.trim()
+                    if (settled != request.query) request = GifRequest(settled, 1)
+                    keyboard?.hide()
                 },
             )
             HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
@@ -345,7 +359,7 @@ private enum class GifTab(val label: String) {
 private data class GifRequest(val query: String, val page: Int)
 
 @Composable
-private fun SearchField(value: String, onChange: (String) -> Unit) {
+private fun SearchField(value: String, onChange: (String) -> Unit, onSearch: () -> Unit) {
     BasicTextField(
         value = value,
         onValueChange = onChange,
@@ -353,6 +367,7 @@ private fun SearchField(value: String, onChange: (String) -> Unit) {
         textStyle = ChatType.body.copy(color = ChatColors.onSurface, textAlign = TextAlign.Center),
         cursorBrush = SolidColor(ChatColors.onSurface),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { onSearch() }),
         decorationBox = { inner ->
             if (value.isEmpty()) {
                 Text(
@@ -461,9 +476,15 @@ private fun StarMark(modifier: Modifier = Modifier) {
 private const val COLUMNS = 2
 private const val GAP = 2
 
-/** How long typing has to stop before it becomes a search. Long enough that a word typed on this
- *  keyboard is one request, short enough that it never feels like the box is ignoring you. */
-private const val SEARCH_SETTLE_MS = 350L
+/**
+ * How long typing has to stop before it becomes a search.
+ *
+ * Was 350ms, which is inside the gap between two letters on this keyboard — so it searched while
+ * you were still typing, which is both a wasted request against an hourly allowance and a grid
+ * that rearranges itself under your thumb. Nearly a second reads as "when you stop", and the
+ * keyboard's Search key is the way to skip it.
+ */
+private const val SEARCH_SETTLE_MS = 900L
 
 /** How many cells from the end the next page is asked for. Two rows: the fetch is in flight
  *  before the last row is on screen, so the grid grows rather than stalling. */

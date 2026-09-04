@@ -251,30 +251,63 @@ class KlipyApi(private val key: String) {
             return out
         }
 
+        /** The rendition sizes both providers name, smallest first. KLIPY sizes as `hd/md/sm/xs`,
+         *  the Tenor-shaped answer as `gif/mediumgif/tinygif/nanogif`; [FULL] is a bare `gif`,
+         *  which is the full-size one in both vocabularies. [UNKNOWN] is a path that matches
+         *  nothing — still usable, since a GIF of unknown size beats an empty cell. */
+        private enum class Size { XS, SM, MD, FULL, HD, UNKNOWN }
+
         /**
-         * How much we want a rendition, lower being better. Sending wants a middling one and the
-         * grid wants the smallest.
+         * What to send, in order of preference.
          *
-         * The names are both providers' vocabularies in one table: KLIPY sizes as
-         * `hd/md/sm/xs`, the Tenor-shaped answer as `gif/mediumgif/tinygif/nanogif`. A path that
-         * matches nothing sorts last but is still usable — better a GIF of unknown size than an
-         * empty cell.
+         * **Medium first.** A phone tunnelling to a Mac over Tailscale is uploading this, and an HD
+         * GIF is routinely eight megabytes that iMessage re-encodes anyway; a medium one is a
+         * second or two and looks the same in a message.
+         */
+        private val SEND_ORDER = listOf(Size.MD, Size.FULL, Size.SM, Size.HD, Size.XS, Size.UNKNOWN)
+
+        /**
+         * What to draw in the grid, in order of preference.
          *
-         * Sending prefers **medium**. A phone tunnelling to a Mac over Tailscale is uploading
-         * this, and an HD GIF is routinely eight megabytes of file that iMessage will re-encode
-         * anyway; a medium one is a second or two and looks the same in a message.
+         * **Not the smallest**, which is what this used to take and what made the results look
+         * soft. The panel is 1080px across a hair under four inches, so a two-column cell is
+         * roughly 400 device pixels wide — and an `xs`/`nanogif` rendition is commonly 120px, i.e.
+         * upscaled more than three times before anybody sees it. `sm`/`tinygif` (~220px) is the
+         * honest floor and `md` is better than either, so `md` is taken when there is no `sm`
+         * rather than falling back down to `xs`.
+         *
+         * It stops short of preferring `md` outright: a screenful is a dozen cells, and at medium
+         * that is several megabytes of download per scroll over this phone's connection. If the
+         * grid ever wants to be sharper still, move [Size.MD] to the front of this list — that is
+         * the whole change.
+         */
+        private val PREVIEW_ORDER = listOf(Size.SM, Size.MD, Size.FULL, Size.XS, Size.HD, Size.UNKNOWN)
+
+        /**
+         * How much we want a rendition, lower being better: its position in the order for the job.
+         *
+         * An explicit order per purpose rather than arithmetic on a size number, which is what was
+         * here first. The arithmetic read as clever and produced *ties* — two sizes equally far
+         * from the target — and a tie is broken by whichever key the service happened to serialise
+         * first, so which rendition the grid drew was effectively decided by JSON key order.
          */
         private fun rank(path: String, forSending: Boolean): Int {
+            val order = if (forSending) SEND_ORDER else PREVIEW_ORDER
+            return order.indexOf(sizeOf(path))
+        }
+
+        /** Which size a rendition's path names. Substrings, because the path is a trail of field
+         *  names (`file.md.gif`, `media_formats.tinygif`) rather than one label. */
+        private fun sizeOf(path: String): Size {
             val p = path.lowercase()
-            val size = when {
-                p.contains("nano") || p.contains("xs") -> 0
-                p.contains("tiny") || p.contains("sm") || p.contains("preview") -> 1
-                p.contains("medium") || p.contains(".md") || p.endsWith("md") -> 2
-                p.contains("hd") || p.contains("large") -> 3
-                else -> 2 // a bare `gif`, which is the full-size one in both vocabularies
+            return when {
+                p.contains("nano") || p.contains("xs") -> Size.XS
+                p.contains("tiny") || p.contains("sm") || p.contains("preview") -> Size.SM
+                p.contains("medium") || p.contains(".md") || p.endsWith("md") -> Size.MD
+                p.contains("hd") || p.contains("large") -> Size.HD
+                p == "gif" || p.endsWith(".gif") -> Size.FULL
+                else -> Size.UNKNOWN
             }
-            // Distance from what we want, so the closest available size wins either way.
-            return if (forSending) kotlin.math.abs(size - 2) else size
         }
 
         private const val MAX_DEPTH = 4

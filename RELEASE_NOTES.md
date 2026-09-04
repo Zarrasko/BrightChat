@@ -1,3 +1,36 @@
+## BrightChat v2.32 — the GIF picker, after using it
+
+Three things that only show up once the thing is in your hand.
+
+**It searched while you were still typing.** There was a debounce, and it was too short to be one:
+350 milliseconds is inside the gap between two letters on this keyboard, so a half-typed word
+became a search, the grid rearranged itself under your thumb, and every one of those requests spent
+part of an hourly allowance on a prefix nobody meant. It now waits nearly a second — long enough
+that finishing a word is one request — and the keyboard's **Search** key fires immediately for
+anybody who doesn't want to wait it out, putting the keyboard away as it goes, which on this panel
+is the difference between seeing two rows of results and seeing none.
+
+**The results were soft, because the picker was asking for the smallest copy of each GIF.** The
+panel is 1080 pixels across a hair under four inches, so a cell in a two-column grid is roughly 400
+device pixels wide — and the `xs` rendition these services offer is commonly 120 pixels, upscaled
+more than three times before it reached your eye. The grid now takes the small-but-not-tiny one,
+and steps *up* to medium when a GIF has no such size rather than falling back down to the smallest.
+Sending is unchanged and still medium: that file is being uploaded through a phone to a Mac, and an
+HD GIF is eight megabytes iMessage re-encodes anyway.
+
+While fixing it: the rendition choice is now an explicit order of preference per job rather than
+arithmetic on a size number. The arithmetic looked clever and quietly produced *ties* — two sizes
+equally far from the target — and a tie went to whichever the service happened to serialize first,
+so which copy of a GIF you were shown was effectively decided by JSON key order.
+
+**And the GIF key sat lower than the + beside it.** The compose row aligns its keys to the bottom,
+and GIF was typeset a size smaller than everything else on that row — two different text sizes
+bottom-aligned line up their *boxes*, not their baselines, and the smaller one's baseline sits
+inside a shorter box. It is the same size as the `+` now, which puts them on one line for real
+rather than at one particular font scale.
+
+- 131 tests.
+
 ## BrightChat v2.31 — GIFs, and a library of your own
 
 **The GIF button that every other messenger has.** Beside the `+` in a thread there is now **GIF**:

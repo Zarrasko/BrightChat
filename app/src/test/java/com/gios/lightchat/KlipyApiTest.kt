@@ -79,8 +79,10 @@ class KlipyApiTest {
         assertEquals("https://cdn.klipy.test/42/md.gif", gif.sendUrl)
         assertEquals(480, gif.width)
         assertEquals(360, gif.height)
-        // Smallest for the grid, which draws a dozen at once.
-        assertEquals("https://cdn.klipy.test/42/xs.gif", gif.previewUrl)
+        // NOT the smallest for the grid: `xs` is commonly 120px against a cell about 400 device
+        // pixels wide, which is what made the results look soft. With no `sm` in this payload the
+        // preference steps up to `md` rather than down to `xs`.
+        assertEquals("https://cdn.klipy.test/42/md.gif", gif.previewUrl)
         assertTrue(page.hasNext)
     }
 
@@ -105,6 +107,33 @@ class KlipyApiTest {
                 assertTrue(gif.previewUrl, gif.previewUrl.endsWith(".gif"))
             }
         }
+    }
+
+    @Test
+    fun `the grid takes sm when there is one, and never drops to xs to save bytes`() {
+        val allSizes = """
+            {"data":{"data":[{"id":"3","file":{
+              "hd":{"gif":{"url":"https://x.test/hd.gif","width":960,"height":720}},
+              "md":{"gif":{"url":"https://x.test/md.gif","width":480,"height":360}},
+              "sm":{"gif":{"url":"https://x.test/sm.gif","width":220,"height":165}},
+              "xs":{"gif":{"url":"https://x.test/xs.gif","width":120,"height":90}}
+            }}]}}
+        """.trimIndent()
+        val gif = KlipyApi.parsePage(JSONObject(allSizes)).gifs.single()
+        assertEquals("https://x.test/sm.gif", gif.previewUrl)
+        assertEquals("https://x.test/md.gif", gif.sendUrl)
+    }
+
+    @Test
+    fun `one rendition serves both jobs when it is all there is`() {
+        // Preference, not requirement: an item offering only a tiny rendition is still drawn and
+        // still sendable, because an empty cell is worse than a small GIF.
+        val onlyXs = """
+            {"data":{"data":[{"id":"4","file":{"xs":{"gif":{"url":"https://x.test/only.gif"}}}}]}}
+        """.trimIndent()
+        val gif = KlipyApi.parsePage(JSONObject(onlyXs)).gifs.single()
+        assertEquals("https://x.test/only.gif", gif.previewUrl)
+        assertEquals("https://x.test/only.gif", gif.sendUrl)
     }
 
     @Test

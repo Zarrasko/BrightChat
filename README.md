@@ -18,7 +18,7 @@ install or update it directly. Don't have BrightMarket yet? Get it, and browse
 every Bright app, at
 **[brightmarket.gzl.dev](https://brightmarket.gzl.dev)**.
 
-**Current version: v2.31.x.** See [Version history](#version-history).
+**Current version: v2.32.x.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -392,6 +392,7 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v2.29.x | LightNotebook's journal can ask who you talked to on a day (names and counts, never text); `main` is no longer a release trigger |
 | v2.30.x | One box for a message, not two: the heads-up box stands aside when BrightControl is drawing banners for every app |
 | v2.31.x | **GIFs** — a picker on KLIPY (what Discord moved to when Google shut Tenor down), saved GIFs kept as files on the phone, and GIFs that animate instead of showing their first frame |
+| v2.32.x | GIF search waits until you stop typing (and the keyboard's Search key skips the wait); the grid draws a sharper rendition; the GIF key lines up with the + |
 
 ## Licence
 

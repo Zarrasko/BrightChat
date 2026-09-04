@@ -628,7 +628,13 @@ fun ComposeBar(
             if (onPickGif != null) {
                 HapticText(
                     text = "GIF",
-                    style = ChatType.hint,
+                    // The same style as the "+" beside it, not the smaller `hint` this started
+                    // as. The row is `Alignment.Bottom`, so two different text sizes line their
+                    // *boxes* up rather than their baselines — and the smaller one's baseline
+                    // sits inside a shorter box, which is why GIF looked like it had slipped
+                    // down. Matching the style is what puts them on one line; nudging it with
+                    // padding would have been a number that only looked right at one font scale.
+                    style = ChatType.body,
                     color = ChatColors.onSurfaceDisabled,
                     onClick = onPickGif,
                 )
