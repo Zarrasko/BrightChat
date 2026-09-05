@@ -121,11 +121,17 @@ object AddressBook {
      */
     fun asRecipients(contacts: List<PhoneContact>): List<Pair<String, String>> {
         val out = ArrayList<Pair<String, String>>()
+        // A number saved under two contacts (a duplicate contact, or a shared line) would
+        // otherwise come out as two rows with the *same address*, and the New Message picker
+        // keys its list on that address — a duplicate key crashes the list. Collapse on
+        // [key], the last-ten-digits identity the rest of the app compares addresses with;
+        // contacts arrive name-sorted, so the first (alphabetically first) contact wins.
+        val seen = HashSet<String>()
         for (contact in contacts) {
             val name = contact.name.trim()
             if (name.isEmpty() || name.none { it.isLetter() }) continue
             if (contact.numbers.any { it.label == FROM_MESSAGES }) continue
-            for (number in contact.numbers) out.add(name to number.raw)
+            for (number in contact.numbers) if (seen.add(number.key)) out.add(name to number.raw)
         }
         return out
     }

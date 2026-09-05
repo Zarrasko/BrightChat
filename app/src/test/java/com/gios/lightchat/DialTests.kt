@@ -181,6 +181,31 @@ class AddressBookTest {
     }
 
     @Test
+    fun `a number saved under two contacts is one recipient row`() {
+        // The New Message picker keys its list on the address, so two rows carrying the same
+        // number — a duplicate contact, or a shared line — would be a duplicate key and crash.
+        val phone = AddressBook.merge(
+            listOf(
+                row(1, "Alex", "12018428713"),
+                row(2, "Basil", "12018428713"),
+            ),
+        )
+        assertEquals(listOf("Alex" to "12018428713"), AddressBook.asRecipients(phone))
+    }
+
+    @Test
+    fun `the same number written two ways is still one row`() {
+        // One saved with the country code and one without are the same line; only the first shows.
+        val phone = AddressBook.merge(
+            listOf(
+                row(1, "Alex", "12018428713"),
+                row(2, "Basil", "2018428713"),
+            ),
+        )
+        assertEquals(listOf("Alex" to "12018428713"), AddressBook.asRecipients(phone))
+    }
+
+    @Test
     fun `no index changes nothing`() {
         val phone = AddressBook.merge(listOf(row(1, "Alex", "1112223333")))
         assertEquals(phone, AddressBook.withKnown(phone, emptyMap()))
