@@ -163,9 +163,8 @@ fun ConversationsScreen(
                         onClick = { viewModel.open(convo) },
                         onToggleFavorite = { viewModel.toggleFavorite(convo) },
                         // Only on Favorites, and only there because that is the only list a pin
-                        // has an opinion about. Its own small verb rather than another gesture:
-                        // the row already spends its long-press on starring and its swipe on
-                        // Delete, and a third would be one too many to remember.
+                        // has an opinion about. Toggled by the swipe reveal on that tab, so it
+                        // has no gesture of its own to remember.
                         pinned = if (tab == ConversationTab.Favorites) {
                             Pins.isPinned(state.pins, convo.guid)
                         } else {
@@ -214,18 +213,21 @@ private fun ConversationRow(
         // Behind the row, uncovered as it slides left. Tapping acts immediately — the swipe is
         // its own confirm.
         //
-        // **On Favorites this is Unstar, not Delete.** The long-press on that tab now pins, so
-        // unstarring needs somewhere to live, and it belongs here: it is the destructive-ish verb
-        // and this is where the destructive verb goes. Deleting a chat you starred is rarer than
-        // unstarring one, and Delete is still one tab away on Messages.
+        // **On Favorites this is Pin/Unpin, not Delete.** Long-press is star/unstar on every
+        // tab, so pinning needs a home of its own and the swipe is where the secondary verb
+        // goes: Pin here, Delete on Messages. Deleting a chat you starred is rarer than pinning
+        // or unpinning one, and Delete is still one tab away.
         val revealable = pinned != null || canDelete
         if (revealable) {
             Box(modifier = Modifier.matchParentSize(), contentAlignment = Alignment.CenterEnd) {
                 HapticText(
-                    text = if (pinned != null) "Unstar" else "Delete",
+                    text = when {
+                        pinned != null -> if (pinned) "Unpin" else "Pin"
+                        else -> "Delete"
+                    },
                     style = ChatType.body,
                     color = ChatColors.onSurface,
-                    onClick = if (pinned != null) onToggleFavorite else onDelete,
+                    onClick = if (pinned != null) onTogglePin else onDelete,
                 )
             }
         }
@@ -265,25 +267,28 @@ private fun ConversationRow(
                         if (offsetX.value < -1f) scope.launch { offsetX.animateTo(0f) } else onClick()
                     },
                     /**
-                     * **Long-press means the useful verb for the list you are on.**
+                     * **Long-press is always star / unstar.**
                      *
-                     * Everywhere else that is star / unstar, and the row moving to another tab is
-                     * its own confirmation. On Favorites the chat is already starred, so starring
-                     * is the one thing it cannot do — there the press pins instead, and the "↑"
-                     * appearing on the title is the confirmation.
+                     * The gesture that starred a chat unstars it too, so a star is never a
+                     * one-way trip. On Favorites that removes the chat to Messages — the row
+                     * moving to another tab is its own confirmation — and drops any pin with it
+                     * (see [Pins.prune]). Pinning lives on the swipe, where the "↑" on the title
+                     * is its confirmation.
                      *
-                     * The first attempt gave pinning its own text verb in the row. It shared the
-                     * line with the title and the timestamp on a 3.92" panel, so the title lost
-                     * about a third of its width to a word that is only relevant on one tab —
-                     * and a tap target that small sitting inside a row that is itself clickable
-                     * and swipeable is a coin toss. A gesture the row already has costs nothing.
+                     * The first attempt put pin on the long-press here, which hijacked the one
+                     * gesture that reverses a star and stranded unstarring on a swipe nobody
+                     * found. Pinning also spent a stretch as its own text verb in the row; it
+                     * shared the line with the title and the timestamp on a 3.92" panel, so the
+                     * title lost a third of its width to a word only one tab cares about — a tap
+                     * target that small inside a row that is itself clickable and swipeable is a
+                     * coin toss. The swipe the row already has costs nothing.
                      */
                     onLongClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        when {
-                            offsetX.value < -1f -> scope.launch { offsetX.animateTo(0f) }
-                            pinned != null -> onTogglePin()
-                            else -> onToggleFavorite()
+                        if (offsetX.value < -1f) {
+                            scope.launch { offsetX.animateTo(0f) }
+                        } else {
+                            onToggleFavorite()
                         }
                     },
                 )
