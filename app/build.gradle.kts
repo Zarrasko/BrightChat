@@ -80,7 +80,7 @@ android {
         targetSdk = 35
         // CI overwrites both from the workflow run number; see .github/workflows/build.yml
         versionCode = 16
-        versionName = "2.34.0"
+        versionName = "2.35.0"
 
         buildConfigField("String", "REPORT_TOKEN", "\"$reportToken\"")
         // Scrambled, not encrypted — see [scramble]. Decoded by `api/KlipyKey.kt`.

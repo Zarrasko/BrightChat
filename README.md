@@ -18,7 +18,7 @@ install or update it directly. Don't have BrightMarket yet? Get it, and browse
 every Bright app, at
 **[brightmarket.gzl.dev](https://brightmarket.gzl.dev)**.
 
-**Current version: v2.34.x.** See [Version history](#version-history).
+**Current version: v2.35.x.** See [Version history](#version-history).
 
 > ### About this fork
 >
@@ -395,6 +395,7 @@ Real tags, oldest to newest (the early `0.x` history predates the `gi-os` fork's
 | v2.32.x | GIF search waits until you stop typing (and the keyboard's Search key skips the wait); the grid draws a sharper rendition; the GIF key lines up with the + |
 | v2.33.x | Long-press is star/unstar on every tab — a star is no longer a one-way trip; pinning moved to the swipe reveal on Favorites |
 | v2.34.x | Fix: starting a message to a number saved under two contacts no longer crashes the list (light-reports#291) |
+| v2.35.x | Fix: an old message no longer resurfaces as the row's preview when a late read receipt or delivery stamp arrives (light-reports#292) |
 
 ## Licence
 

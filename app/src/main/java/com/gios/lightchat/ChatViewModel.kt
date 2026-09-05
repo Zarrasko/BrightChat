@@ -2523,7 +2523,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { s ->
             val convos = s.conversations.map { c ->
                 if (incoming.chatGuid in c.guids) {
-                    when {
+                    // An out-of-order message — an `updated-message` for something older
+                    // than the row already shows (a read receipt, a delivery stamp, an
+                    // edit) — must not roll the preview back. The sweep path guards this
+                    // in Conversation.advancedBy; the socket path was overwriting
+                    // lastText/lastDate regardless, which resurfaced an old message as the
+                    // row's preview. Mirrors advancedBy's `date < lastDate` rule.
+                    if (incoming.message.date < c.lastDate) {
+                        c
+                    } else when {
                         // A group event (rename, member change) bumps recency but
                         // isn't speech — the text preview keeps the newest real message.
                         incoming.message.isGroupEvent -> c.copy(
