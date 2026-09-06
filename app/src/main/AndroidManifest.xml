@@ -112,9 +112,15 @@
           Answered from the local message table, so it is retroactive across everything synced rather
           than only what happened since some recorder started. See TalkedProvider.
         -->
+        <!-- Repointed off upstream's fixed authority for this fork specifically: an
+             authority is unique per-device, not per-app, so keeping the literal
+             com.gios.lightchat.* string here would collide with the production
+             LightChat install this is meant to sit alongside rather than replace.
+             LightNotebook/Roll only know the upstream string, so this integration is
+             simply unavailable from this build — the production install still provides it. -->
         <provider
             android:name=".share.TalkedProvider"
-            android:authorities="com.gios.lightchat.talked"
+            android:authorities="com.zarrasko.messages.talked"
             android:exported="true" />
 
         <activity
@@ -234,14 +240,14 @@
         -->
         <provider
             android:name=".share.ChatsProvider"
-            android:authorities="com.gios.lightchat.chats"
+            android:authorities="com.zarrasko.messages.chats"
             android:exported="true" />
 
         <!-- The one-time login code that just arrived, for three minutes, for LightKeyboard's
              suggestion strip. See CodeProvider. -->
         <provider
             android:name=".share.CodeProvider"
-            android:authorities="com.gios.lightchat.code"
+            android:authorities="com.zarrasko.messages.code"
             android:exported="true" />
 
         <!-- Shares downloaded non-image attachments to external apps (ACTION_VIEW /

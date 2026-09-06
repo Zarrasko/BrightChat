@@ -75,7 +75,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.gios.lightchat"
+        // Distinct from upstream's com.gios.lightchat so this personal fork installs
+        // alongside the production BrightChat/LightChat install rather than replacing
+        // or conflicting with it (debug signing wouldn't match gi-os's release key
+        // anyway) — see the upstream README's own note on package-id changes.
+        applicationId = "com.zarrasko.messages"
         minSdk = 34   // Light Phone III runs Android 14 — the only target device.
         targetSdk = 35
         // CI overwrites both from the workflow run number; see .github/workflows/build.yml
