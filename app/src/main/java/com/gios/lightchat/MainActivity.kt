@@ -335,7 +335,6 @@ fun LightChatApp(viewModel: ChatViewModel) {
     // positional, and three named values are easier to trust than that.
     val favoritesScroll = rememberLazyListState()
     val knownScroll = rememberLazyListState()
-    val unknownScroll = rememberLazyListState()
     val dialScroll = rememberLazyListState()
 
     // A tapped notification can open a thread that isn't on the current tab (a
@@ -398,10 +397,9 @@ fun LightChatApp(viewModel: ChatViewModel) {
             listState = when (tab) {
                 ConversationTab.Favorites -> favoritesScroll
                 ConversationTab.Known -> knownScroll
-                ConversationTab.Unknown -> unknownScroll
                 // Unreachable — the branch above catches Dial before this runs — but the
                 // compiler wants every entry and an exception here would be a crash waiting for
-                // whoever adds a fifth tab.
+                // whoever adds a third tab.
                 ConversationTab.Dial -> dialScroll
             },
             onSelectTab = { tab = it },

@@ -28,14 +28,19 @@ import com.gios.lightchat.Conversation
 import com.gios.lightchat.ui.theme.ChatColors
 
 /**
- * The conversation list's three tabs. [title] is what the header shows; Known is
+ * The conversation list's tabs. [title] is what the header shows; Known is
  * titled "Messages" because it's the default view and the app's own name for
  * itself — renaming it to "Known" would make the common case read like a filter.
+ *
+ * There is no separate Unknown tab: everything that isn't starred lands in Messages
+ * regardless of whether the sender is in the address book. The known/unknown
+ * distinction still exists — [Store.notifyUnknown] uses [Contacts.knows] to decide
+ * whether a stranger's message is allowed to buzz and raise the on-screen box — it's
+ * just not surfaced as a second list to check.
  */
 enum class ConversationTab(val title: String) {
     Favorites("Favorites"),
     Known("Messages"),
-    Unknown("Unknown"),
 
     /**
      * The dialer, which is also the contacts list.
@@ -116,28 +121,28 @@ private fun TabIcon(tab: ConversationTab, active: Boolean, unread: Boolean, onCl
     }
 }
 
-/** Matches LightFog's `n(48)`, which resolves to 48dp at the LPIII's 2.55 density. */
-private const val ICON_DP = 48
+/**
+ * Deliberately smaller than LightFog's own `n(48)` navbar convention: on this screen the
+ * bar sits right below the header's much smaller pencil/refresh glyphs (22dp), and at 48dp
+ * the size gap between "primary nav" and "corner utility" read as inconsistent rather than
+ * as a hierarchy — especially at a premium on a 3.92" panel. 32dp still reads clearly as
+ * the main navigation without dominating the row.
+ */
+private const val ICON_DP = 32
 
 private val ConversationTab.glyph: ImageVector
     get() = when (this) {
         ConversationTab.Favorites -> StarVector
         ConversationTab.Known -> PersonVector
-        ConversationTab.Unknown -> PersonOutlineVector
         ConversationTab.Dial -> PhoneVector
     }
 
-// Material `star`, `person` and `person_outline`. Filled vs outlined carries the
-// Known/Unknown split without a second concept — the same filled-dot/ring language
-// LightGlance uses for its notification glyphs.
+// Material `star` and `person`, hand-parsed like the rest of this bar.
 private val StarVector: ImageVector by lazy {
     vector("M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z")
 }
 private val PersonVector: ImageVector by lazy {
     vector("M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z")
-}
-private val PersonOutlineVector: ImageVector by lazy {
-    vector("M12 5.9c1.16 0 2.1.94 2.1 2.1s-.94 2.1-2.1 2.1S9.9 9.16 9.9 8s.94-2.1 2.1-2.1m0 9c2.97 0 6.1 1.46 6.1 2.1v1.1H5.9V17c0-.64 3.13-2.1 6.1-2.1M12 4C9.79 4 8 5.79 8 8s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 9c-2.67 0-8 1.34-8 4v3h16v-3c0-2.66-5.33-4-8-4z")
 }
 
 /** 24dp-viewport path → tintable vector. The baked fill is irrelevant; `Icon` re-tints. */
@@ -160,13 +165,14 @@ private fun vector(pathData: String): ImageVector =
     ).build()
 
 /**
- * Which tab a conversation belongs to. One function rather than three filters, so
- * the three lists are exhaustive and disjoint by construction — a starred chat is
- * in Favorites and *only* Favorites, and nothing can appear twice or vanish.
+ * Which tab a conversation belongs to. One function rather than two filters, so
+ * the lists are exhaustive and disjoint by construction — a starred chat is in
+ * Favorites and *only* Favorites, and nothing can appear twice or vanish.
+ *
+ * [contacts] is unused here — kept in the signature so this stays the one place that
+ * decides tab membership even though known/unknown no longer splits the list; see
+ * [Contacts.knows] for where that distinction still matters (notification gating).
  */
+@Suppress("UNUSED_PARAMETER")
 fun tabOf(conversation: Conversation, contacts: Contacts, favorites: Set<String>): ConversationTab =
-    when {
-        conversation.guid in favorites -> ConversationTab.Favorites
-        contacts.knows(conversation) -> ConversationTab.Known
-        else -> ConversationTab.Unknown
-    }
+    if (conversation.guid in favorites) ConversationTab.Favorites else ConversationTab.Known

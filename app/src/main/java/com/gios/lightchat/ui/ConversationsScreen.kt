@@ -5,6 +5,7 @@ package com.gios.lightchat.ui
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -18,10 +19,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -30,6 +33,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -93,14 +100,7 @@ fun ConversationsScreen(
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            HapticText(
-                text = "New",
-                style = ChatType.hint,
-                color = ChatColors.onSurfaceVariant,
-                onClick = onNewMessage,
-                modifier = Modifier.width(56.dp),
-                textAlign = TextAlign.Start,
-            )
+            NewMessageIcon(onClick = onNewMessage, modifier = Modifier.width(56.dp))
             Spacer(modifier = Modifier.weight(1f))
             HapticText(
                 text = tab.title,
@@ -109,13 +109,10 @@ fun ConversationsScreen(
                 onClick = onOpenSettings,
             )
             Spacer(modifier = Modifier.weight(1f))
-            HapticText(
-                text = "Refresh",
-                style = ChatType.hint,
-                color = if (state.status == Status.Loading) ChatColors.onSurfaceDisabled else ChatColors.onSurfaceVariant,
+            RefreshIcon(
+                loading = state.status == Status.Loading,
                 onClick = viewModel::refresh,
                 modifier = Modifier.width(56.dp),
-                textAlign = TextAlign.End,
             )
         }
 
@@ -127,7 +124,6 @@ fun ConversationsScreen(
                     state.conversations.isEmpty() && state.status == Status.Loading -> "Loading…"
                     state.conversations.isEmpty() -> state.message ?: "No conversations"
                     tab == ConversationTab.Favorites -> "No favorites yet.\nLong-press a chat to star it."
-                    tab == ConversationTab.Unknown -> "No unknown senders"
                     else -> "No conversations"
                 }
                 Box(
@@ -186,6 +182,90 @@ fun ConversationsScreen(
             modifier = Modifier.navigationBarsPadding(),
         )
     }
+}
+
+/**
+ * The pencil that opens New Message, in place of a text link — matching Light's own
+ * convention that "create new" is a pencil, not a "+" or a word. Sized down from the
+ * navbar's 48dp glyphs (this sits in a slim header row, not the icon bar) but drawn
+ * the same hand-parsed way, matching [ConversationNavbar]'s glyphs rather than pulling
+ * in material-icons for one shape.
+ */
+@Composable
+private fun NewMessageIcon(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val haptics = LocalHapticFeedback.current
+    val interaction = remember { MutableInteractionSource() }
+    Icon(
+        imageVector = PencilVector,
+        contentDescription = "New message",
+        tint = ChatColors.onSurfaceVariant,
+        modifier = modifier
+            .size(22.dp)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onClick()
+                },
+            ),
+    )
+}
+
+/** Material's `edit` glyph, hand-parsed like [ConversationNavbar]'s icons. */
+private val PencilVector: ImageVector by lazy {
+    ImageVector.Builder(
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f,
+    ).addPath(
+        pathData = PathParser().parsePathString(
+            "M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 " +
+                "0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z",
+        ).toNodes(),
+        fill = SolidColor(Color.White),
+    ).build()
+}
+
+/** Re-pulls the list from the Mac, in place of the old "Refresh" text link — dimmed
+ *  while a pull is already in flight, exactly as the text was. */
+@Composable
+private fun RefreshIcon(loading: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val haptics = LocalHapticFeedback.current
+    val interaction = remember { MutableInteractionSource() }
+    Icon(
+        imageVector = RefreshVector,
+        contentDescription = "Refresh",
+        tint = if (loading) ChatColors.onSurfaceDisabled else ChatColors.onSurfaceVariant,
+        modifier = modifier
+            .size(22.dp)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onClick()
+                },
+            ),
+    )
+}
+
+/** Material's `refresh` glyph, hand-parsed like [ConversationNavbar]'s icons. */
+private val RefreshVector: ImageVector by lazy {
+    ImageVector.Builder(
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f,
+    ).addPath(
+        pathData = PathParser().parsePathString(
+            "M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 " +
+                "6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c" +
+                "1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z",
+        ).toNodes(),
+        fill = SolidColor(Color.White),
+    ).build()
 }
 
 @Composable
