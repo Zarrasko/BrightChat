@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -33,6 +34,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.DisposableEffect
@@ -49,9 +51,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -85,6 +90,23 @@ import com.gios.lightchat.ReactionType
 import com.gios.lightchat.URL_REGEX
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
+
+/** Material's `phone` glyph, hand-parsed the same way as [ConversationNavbar]'s icons. */
+private val PhoneVector: ImageVector by lazy {
+    ImageVector.Builder(
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f,
+    ).addPath(
+        pathData = PathParser().parsePathString(
+            "M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 " +
+                "1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 " +
+                "0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z",
+        ).toNodes(),
+        fill = SolidColor(Color.White),
+    ).build()
+}
 
 /** One open conversation: messages oldest→newest, user on the right, others left. */
 @Composable
@@ -277,20 +299,30 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                 // keeps the title centred.
                 trailing = if (callNumber != null) {
                     {
-                        HapticText(
-                            text = if (confirmingCall) "Call?" else "Call",
-                            style = ChatType.hint,
-                            // Brightened once armed, exactly as Remove? is: the word changed, and
-                            // on a greyscale panel the weight is what makes that noticeable.
-                            color = if (confirmingCall) ChatColors.onSurface else ChatColors.onSurfaceDim,
-                            onClick = {
-                                if (confirmingCall) {
-                                    confirmingCall = false
-                                    ring(callNumber)
-                                } else {
-                                    confirmingCall = true
-                                }
-                            },
+                        val haptics = LocalHapticFeedback.current
+                        val interaction = remember { MutableInteractionSource() }
+                        Icon(
+                            imageVector = PhoneVector,
+                            contentDescription = if (confirmingCall) "Call?" else "Call",
+                            // Brightened once armed, exactly as Remove? was as text: the icon
+                            // doesn't change shape, so on a greyscale panel the weight is what
+                            // makes the armed state noticeable.
+                            tint = if (confirmingCall) ChatColors.onSurface else ChatColors.onSurfaceDim,
+                            modifier = Modifier
+                                .size(22.dp)
+                                .clickable(
+                                    interactionSource = interaction,
+                                    indication = null,
+                                    onClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        if (confirmingCall) {
+                                            confirmingCall = false
+                                            ring(callNumber)
+                                        } else {
+                                            confirmingCall = true
+                                        }
+                                    },
+                                ),
                         )
                     }
                 } else {
@@ -492,6 +524,7 @@ fun ThreadScreen(viewModel: ChatViewModel) {
                 viewModel::loadImage,
                 onClose = { viewingImage = null },
                 loadFile = viewModel::loadImageFile,
+                onSave = viewModel::saveAttachment,
             )
         }
 

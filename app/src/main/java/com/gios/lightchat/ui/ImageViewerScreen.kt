@@ -1,5 +1,6 @@
 package com.gios.lightchat.ui
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -19,16 +20,19 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntSize
 import com.gios.light.common.hw.WheelScroll
 import com.gios.lightchat.Attachment
@@ -37,6 +41,7 @@ import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** How far pinch/double-tap zoom may go. The decoded bitmap is capped at 1080px
  *  on its long edge (see [com.gios.lightchat.Attachments]), so past ~4× there's
@@ -78,6 +83,9 @@ fun ImageViewerScreen(
      * that refuses to open.
      */
     loadFile: (suspend (Attachment) -> java.io.File?)? = null,
+    /** Long-press saves the photo (or GIF) to the device's own Pictures library — see
+     *  [com.gios.lightchat.Attachments.saveToGallery]. Null hides the gesture entirely. */
+    onSave: (suspend (Attachment) -> Boolean)? = null,
 ) {
     // True color for exactly as long as the viewer is up (vandamd's zero trick;
     // see ColorMode — a no-op without the one-time WRITE_SECURE_SETTINGS grant).
@@ -113,6 +121,27 @@ fun ImageViewerScreen(
     }
 
     BackHandler { closing = true }
+
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    var saving by remember { mutableStateOf(false) }
+    fun save() {
+        // Guards against a second long-press firing a second save while the first is
+        // still in flight — the picture doesn't change while the viewer is open, so
+        // there is nothing a concurrent save would do differently.
+        if (saving || onSave == null) return
+        saving = true
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        scope.launch {
+            val ok = onSave(attachment)
+            Toast.makeText(
+                context,
+                if (ok) "Saved to Pictures" else "Couldn't save",
+                Toast.LENGTH_SHORT,
+            ).show()
+            saving = false
+        }
+    }
 
     // One or the other, never both: a GIF is played from its file and everything else is decoded.
     val animated = attachment.isGif && loadFile != null
@@ -166,6 +195,7 @@ fun ImageViewerScreen(
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { closing = true },
+                    onLongPress = { save() },
                     onDoubleTap = { tap ->
                         if (scale > 1f) {
                             scale = 1f

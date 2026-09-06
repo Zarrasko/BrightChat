@@ -22,21 +22,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.gios.lightchat.AgentProvider
 import com.gios.lightchat.ChatViewModel
+import com.gios.lightchat.api.AgentApi
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatType
 import org.json.JSONObject
 
 /**
- * Create or edit an agent. An agent is a name plus an OpenAI-compatible endpoint
- * (base URL, bearer key, model) and an optional system prompt — June's Hermes server
- * is one such endpoint, but so is OpenRouter, OpenAI, or a local LM Studio box.
+ * Create or edit an agent. An agent is a name plus a provider ([AgentProvider]: an
+ * OpenAI-compatible endpoint, or Anthropic's own Claude API), the matching
+ * base URL/key/model, and an optional system prompt.
  */
 @Composable
 fun AgentEditScreen(viewModel: ChatViewModel) {
     val state by viewModel.state.collectAsState()
     val target = state.agentEditorTarget
     var name by rememberSaveable { mutableStateOf(target?.name.orEmpty()) }
+    var provider by rememberSaveable { mutableStateOf(target?.provider ?: AgentProvider.OPENAI_COMPATIBLE) }
     var baseUrl by rememberSaveable { mutableStateOf(target?.baseUrl.orEmpty()) }
     var apiKey by rememberSaveable { mutableStateOf(target?.apiKey.orEmpty()) }
     var model by rememberSaveable { mutableStateOf(target?.model.orEmpty()) }
@@ -81,9 +84,33 @@ fun AgentEditScreen(viewModel: ChatViewModel) {
 
         FieldLabel("Name")
         FieldInput(name, KeyboardType.Text) { name = it }
-        FieldLabel("Base URL (OpenAI-compatible)")
+
+        FieldLabel("Provider")
+        HapticText(
+            text = when (provider) {
+                AgentProvider.OPENAI_COMPATIBLE -> "OpenAI-compatible"
+                AgentProvider.ANTHROPIC -> "Anthropic (Claude)"
+            },
+            style = ChatType.body,
+            color = ChatColors.onSurface,
+            onClick = {
+                provider = when (provider) {
+                    AgentProvider.OPENAI_COMPATIBLE -> AgentProvider.ANTHROPIC
+                    AgentProvider.ANTHROPIC -> AgentProvider.OPENAI_COMPATIBLE
+                }
+                // Only when the field is still whatever the previous provider defaulted to —
+                // never overwrite a URL the user actually typed in themselves.
+                if (provider == AgentProvider.ANTHROPIC && baseUrl.isBlank()) {
+                    baseUrl = AgentApi.ANTHROPIC_DEFAULT_BASE_URL
+                }
+            },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        )
+        HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
+
+        FieldLabel(if (provider == AgentProvider.ANTHROPIC) "Base URL" else "Base URL (OpenAI-compatible)")
         FieldInput(baseUrl, KeyboardType.Uri) { baseUrl = it }
-        FieldLabel("API key")
+        FieldLabel(if (provider == AgentProvider.ANTHROPIC) "API key (x-api-key)" else "API key")
         FieldInput(apiKey, KeyboardType.Password) { apiKey = it }
         FieldLabel("Model")
         FieldInput(model, KeyboardType.Text) { model = it }
@@ -114,7 +141,7 @@ fun AgentEditScreen(viewModel: ChatViewModel) {
             } else {
                 ChatColors.onSurface
             },
-            onClick = { viewModel.saveAgent(name, baseUrl, apiKey, model, systemPrompt) },
+            onClick = { viewModel.saveAgent(name, provider, baseUrl, apiKey, model, systemPrompt) },
             modifier = Modifier.fillMaxWidth(),
         )
         scanError?.let { error ->

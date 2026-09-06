@@ -605,6 +605,7 @@ fun ChatDetailsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 viewModel::loadImage,
                 onClose = { viewing = null },
                 loadFile = viewModel::loadImageFile,
+                onSave = viewModel::saveAttachment,
             )
         }
 

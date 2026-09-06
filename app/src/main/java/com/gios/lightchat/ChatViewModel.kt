@@ -880,12 +880,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun closeAgentEditor() = _state.update { it.copy(agentEditor = false, agentEditorTarget = null) }
 
     /** Creates or updates an agent, then refreshes the merged list. */
-    fun saveAgent(name: String, baseUrl: String, apiKey: String, model: String, systemPrompt: String) {
+    fun saveAgent(
+        name: String,
+        provider: AgentProvider,
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        systemPrompt: String,
+    ) {
         if (name.isBlank() || baseUrl.isBlank() || model.isBlank()) return
         val target = _state.value.agentEditorTarget
         val agent = Agent(
             id = target?.id ?: java.util.UUID.randomUUID().toString(),
             name = name.trim(),
+            provider = provider,
             baseUrl = baseUrl.trim().trimEnd('/'),
             apiKey = apiKey.trim(),
             model = model.trim(),
@@ -1331,6 +1339,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun loadImageFile(attachment: Attachment): File? {
         val client = api ?: return null
         return Attachments.file(app, client, attachment)
+    }
+
+    /** Copies [attachment] into the device's own Pictures library. See [Attachments.saveToGallery]. */
+    suspend fun saveAttachment(attachment: Attachment): Boolean {
+        val client = api ?: return false
+        return Attachments.saveToGallery(app, client, attachment)
     }
 
     /**

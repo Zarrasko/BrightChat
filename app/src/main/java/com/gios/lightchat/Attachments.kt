@@ -1,10 +1,13 @@
 package com.gios.lightchat
 
+import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.ExifInterface
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -167,4 +170,58 @@ object Attachments {
 
     /** Attachment guids can contain `/`, `:`, etc. — flatten to a safe filename. */
     private fun safeName(guid: String): String = guid.map { if (it.isLetterOrDigit()) it else '_' }.joinToString("")
+
+    /**
+     * Copies [attachment]'s already-cached bytes into the device's own Pictures library via
+     * `MediaStore`, so it survives outside this app's cache (which Android can clear at any
+     * time) and shows up wherever else the phone looks for photos — including this app's own
+     * [com.gios.lightchat.ui.PhotoPickerScreen], which reads `Pictures/` directly.
+     *
+     * `MediaStore.insert` rather than a raw [File] write into `Environment.DIRECTORY_PICTURES`:
+     * writing a file directly is exactly the thing that leaves MediaStore's index stale on this
+     * OS (see the photo picker's own DCIM/Pictures-direct-read comment) — inserting *through*
+     * MediaStore creates the index entry and the bytes together, so there's nothing to fall out
+     * of sync. No storage permission needed either way: an app inserting its own new media has
+     * been unrestricted since scoped storage (API 29).
+     *
+     * Returns false on any failure (not an image/GIF, download failed, disk full) rather than
+     * throwing — a failed save should read as "try again", not crash the viewer.
+     */
+    suspend fun saveToGallery(context: Context, api: BlueBubblesApi, attachment: Attachment): Boolean =
+        withContext(Dispatchers.IO) {
+            if (!attachment.isImage) return@withContext false
+            val source = fetch(context, api, attachment) ?: return@withContext false
+            val mime = attachment.mimeType ?: "image/jpeg"
+            val name = attachment.transferName?.takeIf { it.isNotBlank() }
+                ?: ("IMG_" + safeName(attachment.guid) + extensionFor(mime))
+            val resolver = context.contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(MediaStore.Images.Media.MIME_TYPE, mime)
+                // Its own subfolder rather than dumping straight into Pictures/, the same
+                // courtesy Roll's own captures get by living in DCIM/ rather than loose files.
+                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/BrightChat")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val uri = runCatching { resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) }
+                .getOrNull() ?: return@withContext false
+            val wrote = runCatching {
+                resolver.openOutputStream(uri)?.use { out -> source.inputStream().use { it.copyTo(out) } }
+            }.isSuccess
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            runCatching { resolver.update(uri, values, null, null) }
+            if (!wrote) runCatching { resolver.delete(uri, null, null) } // don't leave a zero-byte entry behind
+            wrote
+        }
+
+    /** Only reached when the server sends an image with no filename at all — rare, but the
+     *  saved file still needs a real extension for the gallery to treat it as an image. */
+    private fun extensionFor(mime: String): String = when (mime) {
+        "image/png" -> ".png"
+        "image/gif" -> ".gif"
+        "image/webp" -> ".webp"
+        "image/heic", "image/heif" -> ".heic"
+        else -> ".jpg"
+    }
 }

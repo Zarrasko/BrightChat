@@ -6,6 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.gios.lightchat.Agent
 import com.gios.lightchat.AgentMessage
+import com.gios.lightchat.AgentProvider
 import com.gios.lightchat.Role
 import com.gios.lightchat.api.SecureStore
 
@@ -29,6 +30,7 @@ class AgentStore private constructor(context: Context) {
                 CREATE TABLE agents (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
+                    provider TEXT NOT NULL DEFAULT 'OPENAI_COMPATIBLE',
                     base_url TEXT NOT NULL,
                     api_key TEXT NOT NULL,
                     model TEXT NOT NULL,
@@ -68,6 +70,7 @@ class AgentStore private constructor(context: Context) {
             .use { c ->
                 val id = c.getColumnIndexOrThrow("id")
                 val name = c.getColumnIndexOrThrow("name")
+                val provider = c.getColumnIndexOrThrow("provider")
                 val url = c.getColumnIndexOrThrow("base_url")
                 val key = c.getColumnIndexOrThrow("api_key")
                 val model = c.getColumnIndexOrThrow("model")
@@ -77,6 +80,7 @@ class AgentStore private constructor(context: Context) {
                         Agent(
                             id = c.getString(id),
                             name = c.getString(name),
+                            provider = parseProvider(c.getString(provider)),
                             baseUrl = c.getString(url),
                             apiKey = decrypt(c.getString(key)),
                             model = c.getString(model),
@@ -94,6 +98,7 @@ class AgentStore private constructor(context: Context) {
             .use { c ->
                 if (!c.moveToFirst()) return null
                 val name = c.getColumnIndexOrThrow("name")
+                val provider = c.getColumnIndexOrThrow("provider")
                 val url = c.getColumnIndexOrThrow("base_url")
                 val key = c.getColumnIndexOrThrow("api_key")
                 val model = c.getColumnIndexOrThrow("model")
@@ -101,6 +106,7 @@ class AgentStore private constructor(context: Context) {
                 return Agent(
                     id = id,
                     name = c.getString(name),
+                    provider = parseProvider(c.getString(provider)),
                     baseUrl = c.getString(url),
                     apiKey = decrypt(c.getString(key)),
                     model = c.getString(model),
@@ -110,9 +116,10 @@ class AgentStore private constructor(context: Context) {
     }
 
     fun putAgent(agent: Agent) {
-        val values = ContentValues(6).apply {
+        val values = ContentValues(7).apply {
             put("id", agent.id)
             put("name", agent.name)
+            put("provider", agent.provider.name)
             put("base_url", agent.baseUrl)
             put("api_key", encrypt(agent.apiKey))
             put("model", agent.model)
@@ -120,6 +127,11 @@ class AgentStore private constructor(context: Context) {
         }
         helper.writableDatabase.insertWithOnConflict("agents", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
+
+    /** Falls back to the original (and only, pre-Anthropic) provider for a row written
+     *  before this column existed, or any other unrecognized value. */
+    private fun parseProvider(raw: String?): AgentProvider =
+        raw?.let { runCatching { AgentProvider.valueOf(it) }.getOrNull() } ?: AgentProvider.OPENAI_COMPATIBLE
 
     /** Deletes the agent and its whole conversation. */
     fun deleteAgent(id: String) {
@@ -215,7 +227,7 @@ class AgentStore private constructor(context: Context) {
             }
 
         private const val NAME = "lightchat_agents.db"
-        private const val VERSION = 1
+        private const val VERSION = 2 // added `provider` (Anthropic support); onUpgrade wipes and recreates
 
         /** Messages per thread page. */
         const val PAGE = 50
