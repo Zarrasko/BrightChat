@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +62,13 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
     // an iMessage to such an address *appears* to send and dies silently on the Mac.
     var unavailable by remember { mutableStateOf<Set<String>>(emptySet()) }
     val focus = remember { FocusRequester() }
+    // Hides "New agent"/"Newsletter" the moment the "To" field takes focus — which
+    // happens immediately on opening this screen (see the LaunchedEffect below), so
+    // without this the keyboard covers the field you're meant to type into before
+    // you've typed a single character. They're a starting menu, not something you
+    // need mid-entry, so trading them away for room the instant typing starts is a
+    // wash rather than a loss.
+    var toFocused by remember { mutableStateOf(false) }
     // Speaking a first message rather than typing it. See [rememberDictation].
     val dictate = rememberDictation(viewModel)
 
@@ -122,26 +130,31 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
             modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
         )
 
-        // An agent is not a person in the address book — a separate creation path.
-        HapticText(
-            text = "New agent",
-            style = ChatType.body,
-            color = ChatColors.onSurfaceVariant,
-            textAlign = TextAlign.Start,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            onClick = { viewModel.openNewAgent() },
-        )
-        // Nor is a newsletter batch: it addresses many threads at once rather than opening one,
-        // so it cannot be a recipient in the "To" field below — it is its own destination.
-        HapticText(
-            text = "Newsletter",
-            style = ChatType.body,
-            color = ChatColors.onSurfaceVariant,
-            textAlign = TextAlign.Start,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            onClick = { viewModel.openNewsletters() },
-        )
-        HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
+        // An agent is not a person in the address book — a separate creation path. Hidden
+        // once "To" has focus (see [toFocused]) so the keyboard never covers the field
+        // these two would otherwise sit above.
+        if (!toFocused) {
+            HapticText(
+                text = "New agent",
+                style = ChatType.body,
+                color = ChatColors.onSurfaceVariant,
+                textAlign = TextAlign.Start,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                onClick = { viewModel.openNewAgent() },
+            )
+            // Nor is a newsletter batch: it addresses many threads at once rather than
+            // opening one, so it cannot be a recipient in the "To" field below — it is
+            // its own destination.
+            HapticText(
+                text = "Newsletter",
+                style = ChatType.body,
+                color = ChatColors.onSurfaceVariant,
+                textAlign = TextAlign.Start,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                onClick = { viewModel.openNewsletters() },
+            )
+            HorizontalDivider(thickness = 1.dp, color = ChatColors.onSurfaceDisabled)
+        }
 
         // "To" line: chosen recipients as removable chips, then an inline field to
         // add more. FlowRow lets chips wrap and the field flow after them, native-style.
@@ -191,7 +204,9 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
                         singleLine = true,
                         textStyle = ChatType.body.copy(color = ChatColors.onSurface),
                         cursorBrush = SolidColor(ChatColors.onSurface),
-                        modifier = Modifier.widthIn(min = 120.dp).focusRequester(focus),
+                        modifier = Modifier.widthIn(min = 120.dp)
+                            .focusRequester(focus)
+                            .onFocusChanged { toFocused = it.isFocused },
                     )
                 }
             }
