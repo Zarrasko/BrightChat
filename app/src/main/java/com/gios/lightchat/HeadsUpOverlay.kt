@@ -18,6 +18,7 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
+import com.gios.lightchat.api.Store
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.gios.lightchat.ui.HeadsUpBox
@@ -68,7 +69,7 @@ object HeadsUpOverlay {
             HeadsUpActivity.dismissLive()
             if (view == null) attach(app)
             handler.removeCallbacks(autoHide)
-            handler.postDelayed(autoHide, VISIBLE_MS)
+            handler.postDelayed(autoHide, Store.headsUpDurationMs(app))
         }
     }
 
@@ -177,7 +178,4 @@ object HeadsUpOverlay {
             viewModelStore.clear()
         }
     }
-
-    /** Matches HeadsUpActivity, so the box behaves the same either way it's shown. */
-    private const val VISIBLE_MS = 4_500L
 }

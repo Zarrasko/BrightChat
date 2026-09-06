@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.gios.lightchat.api.Store
 import com.gios.lightchat.ui.HeadsUpBox
 import com.gios.lightchat.ui.theme.LightChatTheme
 
@@ -104,7 +105,7 @@ class HeadsUpActivity : ComponentActivity() {
 
     private fun armDismiss() {
         handler.removeCallbacks(dismiss)
-        handler.postDelayed(dismiss, VISIBLE_MS)
+        handler.postDelayed(dismiss, Store.headsUpDurationMs(this))
     }
 
     /** Tapping the box opens that thread, exactly like tapping the notification. */
@@ -125,10 +126,6 @@ class HeadsUpActivity : ComponentActivity() {
     }
 
     companion object {
-        /** Long enough to read two lines, short enough not to sit in front of what
-         *  you were doing. */
-        private const val VISIBLE_MS = 4_500L
-
         /**
          * The instance currently on screen, if any. Held so [HeadsUpOverlay] can replace
          * it: the activity is only used when the screen was off, and once the user has

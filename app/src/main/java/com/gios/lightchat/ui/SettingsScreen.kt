@@ -193,6 +193,23 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
             },
         )
 
+        // Only worth showing when there's a box to time at all. Tap to cycle, same gesture
+        // as every other setting on this screen — there's no dial or slider anywhere else
+        // in the app, so one wouldn't belong here either.
+        if (headsUpBox && !ownedElsewhere) {
+            var headsUpMs by remember { mutableStateOf(Store.headsUpDurationMs(context)) }
+            val options = Store.HEADS_UP_DURATION_OPTIONS_MS
+            Toggle(
+                label = "On-screen alerts last: ${formatDuration(headsUpMs)}",
+                hint = "Tap to change how long the box stays up.",
+                onClick = {
+                    val next = options.getOrElse(options.indexOf(headsUpMs) + 1) { options.first() }
+                    headsUpMs = next
+                    Store.setHeadsUpDurationMs(context, next)
+                },
+            )
+        }
+
         // Stays on this screen rather than going back, so the outcome can actually be
         // read — including the case where the Private API is off and the Mac still shows
         // everything unread.
@@ -597,6 +614,16 @@ private fun SectionHeader(title: String) {
     Spacer(modifier = Modifier.height(30.dp))
     Text(text = title, style = ChatType.hint, color = ChatColors.onSurfaceDisabled)
     Spacer(modifier = Modifier.height(14.dp))
+}
+
+/** "4.5s" / "10s" — whole seconds print bare, everything else keeps its one decimal. */
+private fun formatDuration(ms: Long): String {
+    val seconds = ms / 1000.0
+    return if (seconds == seconds.toLong().toDouble()) {
+        "${seconds.toLong()}s"
+    } else {
+        "${seconds}s"
+    }
 }
 
 /** A setting that flips, with the line underneath saying what the current state means. */

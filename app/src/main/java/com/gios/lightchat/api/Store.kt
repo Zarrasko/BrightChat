@@ -30,6 +30,7 @@ object Store {
     private const val KEY_POLL_FAILS = "poll_fails"   // consecutive failures
     private const val KEY_NOTIFY_UNKNOWN = "notify_unknown" // alert for senders not in the address book
     private const val KEY_HEADS_UP = "heads_up_box" // show the on-screen box for new messages
+    private const val KEY_HEADS_UP_MS = "heads_up_duration_ms" // how long that box stays up
     private const val KEY_ALERTS_OWNED = "alerts_owned" // BrightControl draws the box for every app
     private const val KEY_CALL_ANNOUNCE = "call_announce" // text people the dumb-phone number when calling them
     private const val KEY_MY_NUMBER = "my_number" // manual override for the SIM's own number
@@ -371,6 +372,21 @@ object Store {
     fun setHeadsUpBox(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_HEADS_UP, value).apply()
     }
+
+    /**
+     * How long [com.gios.lightchat.HeadsUpOverlay] / [com.gios.lightchat.HeadsUpActivity] stay up
+     * before dismissing themselves. One of [HEADS_UP_DURATION_OPTIONS_MS]; defaults to the
+     * original fixed value.
+     */
+    fun headsUpDurationMs(context: Context): Long =
+        prefs(context).getLong(KEY_HEADS_UP_MS, HEADS_UP_DURATION_OPTIONS_MS.first())
+
+    fun setHeadsUpDurationMs(context: Context, value: Long) {
+        prefs(context).edit().putLong(KEY_HEADS_UP_MS, value).apply()
+    }
+
+    /** Cycle-through options for the on-screen box's dismiss timer, shortest first. */
+    val HEADS_UP_DURATION_OPTIONS_MS = listOf(4_500L, 7_500L, 10_000L, 15_000L, 30_000L)
 
     /**
      * Whether BrightControl has claimed the on-screen box for every app on the phone.
