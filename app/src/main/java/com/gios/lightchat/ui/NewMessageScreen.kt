@@ -132,8 +132,12 @@ fun NewMessageScreen(viewModel: ChatViewModel) {
 
         // An agent is not a person in the address book — a separate creation path. Hidden
         // once "To" has focus (see [toFocused]) so the keyboard never covers the field
-        // these two would otherwise sit above.
-        if (!toFocused) {
+        // these two would otherwise sit above — and, once a recipient is chosen, hidden
+        // for the rest of the screen's life regardless of focus. Without the second half,
+        // tapping back into "To" later (to add a second recipient, or a stray tap while
+        // aiming for the compose bar) brings them back and pushes the compose bar behind
+        // the keyboard all over again — the same problem, just re-triggered later.
+        if (!toFocused && recipients.isEmpty()) {
             HapticText(
                 text = "New agent",
                 style = ChatType.body,
