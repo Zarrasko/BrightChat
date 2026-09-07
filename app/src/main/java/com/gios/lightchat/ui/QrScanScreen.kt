@@ -163,6 +163,11 @@ private fun decodeQr(image: ImageProxy): String? = try {
     )
     val hints = HashMap<DecodeHintType, Any>()
     hints[DecodeHintType.POSSIBLE_FORMATS] = listOf(BarcodeFormat.QR_CODE)
+    // A code carrying a full API key skews dense (small modules for the code's physical
+    // size), and a phone off a screen already fights moiré/glare that print doesn't have —
+    // TRY_HARDER trades a bit of per-frame CPU for meaningfully better odds on exactly
+    // that case. Worth it here: this only runs while the scanner is open, not continuously.
+    hints[DecodeHintType.TRY_HARDER] = true
     MultiFormatReader()
         .apply { setHints(hints) }
         .decode(BinaryBitmap(HybridBinarizer(source)))

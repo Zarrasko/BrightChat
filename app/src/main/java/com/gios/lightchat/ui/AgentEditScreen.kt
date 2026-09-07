@@ -57,6 +57,7 @@ fun AgentEditScreen(viewModel: ChatViewModel) {
                     scanError = "That QR code isn’t a LightChat agent."
                 } else {
                     name = fields.name
+                    fields.provider?.let { provider = it }
                     baseUrl = fields.baseUrl
                     apiKey = fields.apiKey
                     model = fields.model
@@ -182,11 +183,15 @@ private fun FieldInput(value: String, keyboardType: KeyboardType, onChange: (Str
 }
 
 /**
- * A decoded agent QR: the five editable fields. The editor fills whatever is present
- * and leaves the rest as the user left them.
+ * A decoded agent QR: the six editable fields. The editor fills whatever is present
+ * and leaves the rest as the user left them. [provider] is null (rather than
+ * defaulting to one) when the code doesn't say — an older QR minted before
+ * [AgentProvider] existed shouldn't silently flip a Claude agent back to
+ * OpenAI-compatible.
  */
 private data class AgentQrFields(
     val name: String,
+    val provider: AgentProvider?,
     val baseUrl: String,
     val apiKey: String,
     val model: String,
@@ -202,6 +207,17 @@ private fun parseAgentQr(text: String): AgentQrFields? {
     if (root.optString("type") != "lightchat-agent") return null
     return AgentQrFields(
         name = root.optString("name"),
+        // "anthropic" (any case) -> ANTHROPIC; anything else present -> OPENAI_COMPATIBLE;
+        // the key missing entirely -> null, so the editor leaves whatever was already picked.
+        provider = if (root.has("provider")) {
+            if (root.optString("provider").equals("anthropic", ignoreCase = true)) {
+                AgentProvider.ANTHROPIC
+            } else {
+                AgentProvider.OPENAI_COMPATIBLE
+            }
+        } else {
+            null
+        },
         baseUrl = root.optString("base_url").ifBlank { root.optString("baseUrl") },
         apiKey = root.optString("api_key").ifBlank { root.optString("apiKey") },
         model = root.optString("model"),
