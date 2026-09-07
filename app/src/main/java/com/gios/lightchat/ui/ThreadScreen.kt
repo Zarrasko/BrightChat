@@ -108,6 +108,26 @@ private val PhoneVector: ImageVector by lazy {
     ).build()
 }
 
+/**
+ * The Light SDK's own paper-airplane send glyph (`ic_send_white.xml`, `LightIcons.SEND`),
+ * ported path-for-path rather than referenced across modules — this app doesn't depend
+ * on `sdk/ui`, and one path isn't worth adding that dependency for.
+ */
+private val SendVector: ImageVector by lazy {
+    ImageVector.Builder(
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 40f,
+        viewportHeight = 40f,
+    ).addPath(
+        pathData = PathParser().parsePathString(
+            "M27.6,10.7L7.5,16.5c-1.3,0.4-1.3,2.1-0.1,2.6l9.5,3.2c0.4,0.1,0.7,0.4,0.9,0.9l3.2,9.5" +
+                "c0.4,1.3,2.2,1.2,2.6-0.1l5.7-20.1C29.6,11.4,28.6,10.4,27.6,10.7z",
+        ).toNodes(),
+        fill = SolidColor(Color.White),
+    ).build()
+}
+
 /** One open conversation: messages oldest→newest, user on the right, others left. */
 @Composable
 fun ThreadScreen(viewModel: ChatViewModel) {
@@ -650,10 +670,12 @@ fun ComposeBar(
             verticalAlignment = Alignment.Bottom,
         ) {
             if (onPickImage != null) {
+                // Full white rather than dimmed: unlike Send, this is never actually
+                // disabled, so the dim look was just visual noise, not a state.
                 HapticText(
                     text = "+",
                     style = ChatType.body,
-                    color = ChatColors.onSurfaceDisabled,
+                    color = ChatColors.onSurface,
                     onClick = onPickImage,
                 )
                 Spacer(modifier = Modifier.width(16.dp))
@@ -668,7 +690,7 @@ fun ComposeBar(
                     // down. Matching the style is what puts them on one line; nudging it with
                     // padding would have been a number that only looked right at one font scale.
                     style = ChatType.body,
-                    color = ChatColors.onSurfaceDisabled,
+                    color = ChatColors.onSurface,
                     onClick = onPickGif,
                 )
                 Spacer(modifier = Modifier.width(16.dp))
@@ -707,16 +729,29 @@ fun ComposeBar(
                 )
             }
             Spacer(modifier = Modifier.width(16.dp))
-            HapticText(
-                text = "Send",
-                style = ChatType.body,
-                color = if (input.isBlank()) ChatColors.onSurfaceDisabled else ChatColors.onSurface,
-                onClick = {
-                    if (input.isNotBlank()) {
-                        onSend(input)
-                        input = ""
-                    }
-                },
+            // The Light SDK's own send glyph rather than the word — still dims when
+            // there's nothing to send, same as it did as text, since that's a real
+            // "nothing will happen" signal rather than the "+"/GIF's plain styling.
+            val sendHaptics = LocalHapticFeedback.current
+            val sendInteraction = remember { MutableInteractionSource() }
+            Icon(
+                imageVector = SendVector,
+                contentDescription = "Send",
+                tint = if (input.isBlank()) ChatColors.onSurfaceDisabled else ChatColors.onSurface,
+                modifier = Modifier
+                    .padding(bottom = 3.dp)
+                    .size(22.dp)
+                    .clickable(
+                        interactionSource = sendInteraction,
+                        indication = null,
+                        onClick = {
+                            if (input.isNotBlank()) {
+                                sendHaptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onSend(input)
+                                input = ""
+                            }
+                        },
+                    ),
             )
         }
     }
