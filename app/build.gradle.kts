@@ -85,8 +85,8 @@ android {
         // CI overwrites both from the workflow run number on upstream, but that workflow
         // needs signing secrets this fork doesn't have configured, so these are bumped by
         // hand for each release cut here instead — see Updater.kt for what reads this.
-        versionCode = 17
-        versionName = "2.36.0"
+        versionCode = 18
+        versionName = "2.36.1"
 
         buildConfigField("String", "REPORT_TOKEN", "\"$reportToken\"")
         // Scrambled, not encrypted — see [scramble]. Decoded by `api/KlipyKey.kt`.
