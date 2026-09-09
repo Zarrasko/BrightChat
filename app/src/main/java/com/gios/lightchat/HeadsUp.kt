@@ -2,7 +2,6 @@ package com.gios.lightchat
 
 import android.app.KeyguardManager
 import android.content.Context
-import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -14,31 +13,41 @@ import android.util.Log
 import com.gios.lightchat.api.Store
 
 /**
- * The alert side of an incoming message: a buzz, and a box over whatever the phone
- * is showing (see [HeadsUpActivity]). The notification [Notifications.post] raises
- * is the *record* — it stays in LightOS's list and drives LightGlance's dot — so
- * this is purely additive and degrades to notification-only.
+ * The alert side of an incoming message: a buzz, and — only while awake and past the
+ * keyguard — a box over whatever the phone is showing. The notification
+ * [Notifications.post] raises is the *record* — it stays in LightOS's list and drives
+ * LightGlance's dot — and is posted by the caller regardless of anything here, so this
+ * is purely additive and always degrades to notification-only.
  *
- * Two ways of showing it, chosen on whether the phone is already awake and unlocked:
+ * **Screen off, or locked: no box of ours, on purpose, not just as a fallback.** This
+ * was tried both as a `showWhenLocked` + `turnScreenOn` activity and, later, as an
+ * overlay window additionally carrying `FLAG_DISMISS_KEYGUARD` (matching Light SDK's
+ * own `LightOverlay`, used by e.g. Agenda's reminders — `FLAG_SHOW_WHEN_LOCKED` alone
+ * isn't honored on this OS without it). Both got the panel to turn on. Neither ever got
+ * *seen*: this phone's launcher (Luma, or whichever the user has installed) draws its
+ * own `TYPE_KEYGUARD_DIALOG` "Unlock Gate" window — confirmed via `dumpsys window
+ * windows`, base layer 311000, above even the system status bar (151000) and
+ * notification shade (171000). That window type is privileged; an ordinary app's
+ * `TYPE_APPLICATION_OVERLAY` (111000) cannot draw above it no matter which flags it
+ * carries — our box was rendering the entire time, `HAS_DRAWN` and `isVisible=true`,
+ * just permanently covered. `FLAG_DISMISS_KEYGUARD` also unlocks the device outright to
+ * show whatever's under it — a real cost (any future PIN/pattern/biometric lock gets
+ * bypassed by a text arriving) for a box that would never win the layer fight it was
+ * paid for with. Not worth it. If the launcher ever exposes its own notification-preview
+ * hook for its Unlock Gate, that's the path back to a locked-screen alert — not fighting
+ * its window layer from here.
  *
- * - **Awake and unlocked → [HeadsUpOverlay]**, a real overlay window. Nothing else is
- *   interrupted: the app underneath keeps running and every touch outside the box still
- *   reaches it. An activity can't do that — anything on top pauses what's below.
- * - **Screen off, or locked → [HeadsUpActivity]**. An overlay window sits below the
- *   keyguard and can't wake the panel, so for the case that matters most — a text
- *   arriving while the phone is face-down on a desk — only an activity with
- *   `showWhenLocked` + `turnScreenOn` will do, and the interruption is moot because
- *   there was nothing on screen to interrupt.
+ * **Awake and unlocked → [HeadsUpOverlay]**, a real overlay window. Nothing else is
+ * interrupted: the app underneath keeps running and every touch outside the box still
+ * reaches it.
  *
- * Both paths need the `SYSTEM_ALERT_WINDOW` appop: for the overlay it's the obvious
- * reason, and for the activity it's because on Android 14 that appop is what exempts an
- * app from background-activity-start restrictions — the same trick LightGlance relies
- * on. LightOS has no Settings screen for it, so it's adb-only and one-time:
+ * The overlay path needs the `SYSTEM_ALERT_WINDOW` appop — the same trick LightGlance
+ * relies on. LightOS has no Settings screen for it, so it's adb-only and one-time:
  *
  *     adb shell appops set com.gios.lightchat SYSTEM_ALERT_WINDOW allow
  *
- * Without it, [show] still buzzes and the notification is still posted; only the box
- * is missing.
+ * Without it, [show] still buzzes and the notification is still posted; only the
+ * awake-and-unlocked box is missing.
  */
 object HeadsUp {
     private const val TAG = "HeadsUp"
@@ -113,34 +122,23 @@ object HeadsUp {
 
     private fun present(context: Context, title: String, text: String, chatGuid: String) {
         handler.post { waiting.remove(chatGuid) }
+        // Screen off, or locked: no box of ours — see the class doc for why (a launcher's
+        // own Unlock Gate window that no app overlay can draw above, discovered the hard
+        // way). The notification, posted separately before this ever runs, is the alert.
+        if (!awakeAndUnlocked(context)) return
         if (!Settings.canDrawOverlays(context)) {
             // Expected on a phone that was never plugged into a computer; the
             // notification already went out, so this is not an error.
             Log.d(TAG, "SYSTEM_ALERT_WINDOW not granted; notification only")
             return
         }
-        // Awake and unlocked: the window, so nothing the user is doing stops.
-        if (awakeAndUnlocked(context)) {
-            HeadsUpOverlay.show(context, title, text, chatGuid)
-            return
-        }
-
-        val intent = Intent(context, HeadsUpActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            // Replace the box that's already up rather than stacking a second one:
-            // singleTop + this flag means a burst re-uses one activity via onNewIntent.
-            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            .addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
-            .putExtra(EXTRA_TITLE, title)
-            .putExtra(EXTRA_TEXT, text)
-            .putExtra(Notifications.EXTRA_CHAT_GUID, chatGuid)
-        runCatching { context.startActivity(intent) }
-            .onFailure { Log.w(TAG, "background activity start refused: $it") }
+        Log.d(TAG, "presenting overlay for $chatGuid")
+        HeadsUpOverlay.show(context, title, text, chatGuid)
     }
 
     /**
-     * Screen on *and* past the lock screen. Locked-but-on still takes the activity path:
-     * an overlay window is below the keyguard, so it would be perfectly invisible.
+     * Screen on *and* past the lock screen. Locked-but-on gets nothing of ours either —
+     * see the class doc for why a box would just be drawn and permanently invisible.
      */
     private fun awakeAndUnlocked(context: Context): Boolean {
         val power = context.getSystemService(PowerManager::class.java) ?: return false
@@ -168,7 +166,4 @@ object HeadsUp {
         )
         runCatching { vibrator.vibrate(effect) }
     }
-
-    const val EXTRA_TITLE = "headsUpTitle"
-    const val EXTRA_TEXT = "headsUpText"
 }

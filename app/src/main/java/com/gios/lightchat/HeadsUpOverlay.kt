@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
 import androidx.compose.runtime.mutableStateOf
@@ -25,17 +26,18 @@ import com.gios.lightchat.ui.HeadsUpBox
 import com.gios.lightchat.ui.theme.LightChatTheme
 
 /**
- * The heads-up box as a real overlay window, used whenever the screen is already on.
+ * The heads-up box as a real overlay window, used whenever the screen is already on
+ * and past the keyguard — see [HeadsUp] for why the screen-off/locked case doesn't get
+ * one of these (or any box of ours) at all: it was tried, including the window-flag
+ * combination that's supposed to draw over a keyguard, and lost to a launcher-owned
+ * `TYPE_KEYGUARD_DIALOG` window no ordinary app can draw above.
  *
- * The point of it being a window rather than [HeadsUpActivity] is that **nothing else
- * is interrupted**. An activity — floating, translucent, whatever — pauses the activity
+ * The point of it being a window rather than an activity is that **nothing else is
+ * interrupted**. An activity — floating, translucent, whatever — pauses the activity
  * underneath it, so a message arriving while you were doing something else stopped that
  * something else for four and a half seconds. A `TYPE_APPLICATION_OVERLAY` window
  * doesn't: the app below keeps running, and `FLAG_NOT_FOCUSABLE` (which implies
  * `FLAG_NOT_TOUCH_MODAL`) means every touch outside this box goes straight to it.
- *
- * What the window can't do is wake the panel or draw above the keyguard, which is why
- * the activity still exists for the screen-off case. See [HeadsUp] for the split.
  */
 object HeadsUpOverlay {
 
@@ -64,9 +66,6 @@ object HeadsUpOverlay {
             sender.value = title
             body.value = text.trim().take(300)
             chatGuid = guid
-            // Screen-off box already up and the user has since unlocked: the activity is
-            // still there, pausing whatever is underneath. Replace it with this.
-            HeadsUpActivity.dismissLive()
             if (view == null) attach(app)
             handler.removeCallbacks(autoHide)
             handler.postDelayed(autoHide, Store.headsUpDurationMs(app))
@@ -81,7 +80,7 @@ object HeadsUpOverlay {
 
     fun hide() {
         // Posted for the same reason as show: removeView is main-thread-only, and this is
-        // also called from MainActivity.onStart and from the tap handler.
+        // also called from MainActivity.onWindowFocusChanged and from the tap handler.
         handler.post {
             handler.removeCallbacks(autoHide)
             val current = view ?: return@post
@@ -131,8 +130,12 @@ object HeadsUpOverlay {
             PixelFormat.TRANSLUCENT,
         ).apply { gravity = Gravity.TOP }
 
-        val added = runCatching { manager.addView(composeView, params) }.isSuccess
-        if (!added) {
+        val result = runCatching { manager.addView(composeView, params) }
+        Log.d(
+            "HeadsUpOverlay",
+            result.fold(onSuccess = { "addView succeeded" }, onFailure = { "addView failed: $it" }),
+        )
+        if (result.isFailure) {
             composeView.disposeComposition()
             treeOwner.destroy()
             return

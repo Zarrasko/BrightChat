@@ -161,20 +161,6 @@
             </intent-filter>
         </activity>
 
-        <!-- The incoming-message box. Floating and sized to its content (see
-             HeadsUpActivity), excluded from recents, and never left behind in the
-             back stack. singleTop so a burst of messages re-uses one instance. -->
-        <activity
-            android:name=".HeadsUpActivity"
-            android:exported="false"
-            android:launchMode="singleTop"
-            android:excludeFromRecents="true"
-            android:noHistory="true"
-            android:taskAffinity=""
-            android:showWhenLocked="true"
-            android:turnScreenOn="true"
-            android:theme="@style/Theme.LightChat.HeadsUp" />
-
         <!-- Holds the live Socket.IO connection so messages arrive (and notify)
              without Google Play push. remoteMessaging FGS so it can also start at
              boot. -->

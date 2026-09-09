@@ -160,7 +160,19 @@ class MainActivity : ComponentActivity() {
     // focus because returning from the keyboard/recents can resurface them.
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) enableImmersive()
+        if (hasFocus) {
+            enableImmersive()
+            // The user is here; a box telling them about a message they're about to read
+            // is just something in the way. Deliberately not in onStart(): dismissing the
+            // keyguard from a heads-up box (see HeadsUpOverlay) resumes whatever activity
+            // was last in the foreground, which is this one whenever the app was open
+            // before the phone slept — onStart() would fire, and immediately tear down
+            // the very box that triggered the dismiss, before it was ever seen. This
+            // activity doesn't actually have focus in that case (the keyguard/idle screen
+            // still does), so onWindowFocusChanged(true) — unlike onStart() — only fires
+            // once the user has genuinely returned.
+            HeadsUpOverlay.hide()
+        }
     }
 
     private fun enableImmersive() {
@@ -178,9 +190,6 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         AppForeground.active = true
         Notifications.clear(this)
-        // The user is here; a box telling them about a message they're about to read is
-        // just something in the way.
-        HeadsUpOverlay.hide()
         // Re-pull the conversation list on every return to the app, not just cold
         // start — the socket only runs while the service does. Rate-guarded in the
         // ViewModel so this doesn't duplicate the init refresh.
