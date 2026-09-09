@@ -82,9 +82,11 @@ android {
         applicationId = "com.zarrasko.messages"
         minSdk = 34   // Light Phone III runs Android 14 — the only target device.
         targetSdk = 35
-        // CI overwrites both from the workflow run number; see .github/workflows/build.yml
-        versionCode = 16
-        versionName = "2.35.0"
+        // CI overwrites both from the workflow run number on upstream, but that workflow
+        // needs signing secrets this fork doesn't have configured, so these are bumped by
+        // hand for each release cut here instead — see Updater.kt for what reads this.
+        versionCode = 17
+        versionName = "2.36.0"
 
         buildConfigField("String", "REPORT_TOKEN", "\"$reportToken\"")
         // Scrambled, not encrypted — see [scramble]. Decoded by `api/KlipyKey.kt`.

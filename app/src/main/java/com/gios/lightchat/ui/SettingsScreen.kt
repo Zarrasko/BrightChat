@@ -22,6 +22,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -33,11 +34,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.gios.light.common.hw.WheelScroll
+import com.gios.lightchat.AlertOwner
+import com.gios.lightchat.BuildConfig
 import com.gios.lightchat.CallAnnounce
 import com.gios.lightchat.ChatViewModel
 import com.gios.lightchat.Delivery
 import com.gios.lightchat.Dialer
-import com.gios.lightchat.AlertOwner
+import com.gios.lightchat.Updater
 import com.gios.lightchat.api.Store
 import com.gios.lightchat.api.KlipyApi
 import com.gios.lightchat.api.parseApiKeyQr
@@ -45,6 +48,7 @@ import com.gios.lightchat.api.parseWhisperQr
 import com.gios.lightchat.ui.theme.ChatColors
 import com.gios.lightchat.ui.theme.ChatDimens
 import com.gios.lightchat.ui.theme.ChatType
+import kotlinx.coroutines.launch
 
 /**
  * Everything this app can be told, on one page.
@@ -289,6 +293,10 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
         // --------------------------------------------------------------------------- account
         SectionHeader("Account")
         Action(label = "Sign out", hint = null) { viewModel.signOut() }
+
+        // ----------------------------------------------------------------------------- about
+        SectionHeader("About")
+        UpdateCheck()
         Spacer(modifier = Modifier.height(28.dp))
     }
 }
@@ -600,6 +608,75 @@ private fun DeliveryHealth() {
         }
     }
     Spacer(modifier = Modifier.height(12.dp))
+}
+
+/**
+ * Version display plus a manual update check, against this fork's own GitHub releases —
+ * see [Updater]. Not everyone running this fork has BrightMarket installed (including
+ * whoever it was forked from), so this is the update path for that case.
+ *
+ * State lives here rather than in the ViewModel: it's Settings-screen-local, nobody else
+ * needs it, and it doesn't need to survive leaving this screen — a download in flight
+ * when the user navigates away is one they can just retry.
+ */
+@Composable
+private fun UpdateCheck() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var status by remember { mutableStateOf<String?>(null) }
+    var checking by remember { mutableStateOf(false) }
+    var downloading by remember { mutableStateOf(false) }
+    var available by remember { mutableStateOf<Updater.Update?>(null) }
+
+    Hint("Version ${BuildConfig.VERSION_NAME}")
+
+    val update = available
+    when {
+        update != null -> {
+            HapticText(
+                text = if (downloading) "Downloading v${update.version}…" else "Update to v${update.version}",
+                style = ChatType.body,
+                color = if (downloading) ChatColors.onSurfaceDisabled else ChatColors.onSurface,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    if (downloading) return@HapticText
+                    // No in-dialog prompt for this one — only Settings has the toggle.
+                    if (!Updater.canInstall(context)) {
+                        runCatching { context.startActivity(Updater.installPermissionIntent(context)) }
+                        return@HapticText
+                    }
+                    downloading = true
+                    scope.launch {
+                        val apk = Updater.download(context, update)
+                        downloading = false
+                        if (apk != null) {
+                            Updater.install(context, apk)
+                        } else {
+                            status = "Download failed — try again"
+                        }
+                    }
+                },
+            )
+            Hint("Tap to download, then confirm the install")
+            Spacer(modifier = Modifier.height(18.dp))
+        }
+        else -> {
+            Action(
+                label = if (checking) "Checking…" else "Check for updates",
+                hint = status,
+            ) {
+                if (checking) return@Action
+                checking = true
+                status = null
+                scope.launch {
+                    val result = Updater.check(context)
+                    checking = false
+                    if (result != null) available = result else status = "Up to date"
+                }
+            }
+        }
+    }
 }
 
 /**

@@ -5,4 +5,6 @@
     <cache-path name="shared" path="shared/" />
     <!-- Where the camera app is asked to write a photo taken from the picker. -->
     <cache-path name="camera" path="camera/" />
+    <!-- A downloaded update APK, handed to the system installer. See Updater.kt. -->
+    <cache-path name="updates" path="updates/" />
 </paths>
