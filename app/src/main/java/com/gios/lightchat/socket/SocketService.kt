@@ -9,6 +9,7 @@ import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import com.gios.lightchat.AlertText
@@ -29,6 +30,7 @@ import com.gios.lightchat.api.Store
 import com.gios.lightchat.db.MessageStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -59,6 +61,15 @@ class SocketService : Service() {
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var lastNetworkCatchUp = 0L
 
+    /** Counting down to [disconnectForIdle] while the screen is off; cancelled the moment
+     *  it comes back on. Null whenever there's no countdown in flight. */
+    private var idleJob: Job? = null
+
+    /** True once the live socket has been deliberately dropped for being idle too long.
+     *  Read by the watchdog and the network callback so neither of them undoes it — the
+     *  whole point is that nothing but the screen turning back on brings the socket back. */
+    private var suspendedForIdle = false
+
     /** Cancelled in [onDestroy]; used for the read-verification round trip. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -73,6 +84,13 @@ class SocketService : Service() {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING,
         )
         connect()
+        // A restart can land at any hour — DeliveryWorker reviving a killed service,
+        // boot, a package replace — with the screen already off. Don't hold the live
+        // socket open for a full idle grace period first in that case; start counting
+        // down immediately instead of waiting for a SCREEN_OFF broadcast that already
+        // happened before this process existed.
+        val power = getSystemService(PowerManager::class.java)
+        if (power?.isInteractive == false) scheduleIdleSuspend()
         startWatchdog()
         watchForWake()
         watchForNetwork()
@@ -100,6 +118,11 @@ class SocketService : Service() {
     private fun watchForWake() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == Intent.ACTION_SCREEN_OFF) {
+                    scheduleIdleSuspend()
+                    return
+                }
+                resumeFromIdle()
                 if (!PollAlarm.looksStalled(context)) return
                 Log.w(TAG, "poll looks stalled; catching up on wake")
                 PollAlarm.schedule(context)
@@ -108,14 +131,68 @@ class SocketService : Service() {
         }
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
-            // Both, because the interesting one depends on whether a lock is set: with a
-            // PIN the useful signal is the unlock, without one the screen coming on is all
-            // there is. Duplicates are harmless — the stall gate rejects the second.
+            addAction(Intent.ACTION_SCREEN_OFF)
+            // Both ON and PRESENT, because the interesting one depends on whether a lock is
+            // set: with a PIN the useful signal is the unlock, without one the screen coming
+            // on is all there is. Duplicates are harmless — resumeFromIdle is idempotent and
+            // the stall gate rejects the second catch-up.
             addAction(Intent.ACTION_USER_PRESENT)
         }
         runCatching { registerReceiver(receiver, filter) }
             .onSuccess { wakeReceiver = receiver }
             .onFailure { Log.w(TAG, "couldn't watch for wake: $it") }
+    }
+
+    /**
+     * Starts (or restarts) the countdown to dropping the live socket.
+     *
+     * Not immediate: a glance at the phone that relocks a few seconds later would otherwise
+     * tear the socket down and reconnect it right back, which costs its own round of
+     * handshake traffic for nothing. [IDLE_GRACE_MS] is long enough to skip past that and
+     * short enough that only a phone genuinely being set down pays for it.
+     */
+    private fun scheduleIdleSuspend() {
+        idleJob?.cancel()
+        idleJob = scope.launch {
+            delay(IDLE_GRACE_MS)
+            disconnectForIdle()
+        }
+    }
+
+    /**
+     * Drops the live socket once the screen has been off for [IDLE_GRACE_MS] straight.
+     *
+     * This is the actual battery fix: the socket's ping/pong keepalive (engine.io, on the
+     * order of every 25s) and the Tailscale tunnel's own NAT keepalive both pull the radio
+     * out of idle on a cadence no different whether anyone's asleep or not. While the phone
+     * is locked, [HeadsUp.present] already only ever shows a plain notification — the
+     * instant delivery a live socket buys is invisible to someone not looking at the screen.
+     * So overnight, delivery is handed off entirely to [PollAlarm] and [DeliveryWorker],
+     * which were already built to carry this on their own; this just stops paying for a
+     * second, redundant path once nobody benefits from it.
+     */
+    private fun disconnectForIdle() {
+        if (suspendedForIdle) return
+        suspendedForIdle = true
+        Log.d(TAG, "screen off ${IDLE_GRACE_MS}ms; suspending the live socket, falling back to the poll chain")
+        socket?.disconnect()
+    }
+
+    /** Undoes [disconnectForIdle] and cancels any countdown in flight — called on every
+     *  screen-on/unlock, so it also cleanly no-ops the common case of nothing being idle. */
+    private fun resumeFromIdle() {
+        idleJob?.cancel()
+        idleJob = null
+        if (!suspendedForIdle) return
+        suspendedForIdle = false
+        Log.d(TAG, "screen on; resuming the live socket")
+        val live = socket
+        if (live == null || !live.connected()) {
+            if (live == null) connect() else runCatching { live.connect() }
+        }
+        // Anything that arrived during the gap was only ever going to be found by the poll
+        // chain; ask right away instead of waiting out its own interval now that we can.
+        scope.launch { CatchUp.run(this@SocketService) }
     }
 
     /**
@@ -131,8 +208,14 @@ class SocketService : Service() {
         val manager = getSystemService(ConnectivityManager::class.java) ?: return
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                val live = socket
-                if (live == null || !live.connected()) runCatching { live?.connect() }
+                // A flapping Tailscale tunnel reconnecting overnight is not a reason to
+                // wake the live socket back up — that's exactly the traffic being avoided.
+                // The cheap REST probe below still runs, same as it would for any other
+                // asleep-phone catch-up.
+                if (!suspendedForIdle) {
+                    val live = socket
+                    if (live == null || !live.connected()) runCatching { live?.connect() }
+                }
                 catchUpOpportunistically()
             }
         }
@@ -166,6 +249,11 @@ class SocketService : Service() {
         scope.launch {
             while (isActive) {
                 delay(WATCHDOG_MS)
+                if (suspendedForIdle) {
+                    // Deliberately down; PollAlarm and DeliveryWorker own delivery until the
+                    // screen comes back on. Reconnecting here would undo the whole point.
+                    continue
+                }
                 val live = socket
                 if (live == null || !live.connected()) {
                     Log.w(TAG, "socket down; reconnecting")
@@ -431,6 +519,8 @@ class SocketService : Service() {
         )
 
     override fun onDestroy() {
+        idleJob?.cancel()
+        idleJob = null
         wakeReceiver?.let { runCatching { unregisterReceiver(it) } }
         wakeReceiver = null
         networkCallback?.let { cb ->
@@ -449,6 +539,10 @@ class SocketService : Service() {
 
         /** How long a missed message can stay missed while the service is alive. */
         private const val WATCHDOG_MS = 5 * 60 * 1000L
+
+        /** How long the screen has to stay off before the live socket is dropped. Long
+         *  enough that a quick glance-and-relock doesn't pay for a reconnect it didn't need. */
+        private const val IDLE_GRACE_MS = 5 * 60 * 1000L
 
         /** Floor between catch-ups triggered by the network or a socket reconnect. */
         private const val NETWORK_CATCHUP_MIN_GAP_MS = 60 * 1000L
