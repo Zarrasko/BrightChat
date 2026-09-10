@@ -29,7 +29,6 @@ import com.gios.light.common.hw.LightKeys
 import com.gios.light.common.hw.LocalWheelBus
 import com.gios.light.common.hw.WheelBus
 import com.gios.light.common.report.LightReport
-import com.gios.light.common.report.ReportOverlay
 import com.gios.lightchat.api.Store
 import com.gios.lightchat.socket.AppForeground
 import com.gios.lightchat.ui.AgentEditScreen
@@ -143,10 +142,13 @@ class MainActivity : ComponentActivity() {
                 CompositionLocalProvider(LocalWheelBus provides wheel) {
                     LightChatApp(viewModel)
                 }
-                // Shake to report, the crash offer on next launch, and the app's own noticed
-                // failures. A sibling, not a wrapper — the sheet is its own window, so it covers
-                // the app whether or not it contains it.
-                ReportOverlay()
+                // Upstream shows a shake-to-report sheet (plus a crash-offer-on-next-launch
+                // and the app's own noticed-failure toasts) here via ReportOverlay(). Dropped
+                // for this fork: a personal build has no one to send a report to, and the
+                // shake trigger is easy to set off by accident just carrying the phone.
+                // LightReport.install() above still writes a local crash log on a genuine
+                // crash — silent, no UI — so a crash is still diagnosable by pulling that
+                // file, just never offered up unprompted.
             }
         }
         handlePasswordExtra(intent)
